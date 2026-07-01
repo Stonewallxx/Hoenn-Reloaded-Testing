@@ -29,6 +29,9 @@ are:
 - `Reloaded::SaveData`
 - `Reloaded::Assets`
 - `Reloaded::ModManager`
+- `Reloaded::Profiles`
+- `Reloaded::Options`
+- `Reloaded::Settings`
 
 ## Recommended Modding Rules
 
@@ -130,6 +133,22 @@ Reloaded API that can handle the use case.
 
 See `Reloaded/Documentation/SaveData.md` for the full save data reference.
 
+## Options
+
+Use the Reloaded options framework for new in-game settings screens.
+
+Current reusable types include:
+
+- `CategoryHeader`
+- `CollapsibleHeader`
+- `TextDisplayOption`
+- `ActionButton`
+- `LockableEnumOption`
+- `HiddenOption`
+- `Spacer`
+
+See `Reloaded/Documentation/Options.md` for the full options reference.
+
 ## Mod Folder Structure
 
 Mods use this layout:
@@ -163,7 +182,7 @@ Optional:
 
 `ModDev/` is a developer override folder.
 
-When `Reloaded::ModManager::MODDEV_ENABLED` is `true`, Reloaded also scans:
+When ModDev is enabled, Reloaded also scans:
 
 ```text
 ModDev/
@@ -173,6 +192,78 @@ ModDev/
 
 If the same mod `id` exists in both `Mods/` and `ModDev/`, the `ModDev/`
 version is used and the `Mods/` version is skipped.
+
+ModDev can be changed from the in-game options menu under:
+
+```text
+MODS > ModDev
+```
+
+The setting is stored in:
+
+```text
+Reloaded/Settings.txt
+moddev=On
+```
+
+Changing it applies on the next mod scan or restart.
+
+## Profiles
+
+Profiles are named mod setups stored in:
+
+```text
+Mods/Reloaded/Profiles/
+```
+
+The active profile is selected by:
+
+```text
+Reloaded/Settings.txt
+active_profile=Default
+```
+
+Profiles control:
+
+- enabled mods,
+- disabled mods,
+- player-preferred load order,
+- future per-mod settings.
+
+Profiles do not control `ModDev`, `Logging Mode`, or Reloaded visual options.
+
+Example:
+
+```json
+{
+  "id": "default",
+  "name": "Default",
+  "version": 1,
+  "enabled_mods": ["example_mod"],
+  "disabled_mods": [],
+  "load_order": ["example_mod"],
+  "mod_settings": {},
+  "notes": "Default Reloaded mod profile."
+}
+```
+
+Dependencies still load before dependents, even if `load_order` places them
+later. Missing profile mods log warnings.
+
+See `Reloaded/Documentation/Profiles.md` for the full profile reference.
+
+## Core And Modules
+
+`Reloaded/Core/` contains framework systems that other Reloaded code depends on:
+logging, settings, events, patches, save data, assets, profiles, mod loading,
+and options.
+
+`Reloaded/Modules/` is for Reloaded-owned feature systems that load after Core
+is ready. Good examples are future gameplay systems, optional UI replacements,
+or feature modules that use the Core APIs.
+
+Mods should not be placed in `Reloaded/Modules/`. External mods belong in
+`Mods/<mod_id>/` or `ModDev/<mod_id>/`.
 
 ## Mod Manifest
 
@@ -198,7 +289,7 @@ Rules:
 - The mod folder name should match `id`.
 - `version` and `minimum_reloaded_version` use `Major.Minor.Patch`.
 - `authors`, `dependencies`, and `tags` are arrays.
-- `enabled` is optional and defaults to `true`.
+- `enabled` is legacy metadata; active profiles decide whether a mod loads.
 - Dependencies load before mods that depend on them.
 
 `load_after`, `load_before`, `priority`, `type`, `scripts`, and
@@ -276,7 +367,6 @@ Reloaded does not globally patch `Bitmap.new` yet.
 These sections should be added as the systems are created:
 
 - dependency rules,
-- profile-based load order rules,
 - custom content registration,
 - data patching,
 - asset overrides,

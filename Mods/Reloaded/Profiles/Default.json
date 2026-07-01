@@ -1,0 +1,10 @@
+{
+  "id": "default",
+  "name": "Default",
+  "version": 1,
+  "enabled_mods": [],
+  "disabled_mods": [],
+  "load_order": [],
+  "mod_settings": {},
+  "notes": "Default Reloaded mod profile."
+}

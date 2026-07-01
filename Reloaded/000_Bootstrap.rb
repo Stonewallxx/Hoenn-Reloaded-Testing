@@ -7,6 +7,7 @@
 # Responsibilities:
 #   - Load the Reloaded version from Reloaded/Version.md.
 #   - Load framework files from Reloaded/Core.
+#   - Boot core runtime systems in a predictable order.
 #   - Load feature/module files from Reloaded/Modules.
 #   - Emit early lifecycle events for framework systems.
 #   - Write basic bootstrap diagnostics through Reloaded::Log.
@@ -31,6 +32,7 @@ module Reloaded
         load_folder("Core")
         Reloaded::Log.boot_header if defined?(Reloaded::Log)
         emit(:bootstrap_loaded)
+        boot_core_systems
         emit(:core_loaded)
         load_folder("Modules")
         emit(:modules_loaded)
@@ -82,6 +84,21 @@ module Reloaded
         Reloaded.const_set(:VERSION, version) unless Reloaded.const_defined?(:VERSION)
       rescue
         Reloaded.const_set(:VERSION, "0.0.0") unless Reloaded.const_defined?(:VERSION)
+      end
+
+      def boot_core_systems
+        boot_system("Profiles", Reloaded::Profiles) if defined?(Reloaded::Profiles)
+        boot_system("ModManager", Reloaded::ModManager) if defined?(Reloaded::ModManager)
+      end
+
+      def boot_system(label, system)
+        return true unless system.respond_to?(:boot)
+        result = system.boot
+        log("Booted #{label}") if result
+        result
+      rescue Exception => e
+        log("Failed to boot #{label}: #{e.class}: #{e}", "ERROR")
+        false
       end
 
       def emit(event_name)

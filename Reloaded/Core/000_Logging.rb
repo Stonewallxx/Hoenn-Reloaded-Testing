@@ -18,7 +18,6 @@ module Reloaded
     ROOT          = File.expand_path(File.join(File.dirname(__FILE__), ".."))
     LOG_DIR       = File.join(ROOT, "Logging")
     REPORT_DIR    = File.join(LOG_DIR, "Reports")
-    MODE_FILE     = File.join(ROOT, "LogMode.txt")
     MAIN_LOG      = File.join(LOG_DIR, "Log.txt")
     MODS_LOG      = File.join(LOG_DIR, "Mods.txt")
     COOP_LOG      = File.join(LOG_DIR, "Coop.txt")
@@ -34,6 +33,7 @@ module Reloaded
       :patches => MAIN_LOG,
       :save_data => MAIN_LOG,
       :assets => MAIN_LOG,
+      :options => MAIN_LOG,
       :mods => MODS_LOG,
       :coop => COOP_LOG
     }.freeze
@@ -61,10 +61,7 @@ module Reloaded
 
       def set_mode(value, persist: true)
         self.mode = value
-        if persist
-          ensure_dirs
-          File.open(MODE_FILE, "w") { |f| f.puts(mode_label) } rescue nil
-        end
+        Reloaded::Settings.set("logging_mode", mode_label) if persist && defined?(Reloaded::Settings)
         info("Log Mode changed to #{mode_label}", :framework)
         mode
       end
@@ -236,11 +233,8 @@ module Reloaded
       end
 
       def read_mode
-        if File.exist?(MODE_FILE)
-          normalize_mode(File.read(MODE_FILE).to_s.strip)
-        else
-          :developer
-        end
+        return normalize_mode(Reloaded::Settings.get("logging_mode", "Developer")) if defined?(Reloaded::Settings)
+        :developer
       rescue
         :developer
       end

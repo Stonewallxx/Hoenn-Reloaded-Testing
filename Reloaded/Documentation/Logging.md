@@ -32,7 +32,7 @@ Reloaded logs are stored in `Reloaded/Logging/`.
 
 ## Log Modes
 
-Set `Reloaded/LogMode.txt` to one of these values:
+Set `logging_mode` in `Reloaded/Settings.txt` to one of these values:
 
 - `Player` - Shorter, readable logs focused on fixes.
 - `Developer` - Detailed technical logging. Default while the fork is early.
@@ -41,7 +41,7 @@ Set `Reloaded/LogMode.txt` to one of these values:
 The default tracked value is:
 
 ```text
-Developer
+logging_mode=Developer
 ```
 
 Code can change the mode with:
@@ -54,6 +54,12 @@ Reloaded::Log.set_mode("Bug Report")
 
 `Developer` mode writes debug messages. `Player` and `Bug Report` modes skip
 debug messages.
+
+The mode can also be changed in-game under:
+
+```text
+DEVELOPER > Logging Mode
+```
 
 ## Basic Use
 
@@ -99,7 +105,7 @@ This writes `Reloaded/Logging/LatestBugReport.txt` with version information,
 current warning/error counts, and the latest report blocks from `Log.txt`.
 
 Generated log files are ignored by Git. Only the logging system, documentation,
-`LogMode.txt`, and logging-folder ignore files should be tracked.
+`Settings.txt`, and logging-folder ignore files should be tracked.
 
 ## Project Rule
 

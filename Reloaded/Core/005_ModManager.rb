@@ -20,10 +20,11 @@ end
 
 module Reloaded
   module ModManager
+    ROOT = File.expand_path(File.join(File.dirname(__FILE__), ".."))
     MODS_DIR = File.expand_path("./Mods")
     MODDEV_DIR = File.expand_path("./ModDev")
 
-    MODDEV_ENABLED = false
+    DEFAULT_MODDEV_ENABLED = false
 
     AUTHOR_TAGS = {
       :role => [
@@ -79,6 +80,8 @@ module Reloaded
     @skipped_mods = []
     @script_count = 0
     @booted = false
+    @moddev_enabled = nil
+    @active_profile = nil
 
     class << self
       def boot
@@ -130,7 +133,20 @@ module Reloaded
       end
 
       def moddev_enabled?
-        MODDEV_ENABLED
+        @moddev_enabled = read_moddev_enabled if @moddev_enabled.nil?
+        @moddev_enabled
+      end
+
+      def set_moddev_enabled(value, persist: true)
+        next_value = truthy?(value)
+        previous_value = @moddev_enabled.nil? ? read_moddev_enabled : @moddev_enabled
+        @moddev_enabled = next_value
+        changed = previous_value != @moddev_enabled
+        Reloaded::Settings.set_bool("moddev", @moddev_enabled, persist: persist) if changed && persist && defined?(Reloaded::Settings)
+        if changed && defined?(Reloaded::Log)
+          Reloaded::Log.info("ModDev #{moddev_enabled? ? 'enabled' : 'disabled'}", :mods)
+        end
+        @moddev_enabled
       end
 
       def scan
@@ -162,7 +178,7 @@ module Reloaded
         ordered = []
         visiting = {}
         visited = {}
-        @mods.keys.sort.each { |id| visit_mod(id, ordered, visiting, visited) }
+        ordered_ids.each { |id| visit_mod(id, ordered, visiting, visited) }
         @active_mods = ordered.select { |mod| mod[:enabled] && mod[:errors].empty? }
         @active_mods
       end
@@ -173,6 +189,20 @@ module Reloaded
 
       private
 
+      def read_moddev_enabled
+        return Reloaded::Settings.bool("moddev", DEFAULT_MODDEV_ENABLED) if defined?(Reloaded::Settings)
+        DEFAULT_MODDEV_ENABLED
+      rescue
+        DEFAULT_MODDEV_ENABLED
+      end
+
+      def truthy?(value)
+        case value.to_s.strip.downcase
+        when "1", "true", "on", "yes", "enabled", "enable" then true
+        else false
+        end
+      end
+
       def reset
         @candidates = []
         @mods = {}
@@ -181,6 +211,7 @@ module Reloaded
         @loaded_mods = []
         @skipped_mods = []
         @script_count = 0
+        @active_profile = defined?(Reloaded::Profiles) ? Reloaded::Profiles.active : nil
       end
 
       def scan_folder(root, source)
@@ -207,6 +238,7 @@ module Reloaded
           :tags => normalize_string_array(data["tags"]),
           :system_tags => [],
           :enabled => data.has_key?("enabled") ? !!data["enabled"] : true,
+          :manifest_enabled => data.has_key?("enabled") ? !!data["enabled"] : true,
           :manifest => data,
           :manifest_path => manifest_path.gsub("\\", "/"),
           :folder_path => folder_path.gsub("\\", "/"),
@@ -275,7 +307,6 @@ module Reloaded
       end
 
       def register_valid_candidate(candidate)
-        candidate[:system_tags] << "disabled" unless candidate[:enabled]
         candidate[:system_tags] << "moddev" if candidate[:source] == :moddev
         existing = @mods[candidate[:id]]
         if existing && existing[:source] == :mods && candidate[:source] == :moddev
@@ -292,9 +323,27 @@ module Reloaded
       end
 
       def validate_disabled_mods
+        apply_profile_state
         @mods.each_value do |mod|
           next if mod[:enabled]
           @skipped_mods << skip_entry(mod, "Disabled")
+        end
+      end
+
+      def apply_profile_state
+        if defined?(Reloaded::Profiles)
+          missing = Reloaded::Profiles.missing_mod_ids(@mods.keys)
+          missing.each do |id|
+            Reloaded::Log.warning("Active profile references missing mod: #{id}", :mods) if defined?(Reloaded::Log)
+          end
+          @mods.each_value do |mod|
+            mod[:enabled] = Reloaded::Profiles.enabled?(mod[:id])
+            mod[:system_tags] << "disabled" unless mod[:enabled] || mod[:system_tags].include?("disabled")
+          end
+        else
+          @mods.each_value do |mod|
+            mod[:system_tags] << "disabled" unless mod[:enabled] || mod[:system_tags].include?("disabled")
+          end
         end
       end
 
@@ -330,6 +379,10 @@ module Reloaded
           dep_mod = @mods[dep_id]
           if dep_mod.nil?
             mark_missing_dependency(mod, dep_id)
+            next
+          end
+          unless dep_mod[:enabled]
+            mark_missing_dependency(mod, "#{dep_id} (disabled)")
             next
           end
           if dependency[:version] && compare_versions(dep_mod[:version], dependency[:version]) < 0
@@ -398,6 +451,7 @@ module Reloaded
           :loaded_mods => @loaded_mods.length,
           :skipped_mods => @skipped_mods.length,
           :scripts_loaded => @script_count,
+          :active_profile => active_profile_name,
           :moddev_enabled => moddev_enabled?
         ) if defined?(Reloaded::Log)
       end
@@ -464,8 +518,18 @@ module Reloaded
       rescue Exception => e
         Reloaded::Log.exception("Mod Manager event #{event_name} failed", e, channel: :mods) if defined?(Reloaded::Log)
       end
+
+      def ordered_ids
+        if defined?(Reloaded::Profiles)
+          Reloaded::Profiles.ordered_mod_ids(@mods.keys)
+        else
+          @mods.keys.sort
+        end
+      end
+
+      def active_profile_name
+        defined?(Reloaded::Profiles) ? Reloaded::Profiles.active_name : "None"
+      end
     end
   end
 end
-
-Reloaded::ModManager.boot if defined?(Reloaded::ModManager)

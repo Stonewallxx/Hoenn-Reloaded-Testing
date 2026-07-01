@@ -19,7 +19,6 @@ immediately.
 
 ## Logging
 
-- Add in-game settings for changing `Reloaded/LogMode.txt`.
 - Add mod loader-specific logging once the mod loader exists.
 - Improve bug report exports after mod metadata, dependency checks, and load
   order are implemented.
@@ -28,7 +27,6 @@ immediately.
 ## Modding Documentation
 
 - Add dependency rules once finalized.
-- Add profile-based load order rules once finalized.
 - Add compatibility guidelines after patch/data systems mature.
 
 ## Events
@@ -44,6 +42,10 @@ immediately.
 - Decide whether any Reloaded settings should be global files, per-save data, or
   both.
 
+## Options
+
+- Add Mod Manager profile/settings rows after the in-game Mod Manager UI exists.
+
 ## Patches
 
 - Register patch points whenever Reloaded systems alter vanilla behavior.
@@ -52,8 +54,7 @@ immediately.
 
 ## Future Systems
 
-- Profile-based mod load order manager.
-- In-game ModDev toggle.
+- In-game profile selector and load order editor.
 - In-game mod settings manager.
 - Data patching system.
 - Direct `Bitmap.new` asset redirect review if needed.
