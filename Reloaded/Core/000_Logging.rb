@@ -32,6 +32,8 @@ module Reloaded
       :bootstrap => MAIN_LOG,
       :events => MAIN_LOG,
       :patches => MAIN_LOG,
+      :save_data => MAIN_LOG,
+      :assets => MAIN_LOG,
       :mods => MODS_LOG,
       :coop => COOP_LOG
     }.freeze

@@ -27,10 +27,8 @@ immediately.
 
 ## Modding Documentation
 
-- Add mod folder format once finalized.
-- Add mod metadata format once finalized.
 - Add dependency rules once finalized.
-- Add load order rules once finalized.
+- Add profile-based load order rules once finalized.
 - Add compatibility guidelines after patch/data systems mature.
 
 ## Events
@@ -38,6 +36,13 @@ immediately.
 - Add event names as official vanilla bridge points are created.
 - Document event context payloads for each public event.
 - Add examples for common modding use cases.
+
+## Save Data
+
+- Add migration helpers if the Reloaded save bucket schema needs to change.
+- Add examples after real mods begin storing persistent data.
+- Decide whether any Reloaded settings should be global files, per-save data, or
+  both.
 
 ## Patches
 
@@ -47,10 +52,9 @@ immediately.
 
 ## Future Systems
 
-- Mod loader.
-- Mod metadata parser.
-- Dependency validator.
-- Load order resolver.
+- Profile-based mod load order manager.
+- In-game ModDev toggle.
+- In-game mod settings manager.
 - Data patching system.
-- Asset override system.
+- Direct `Bitmap.new` asset redirect review if needed.
 - In-game Reloaded settings menu.

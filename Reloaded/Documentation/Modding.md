@@ -26,6 +26,9 @@ are:
 - `Reloaded::Events`
 - `Reloaded::Hooks` compatibility alias
 - `Reloaded::Patches`
+- `Reloaded::SaveData`
+- `Reloaded::Assets`
+- `Reloaded::ModManager`
 
 ## Recommended Modding Rules
 
@@ -106,14 +109,174 @@ Reloaded can detect conflicts and explain them in logs.
 
 See `Reloaded/Documentation/Patches.md` for the full patches reference.
 
+## Save Data
+
+Use `Reloaded::SaveData` for persistent mod data.
+
+```ruby
+Reloaded::SaveData.set(:example_mod, :quest_stage, 2)
+Reloaded::SaveData.get(:example_mod, :quest_stage, 0)
+```
+
+For direct access to your mod namespace:
+
+```ruby
+save = Reloaded::SaveData.mod(:example_mod)
+save["quest_stage"] = 2
+```
+
+Do not add random fields to vanilla save objects for mod data unless there is no
+Reloaded API that can handle the use case.
+
+See `Reloaded/Documentation/SaveData.md` for the full save data reference.
+
+## Mod Folder Structure
+
+Mods use this layout:
+
+```text
+Mods/
+  example_mod/
+    mod.json
+    Scripts/
+    Graphics/
+    Audio/
+    Fonts/
+    Settings.json
+    Documentation/
+```
+
+Required:
+
+- `mod.json`
+
+Optional:
+
+- `Scripts/` - Ruby scripts loaded in alphabetical order.
+- `Graphics/` - Graphics assets resolved at runtime.
+- `Audio/` - Audio assets resolved at runtime.
+- `Fonts/` - Font assets reserved for runtime resolution.
+- `Settings.json` - Reserved for future Mod Manager settings.
+- `Documentation/` - Mod author documentation.
+
+## ModDev
+
+`ModDev/` is a developer override folder.
+
+When `Reloaded::ModManager::MODDEV_ENABLED` is `true`, Reloaded also scans:
+
+```text
+ModDev/
+  example_mod/
+    mod.json
+```
+
+If the same mod `id` exists in both `Mods/` and `ModDev/`, the `ModDev/`
+version is used and the `Mods/` version is skipped.
+
+## Mod Manifest
+
+Each mod must include `mod.json`:
+
+```json
+{
+  "id": "example_mod",
+  "name": "Example Mod",
+  "version": "1.0.0",
+  "authors": ["Stonewall"],
+  "description": "Example Reloaded mod.",
+  "minimum_reloaded_version": "1.0.0",
+  "dependencies": [],
+  "incompatible": [],
+  "tags": ["mod", "gameplay"]
+}
+```
+
+Rules:
+
+- `id` must use lowercase letters, numbers, and underscores.
+- The mod folder name should match `id`.
+- `version` and `minimum_reloaded_version` use `Major.Minor.Patch`.
+- `authors`, `dependencies`, and `tags` are arrays.
+- `enabled` is optional and defaults to `true`.
+- Dependencies load before mods that depend on them.
+
+`load_after`, `load_before`, `priority`, `type`, `scripts`, and
+`minimum_base_version` are not part of the current manifest format.
+
+## Mod Tags
+
+Editable tag arrays live at the top of:
+
+```text
+Reloaded/Core/005_ModManager.rb
+```
+
+Author tags are grouped into role and content tags. System tags are assigned by
+Reloaded or the future Mod Manager.
+
+Unknown author tags log warnings rather than blocking a mod.
+
+## Script Loading
+
+Reloaded loads every Ruby file in:
+
+```text
+Mods/example_mod/Scripts/**/*.rb
+```
+
+Files load alphabetically, so mod authors should name ordered scripts like:
+
+```text
+001_Main.rb
+002_Items.rb
+003_Events.rb
+```
+
+Mods without a `Scripts/` folder can still provide metadata and assets.
+
+## Asset Loading
+
+Mod assets are not copied into base game folders.
+
+Reloaded scans active mods and resolves assets at runtime:
+
+```text
+Mods/example_mod/Graphics/Pictures/foo.png
+Mods/example_mod/Audio/BGM/song.ogg
+```
+
+When the game asks for:
+
+```text
+Graphics/Pictures/foo
+Audio/BGM/song
+```
+
+Reloaded checks active mod assets first, then falls back to vanilla files.
+
+The first resolver patches common helper paths:
+
+- `RPG::Cache.load_bitmap`
+- `RPG::Cache.load_bitmap_path`
+- `AnimatedBitmap.new`
+- `pbResolveBitmap`
+- `pbBitmapName`
+- `FileTest.image_exist?`
+- `FileTest.audio_exist?`
+- `Audio.bgm_play`
+- `Audio.me_play`
+- `Audio.bgs_play`
+- `Audio.se_play`
+
+Reloaded does not globally patch `Bitmap.new` yet.
+
 ## Future Sections
 
 These sections should be added as the systems are created:
 
-- mod folder format,
-- mod metadata format,
 - dependency rules,
-- load order rules,
+- profile-based load order rules,
 - custom content registration,
 - data patching,
 - asset overrides,
