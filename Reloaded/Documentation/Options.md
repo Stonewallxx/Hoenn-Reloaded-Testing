@@ -87,6 +87,7 @@ The consolidated Options menu receives:
 - `Global Small Text`
 - `Menu Frame`
 - `Speech Follows Menu`
+- `Mod Manager`
 - `ModDev`
 - `Logging Mode`
 
@@ -134,25 +135,25 @@ category order now, but it will not appear until economy options are added.
 
 It does not apply globally to every command window yet.
 
-The Options menu uses a Reloaded Pause Menu-style full-row selection box instead
-of the vanilla arrow. `Options Cursor Color` controls this pulsing selection box
-and defaults to white.
+The Options menu uses a pulsing full-row selection box instead of the vanilla
+arrow. `Options Cursor Color` controls this selection box and defaults to white.
 
 When the selected `Menu Frame` is not dark, Reloaded forces readable dark text
 for the Options menu and base Pause menu command window. If `Options Cursor
 Color` is set to `White` while using a non-dark frame, Reloaded changes it to
 `Black` so the cursor remains visible.
 
-The base Pause menu command window also uses the same pulsing selection box as
-the Options menu instead of the vanilla arrow cursor.
-
 Future Reloaded UI screens should use `ReloadedDrawHelper#reloaded_cursor_fill`,
 `ReloadedDrawHelper#reloaded_cursor_border`, and
 `ReloadedDrawHelper#reloaded_draw_selection_box` when drawing configurable
 selection highlights.
 
+Hint text should use the format `Action (input)`. The normal order is:
+`Confirm (C) Back (B) ActionInput (A) SpecialInput (Z) Others`.
+
 `MODS` currently contains:
 
+- `Mod Manager` - opens the in-game Reloaded Mod Manager UI.
 - `ModDev` - toggles scanning `ModDev/` on the next mod scan or restart.
   Persists as `moddev=On/Off` in `Reloaded/Settings.txt`.
 

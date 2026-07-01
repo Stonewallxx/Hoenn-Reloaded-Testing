@@ -149,6 +149,23 @@ Current reusable types include:
 
 See `Reloaded/Documentation/Options.md` for the full options reference.
 
+## UI Hint Text
+
+Use this format for Reloaded UI hint text:
+
+```text
+Action (input)
+```
+
+The normal order is:
+
+```text
+Confirm (C) Back (B) ActionInput (A) SpecialInput (Z) Others
+```
+
+Only include actions that are relevant to the current screen.
+When `Input::ACTION` opens a page menu, label it as `Menu (A)`.
+
 ## Mod Folder Structure
 
 Mods use this layout:
@@ -228,7 +245,7 @@ Profiles control:
 - enabled mods,
 - disabled mods,
 - player-preferred load order,
-- future per-mod settings.
+- profile-scoped per-mod settings.
 
 Profiles do not control `ModDev`, `Logging Mode`, or Reloaded visual options.
 
@@ -250,6 +267,17 @@ Example:
 Dependencies still load before dependents, even if `load_order` places them
 later. Missing profile mods log warnings.
 
+Useful profile API examples:
+
+```ruby
+Reloaded::Profiles.create("Testing")
+Reloaded::Profiles.activate("Testing")
+Reloaded::Profiles.enable_mod("example_mod")
+Reloaded::Profiles.set_load_order(["library_mod", "example_mod"])
+Reloaded::Profiles.set_mod_setting("example_mod", "difficulty", "Hard")
+Reloaded::Profiles.export_profile("Testing", "Mods/Reloaded/Testing.json")
+```
+
 See `Reloaded/Documentation/Profiles.md` for the full profile reference.
 
 ## Core And Modules
@@ -264,6 +292,62 @@ or feature modules that use the Core APIs.
 
 Mods should not be placed in `Reloaded/Modules/`. External mods belong in
 `Mods/<mod_id>/` or `ModDev/<mod_id>/`.
+
+## Mod Manager Backend API
+
+The Mod Manager exposes read-only helper methods for future UI screens and
+debug tooling.
+
+```ruby
+Reloaded::ModManager.mod_ids
+Reloaded::ModManager.mod_rows
+Reloaded::ModManager.mod_row("example_mod")
+Reloaded::ModManager.mod_status("example_mod")
+Reloaded::ModManager.dependency_status("example_mod")
+Reloaded::ModManager.incompatibility_status("example_mod")
+Reloaded::ModManager.profile_summary
+```
+
+`mod_rows` returns display-ready hashes with mod metadata, profile enabled
+state, validation warnings/errors, dependency status, incompatibility status,
+system tags, source folder, loaded state, and script count.
+
+Common status values:
+
+- `:enabled`
+- `:disabled`
+- `:missing_dependency`
+- `:conflict`
+- `:broken`
+- `:invalid`
+- `:missing`
+
+## Mod Manager UI
+
+The first in-game Mod Manager UI is available from:
+
+```text
+Options > MODS > Mod Manager
+```
+
+Current UI features:
+
+- installed mod list,
+- active profile summary,
+- search,
+- filters for enabled, disabled, dependency issues, and conflicts,
+- right-side mod details,
+- dependency and incompatibility details,
+- enable/disable through the active profile,
+- profile load order move up/down,
+- restart-required exit warning for mod load changes,
+- keyboard/controller and mouse hover/click support.
+
+Changing profile state from the UI updates the active profile immediately and
+refreshes mod metadata. Changes that affect the loaded mod set or load order
+show a restart-required popup when leaving the full Mod Manager. Ruby scripts
+are not hot-loaded or unloaded while the game is running, so script changes
+should still be treated as restart-required.
 
 ## Mod Manifest
 

@@ -100,6 +100,18 @@ module Reloaded
         false
       end
 
+      def refresh_metadata
+        scan
+        validate
+        build_load_order
+        Reloaded::Assets.rebuild(@active_mods) if defined?(Reloaded::Assets)
+        write_summary
+        true
+      rescue Exception => e
+        Reloaded::Log.exception("Mod Manager metadata refresh failed", e, channel: :mods) if defined?(Reloaded::Log)
+        false
+      end
+
       def candidates
         @candidates.dup
       end
@@ -130,6 +142,82 @@ module Reloaded
 
       def system_tags
         SYSTEM_TAGS
+      end
+
+      def mod_ids
+        @mods.keys.sort
+      end
+
+      def mod_rows
+        @mods.values.map { |mod| build_mod_row(mod) }.sort_by do |row|
+          [row[:name].to_s.downcase, row[:id].to_s]
+        end
+      end
+
+      def mod_row(mod_id)
+        mod = @mods[normalize_mod_id(mod_id)]
+        mod ? build_mod_row(mod) : nil
+      end
+
+      def dependency_status(mod_id)
+        mod = @mods[normalize_mod_id(mod_id)]
+        return [] unless mod
+        mod[:dependencies].map { |dependency| dependency_status_entry(mod, dependency) }
+      end
+
+      def incompatibility_status(mod_id)
+        id = normalize_mod_id(mod_id)
+        mod = @mods[id]
+        return [] unless mod
+        direct = normalize_string_array(mod[:incompatible])
+        reverse = @mods.values.select { |other| normalize_string_array(other[:incompatible]).include?(id) }.map { |other| other[:id] }
+        (direct + reverse).uniq.sort.map do |other_id|
+          other = @mods[other_id]
+          {
+            :id => other_id,
+            :name => other ? other[:name] : other_id,
+            :installed => !other.nil?,
+            :enabled => other ? !!other[:enabled] : false,
+            :status => other && other[:enabled] ? :conflict : :ok
+          }
+        end
+      end
+
+      def profile_summary
+        base = if defined?(Reloaded::Profiles)
+                 Reloaded::Profiles.summary
+               else
+                 {
+                   :id => "none",
+                   :name => "None",
+                   :enabled_mods => 0,
+                   :disabled_mods => 0,
+                   :load_order => 0,
+                   :mod_settings => 0,
+                   :active => false
+                 }
+               end
+        missing = defined?(Reloaded::Profiles) ? Reloaded::Profiles.missing_mod_ids(@mods.keys) : []
+        base.merge(
+          :available_mods => @mods.length,
+          :active_mods => @active_mods.length,
+          :loaded_mods => @loaded_mods.length,
+          :skipped_mods => @skipped_mods.length,
+          :invalid_mods => @invalid_mods.length,
+          :missing_mods => missing,
+          :moddev_enabled => moddev_enabled?
+        )
+      end
+
+      def mod_status(mod_id)
+        mod = @mods[normalize_mod_id(mod_id)]
+        return :missing unless mod
+        return :invalid unless Array(mod[:errors]).empty?
+        return :broken if Array(mod[:system_tags]).include?("broken")
+        return :conflict if Array(mod[:system_tags]).include?("conflict")
+        return :missing_dependency if Array(mod[:system_tags]).include?("missing_dependency")
+        return :disabled unless mod[:enabled]
+        :enabled
       end
 
       def moddev_enabled?
@@ -194,6 +282,75 @@ module Reloaded
         DEFAULT_MODDEV_ENABLED
       rescue
         DEFAULT_MODDEV_ENABLED
+      end
+
+      def build_mod_row(mod)
+        id = mod[:id].to_s
+        {
+          :id => id,
+          :name => mod[:name].to_s,
+          :version => mod[:version].to_s,
+          :authors => Array(mod[:authors]).map(&:to_s),
+          :description => mod[:description].to_s,
+          :source => mod[:source],
+          :folder_path => mod[:folder_path],
+          :manifest_path => mod[:manifest_path],
+          :enabled => !!mod[:enabled],
+          :profile_enabled => profile_enabled?(id),
+          :profile_disabled => profile_disabled?(id),
+          :loaded => loaded_mod_id?(id),
+          :status => mod_status(id),
+          :tags => normalize_string_array(mod[:tags]),
+          :system_tags => normalize_string_array(mod[:system_tags]),
+          :dependencies => dependency_status(id),
+          :incompatibilities => incompatibility_status(id),
+          :warnings => Array(mod[:warnings]).map(&:to_s),
+          :errors => Array(mod[:errors]).map(&:to_s),
+          :scripts_loaded => scripts_loaded_for(id),
+          :moddev => mod[:source] == :moddev
+        }
+      end
+
+      def dependency_status_entry(mod, dependency)
+        dep_id = dependency[:id].to_s.downcase
+        required = dependency[:version].to_s
+        required = nil if required.empty?
+        dep_mod = @mods[dep_id]
+        status = if dep_mod.nil?
+                   :missing
+                 elsif !dep_mod[:enabled]
+                   :disabled
+                 elsif required && compare_versions(dep_mod[:version], required) < 0
+                   :version_mismatch
+                 else
+                   :ok
+                 end
+        {
+          :id => dep_id,
+          :name => dep_mod ? dep_mod[:name] : dep_id,
+          :required_version => required,
+          :installed_version => dep_mod ? dep_mod[:version] : nil,
+          :installed => !dep_mod.nil?,
+          :enabled => dep_mod ? !!dep_mod[:enabled] : false,
+          :status => status
+        }
+      end
+
+      def profile_enabled?(mod_id)
+        defined?(Reloaded::Profiles) ? Reloaded::Profiles.enabled_mod_ids.include?(normalize_mod_id(mod_id)) : false
+      end
+
+      def profile_disabled?(mod_id)
+        defined?(Reloaded::Profiles) ? Reloaded::Profiles.disabled_mod_ids.include?(normalize_mod_id(mod_id)) : false
+      end
+
+      def loaded_mod_id?(mod_id)
+        @loaded_mods.any? { |mod| mod[:id].to_s == normalize_mod_id(mod_id) }
+      end
+
+      def scripts_loaded_for(mod_id)
+        loaded = @loaded_mods.find { |mod| mod[:id].to_s == normalize_mod_id(mod_id) }
+        loaded ? loaded[:scripts_loaded].to_i : 0
       end
 
       def truthy?(value)
@@ -489,6 +646,10 @@ module Reloaded
       def normalize_string_array(value)
         return [] if value.nil? || !value.is_a?(Array)
         value.map { |entry| entry.to_s.strip.downcase }.reject { |entry| entry.empty? }
+      end
+
+      def normalize_mod_id(value)
+        value.to_s.strip.downcase
       end
 
       def valid_version?(version)

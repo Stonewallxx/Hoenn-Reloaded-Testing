@@ -16,6 +16,7 @@
 module Reloaded
   module Log
     ROOT          = File.expand_path(File.join(File.dirname(__FILE__), ".."))
+    GAME_ROOT     = File.expand_path(File.join(ROOT, ".."))
     LOG_DIR       = File.join(ROOT, "Logging")
     REPORT_DIR    = File.join(LOG_DIR, "Reports")
     MAIN_LOG      = File.join(LOG_DIR, "Log.txt")
@@ -153,7 +154,7 @@ module Reloaded
         append_field(lines, fields, :recommended_fix, "Recommended Fix")
         if fields[:stack_trace] || fields["stack_trace"]
           lines << "Stack Trace:"
-          Array(fields[:stack_trace] || fields["stack_trace"]).each { |line| lines << "  #{line}" }
+          Array(fields[:stack_trace] || fields["stack_trace"]).each { |line| lines << "  #{sanitize_text(line)}" }
         elsif fields[:error] || fields["error"]
           err = fields[:error] || fields["error"]
           lines << "Stack Trace:"
@@ -189,7 +190,7 @@ module Reloaded
         lines << "Reloaded Version: #{reloaded_version}"
         lines << "Log Mode: #{mode_label}"
         lines << "Timestamp: #{Time.now}"
-        extra_fields.each { |key, value| lines << "#{labelize(key)}: #{value}" }
+        extra_fields.each { |key, value| lines << "#{labelize(key)}: #{sanitize_text(value)}" }
         lines << ""
         lines << "[COUNTS]"
         [:warning, :error, :critical, :fatal].each do |level|
@@ -199,7 +200,7 @@ module Reloaded
         lines << "[RECENT REPORTS]"
         lines.concat(extract_recent_reports)
         lines << "[/BUG REPORT]"
-        File.open(BUG_REPORT, "w") { |f| f.puts(lines.join("\n")) }
+        File.open(BUG_REPORT, "w") { |f| f.puts(sanitize_text(lines.join("\n"))) }
         info("Bug report exported: #{BUG_REPORT}", :framework)
         BUG_REPORT
       rescue
@@ -264,7 +265,7 @@ module Reloaded
       end
 
       def format_line(channel, message, level)
-        "[#{timestamp}] [#{LEVEL_LABELS[level]}] [#{channel}] #{message}"
+        "[#{timestamp}] [#{LEVEL_LABELS[level]}] [#{channel}] #{sanitize_text(message)}"
       end
 
       def timestamp
@@ -272,19 +273,32 @@ module Reloaded
       end
 
       def append(path, text)
-        File.open(path, "a") { |f| f.puts(text) }
+        File.open(path, "a") { |f| f.puts(sanitize_text(text)) }
       rescue
       end
 
       def short_backtrace(error)
-        (error.backtrace || []).first(8)
+        (error.backtrace || []).first(8).map { |line| sanitize_text(line) }
       rescue
         []
       end
 
       def append_field(lines, fields, key, label)
         value = fields[key] || fields[key.to_s]
-        lines << "#{label}: #{value}" unless value.nil? || value.to_s.empty?
+        lines << "#{label}: #{sanitize_text(value)}" unless value.nil? || value.to_s.empty?
+      end
+
+      def sanitize_text(value)
+        text = value.to_s.gsub("\\", "/")
+        game_root = File.expand_path(GAME_ROOT).gsub("\\", "/")
+        reloaded_root = File.expand_path(ROOT).gsub("\\", "/")
+        [[game_root, ""], [reloaded_root, "/Reloaded"]].each do |root, replacement|
+          next if root.empty?
+          text = text.gsub(/#{Regexp.escape(root)}(?=\/|\z)/i, replacement)
+        end
+        text
+      rescue
+        value.to_s
       end
 
       def labelize(key)

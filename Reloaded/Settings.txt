@@ -1,5 +1,5 @@
 # Reloaded Settings
 # Format: key=value
+active_profile=Default
 logging_mode=Developer
 moddev=Off
-active_profile=Default

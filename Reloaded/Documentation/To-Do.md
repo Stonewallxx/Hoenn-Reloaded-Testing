@@ -44,7 +44,8 @@ immediately.
 
 ## Options
 
-- Add Mod Manager profile/settings rows after the in-game Mod Manager UI exists.
+- Decide whether the Mod Manager also needs a title-screen entry after the
+  Options entry is tested in-game.
 
 ## Patches
 
@@ -54,8 +55,10 @@ immediately.
 
 ## Future Systems
 
-- In-game profile selector and load order editor.
+- Dedicated profile load order editor.
+- Profile import/export UI for downloaded modpack profiles.
 - In-game mod settings manager.
+- Mod Manager browser/download UI.
 - Data patching system.
 - Direct `Bitmap.new` asset redirect review if needed.
 - In-game Reloaded settings menu.

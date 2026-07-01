@@ -430,44 +430,6 @@ module Reloaded
             end
           end
 
-          unless method_defined?(:reloaded_options_drawCursor)
-            alias_method :reloaded_options_drawCursor, :drawCursor
-
-            def drawCursor(index, rect)
-              if self.index == index
-                pulse = Math.sin((Graphics.frame_count rescue 0) * Math::PI / 20.0) * 0.5 + 0.5
-                fill_alpha = (42 + (86 - 42) * pulse).to_i
-                border_alpha = (160 + (245 - 160) * pulse).to_i
-                fill = reloaded_with_alpha(reloaded_options_cursor_fill, fill_alpha)
-                border = reloaded_with_alpha(reloaded_options_cursor_border, border_alpha)
-                offset = self.class.const_defined?(:OFFSET) ? self.class::OFFSET : 8
-                text_x = rect.x + 16 - offset
-                box_x = text_x + 4
-                box_w = rect.width - (text_x - rect.x) - 8
-                cut_w = box_w / 3
-                reloaded_draw_selection_box(
-                  self.contents,
-                  box_x + cut_w + 1,
-                  rect.y - 1,
-                  [box_w - cut_w + 3, 1].max,
-                  rect.height - 4,
-                  fill,
-                  border
-                )
-              end
-              offset = self.class.const_defined?(:OFFSET) ? self.class::OFFSET : 8
-              Rect.new(rect.x + 16 - offset, rect.y, rect.width - 16 + offset, rect.height)
-            end
-          end
-
-          unless method_defined?(:reloaded_options_update)
-            alias_method :reloaded_options_update, :update
-
-            def update
-              reloaded_options_update
-              refresh if self.active && ((Graphics.frame_count rescue 0) % 4 == 0)
-            end
-          end
         end
       end
 
@@ -573,7 +535,10 @@ module Reloaded
             "Autogen Dex Entries"
           ])
         )
-        append_collapsible(master, "MODS", [moddev_option])
+        append_collapsible(master, "MODS", [
+          mod_manager_option,
+          moddev_option
+        ])
         append_collapsible(master, "DEVELOPER", [logging_mode_option])
         leftovers = system + gameplay + visuals + challenge
         append_collapsible(master, "OTHER", leftovers) unless leftovers.empty?
@@ -643,62 +608,6 @@ module Reloaded
         Reloaded::Log.exception("Failed to rebuild visible consolidated options", e, channel: :options) if defined?(Reloaded::Log)
       end
 
-      def consolidate_system_options(options, scene)
-        return options unless options.is_a?(Array)
-        source = options.dup
-        add_missing_reloaded_options(source, scene)
-
-        grouped = []
-        append_category(grouped, "RELOADED", source, [
-          "Global Small Text",
-          "Menu Frame",
-          "Speech Follows Menu"
-        ])
-        append_category(grouped, "MODS", source, [
-          "ModDev"
-        ])
-        append_category(grouped, "DEVELOPER", source, [
-          "Logging Mode"
-        ])
-        append_category(grouped, "TEXT", source, [
-          "Text Entry",
-          "Text Speed",
-          "Speech Frame"
-        ])
-        append_category(grouped, "AUDIO", source, [
-          "Music Volume",
-          "SE Volume"
-        ])
-        append_category(grouped, "VISUALS & UI", source, [
-          "Screen Size"
-        ])
-        append_category(grouped, "GAMEPLAY", source, [
-          "Autosave",
-          "Download data"
-        ])
-        append_category(grouped, "SYSTEM", source, [
-          "Device"
-        ])
-        append_category(grouped, "OTHER", source, remaining_option_names(source)) unless source.empty?
-
-        grouped
-      end
-
-      def add_missing_reloaded_options(options, scene)
-        options << small_text_option(scene) unless option_named?(options, "Global Small Text")
-        options << menu_frame_option(scene) unless option_named?(options, "Menu Frame")
-        options << speech_follows_menu_option(scene) unless option_named?(options, "Speech Follows Menu")
-        options << moddev_option unless option_named?(options, "ModDev")
-        options << logging_mode_option unless option_named?(options, "Logging Mode")
-      end
-
-      def append_category(target, label, source, names)
-        picked = take_options(source, names)
-        return if picked.empty?
-        target << CategoryHeader.new(_INTL(label), category_description(label))
-        target.concat(picked)
-      end
-
       def take_options(source, names)
         picked = []
         names.each do |name|
@@ -710,14 +619,6 @@ module Reloaded
 
       def take_option(source, name)
         take_options(source, [name]).first
-      end
-
-      def remaining_option_names(options)
-        options.map { |option| option.respond_to?(:name) ? option.name.to_s : "" }
-      end
-
-      def option_named?(options, name)
-        options.any? { |option| option_name?(option, name) }
       end
 
       def option_name?(option, name)
@@ -839,6 +740,20 @@ module Reloaded
             Reloaded::ModManager.set_moddev_enabled(value.to_i == 1) if defined?(Reloaded::ModManager)
           },
           _INTL("When On, Reloaded scans ModDev/ and lets it override matching Mods/ entries.\nChanges apply on the next mod scan or restart.")
+        )
+      end
+
+      def mod_manager_option
+        ActionButton.new(
+          _INTL("Mod Manager"),
+          proc {
+            if defined?(Reloaded::ModManagerUI)
+              Reloaded::ModManagerUI.open
+            else
+              pbMessage(_INTL("The Reloaded Mod Manager UI is not loaded.")) rescue nil
+            end
+          },
+          _INTL("Open the Reloaded Mod Manager.")
         )
       end
 
@@ -1449,7 +1364,7 @@ if defined?(Window_PokemonOption)
         reloaded_draw_selection_box(
           self.contents,
           rect.x + 4,
-          rect.y,
+          rect.y - 1,
           rect.width - 8,
           rect.height - 4,
           fill,
