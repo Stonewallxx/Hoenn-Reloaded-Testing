@@ -1,18 +1,24 @@
-#==============================================================================
-# Hoenn Reloaded Bootstrap
-#==============================================================================
+#======================================================
+# Reloaded Bootstrap
+# Author: Stonewall
+#======================================================
 # Small startup layer loaded from Data/Scripts/999_Main/999_Main.rb.
-# Keep this file focused on framework loading only; feature code belongs in
-# Reloaded/Core or Reloaded/Modules.
-#==============================================================================
+#
+# Responsibilities:
+#   - Load the Reloaded version from Reloaded/Version.md.
+#   - Load framework files from Reloaded/Core.
+#   - Load feature/module files from Reloaded/Modules.
+#   - Emit early lifecycle events for framework systems.
+#   - Write basic bootstrap diagnostics through Reloaded::Log.
+#
+#======================================================
 
 module Reloaded
-  VERSION = "0.1.0" unless const_defined?(:VERSION)
-
   module Bootstrap
     ROOT     = File.expand_path(File.dirname(__FILE__))
     LOG_DIR  = File.join(ROOT, "Logging")
-    LOG_FILE = File.join(LOG_DIR, "bootstrap.log")
+    LOG_FILE = File.join(LOG_DIR, "Log.txt")
+    VERSION_FILE = File.join(ROOT, "Version.md")
 
     class << self
       def boot
@@ -20,11 +26,14 @@ module Reloaded
         @booted = true
 
         ensure_log_dir
+        load_version
         log("Boot start")
         load_folder("Core")
-        Reloaded::Hooks.run(:bootstrap_loaded) if defined?(Reloaded::Hooks)
+        Reloaded::Log.boot_header if defined?(Reloaded::Log)
+        emit(:bootstrap_loaded)
+        emit(:core_loaded)
         load_folder("Modules")
-        Reloaded::Hooks.run(:modules_loaded) if defined?(Reloaded::Hooks)
+        emit(:modules_loaded)
         log("Boot complete")
       rescue Exception => e
         log("Boot failed: #{e.class}: #{e}", "ERROR") rescue nil
@@ -44,7 +53,11 @@ module Reloaded
       def log(message, level = "INFO")
         ensure_log_dir
         line = "[#{timestamp}] [#{level}] #{message}"
-        File.open(LOG_FILE, "a") { |f| f.puts(line) } rescue nil
+        if defined?(Reloaded::Log)
+          Reloaded::Log.write(:bootstrap, message, level: level.downcase.to_sym)
+        else
+          File.open(LOG_FILE, "a") { |f| f.puts(line) } rescue nil
+        end
         puts("[Reloaded] #{message}") rescue nil
       end
 
@@ -57,6 +70,29 @@ module Reloaded
 
         Dir[File.join(folder, "*.rb")].sort.each do |path|
           load_file(path)
+        end
+      end
+
+      def load_version
+        version = if File.exist?(VERSION_FILE)
+                    File.read(VERSION_FILE).to_s.strip
+                  else
+                    "0.0.0"
+                  end
+        Reloaded.const_set(:VERSION, version) unless Reloaded.const_defined?(:VERSION)
+      rescue
+        Reloaded.const_set(:VERSION, "0.0.0") unless Reloaded.const_defined?(:VERSION)
+      end
+
+      def emit(event_name)
+        if defined?(Reloaded::Events)
+          Reloaded::Events.emit(event_name, {
+            :event => event_name,
+            :reloaded_version => (Reloaded::VERSION rescue nil),
+            :bootstrap_root => ROOT
+          })
+        elsif defined?(Reloaded::Hooks)
+          Reloaded::Hooks.run(event_name)
         end
       end
 
