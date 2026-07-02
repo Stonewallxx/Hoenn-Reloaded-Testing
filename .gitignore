@@ -43,6 +43,7 @@ ModDev/*
 Modders Tools/_repo_cache/
 Modders Tools/*.tmp
 Admin Tools/
+Developer Tools/Base Game Updater/_upstream_cache/
 Reloaded/Settings.txt
 Reloaded/Logging/*.txt
 Reloaded/Logging/Reports/*

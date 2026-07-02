@@ -7,11 +7,11 @@ color 0A
 :: ============================================================
 ::  CONFIG
 :: ============================================================
-set "REPO_URL=https://github.com/infinitefusion/infinitefusion-hoenn-public.git"
-set "REPO_RAW=https://raw.githubusercontent.com/infinitefusion/infinitefusion-hoenn-public/releases"
-set "BRANCH=releases"
+set "REPO_URL=https://github.com/Stonewallxx/Hoenn-Reloaded.git"
+set "REPO_RAW=https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/main"
+set "BRANCH=main"
 set "MGIT=.\REQUIRED_BY_INSTALLER_UPDATER\cmd\git.exe"
-set "VER_FILE=Reloaded\000a_Version.rb"
+set "VER_FILE=Reloaded\Version.md"
 
 :: ============================================================
 ::  Must be run from game root
@@ -31,7 +31,7 @@ if not exist "Game.exe" if not exist "Game.rxproj" (
 set "LOCAL_VER=unknown"
 if exist "%VER_FILE%" (
     for /f "usebackq tokens=*" %%A in (
-        `powershell -NoProfile -Command "$m=(Select-String 'VERSION\s*=\s*""(.+)""' '%VER_FILE%'); if($m){$m.Matches[0].Groups[1].Value}else{'unknown'}"`
+        `powershell -NoProfile -Command "try{(Get-Content '%VER_FILE%' -Raw).Trim()}catch{'unknown'}"`
     ) do set "LOCAL_VER=%%A"
 )
 
@@ -40,7 +40,7 @@ if exist "%VER_FILE%" (
 :: ============================================================
 set "REMOTE_VER=unknown"
 for /f "usebackq tokens=*" %%A in (
-    `powershell -NoProfile -Command "try{$r=(Invoke-WebRequest -Uri '%REPO_RAW%/Reloaded/000a_Version.rb' -UseBasicParsing -TimeoutSec 5).Content; $m=[regex]::Match($r,'VERSION\s*=\s*""(.+)""'); if($m.Success){$m.Groups[1].Value}else{'unknown'}}catch{'unknown'}"`
+    `powershell -NoProfile -Command "try{(Invoke-WebRequest -Uri '%REPO_RAW%/Reloaded/Version.md' -UseBasicParsing -TimeoutSec 5).Content.Trim()}catch{'unknown'}"`
 ) do set "REMOTE_VER=%%A"
 
 :: ============================================================
@@ -59,7 +59,7 @@ echo   including all game files and Mod Manager files.
 echo.
 echo   Your saves will NOT be affected.
 echo.
-echo   SOURCE: github.com/infinitefusion/infinitefusion-hoenn-public
+echo   SOURCE: github.com/Stonewallxx/Hoenn-Reloaded
 echo  ============================================================
 echo.
 set /p "go=  Press ENTER to update, or close this window to cancel: "
@@ -70,17 +70,28 @@ echo.
 :: ============================================================
 if not exist "%MGIT%" (
     color 0C
-    echo  [ERROR] Bundled git.exe not found at: %MGIT%
-    echo  Your installation may be incomplete.
+    echo.
+    echo  ============================================================
+    echo   ERROR: Bundled git.exe was not found.
+    echo  ------------------------------------------------------------
+    echo   Expected path:
+    echo   %MGIT%
+    echo  ------------------------------------------------------------
+    echo   Your installation may be incomplete.
+    echo  ============================================================
     echo.
     pause
     exit /b 1
 )
 
-:: Remove stale lock if present
+:: Remove stale locks if present
 if exist ".git\shallow.lock" (
-    echo  [INFO] Removing stale git lock...
+    echo  [INFO] Removing stale git shallow lock...
     erase /f /q ".git\shallow.lock"
+)
+if exist ".git\index.lock" (
+    echo  [INFO] Removing stale git index lock...
+    erase /f /q ".git\index.lock"
 )
 
 :: ============================================================
@@ -88,11 +99,23 @@ if exist ".git\shallow.lock" (
 :: ============================================================
 echo  [1/3] Initializing repository...
 %MGIT% init . >nul 2>&1
+if %errorlevel% neq 0 (
+    echo.
+    color 0C
+    echo  ============================================================
+    echo   ERROR: Failed to initialize the updater repository.
+    echo  ------------------------------------------------------------
+    echo   Close other Git/updater windows and try again.
+    echo  ============================================================
+    echo.
+    pause
+    exit /b 1
+)
 
 echo  [2/3] Fetching latest release from GitHub...
 %MGIT% remote remove origin >nul 2>&1
 %MGIT% remote add origin "%REPO_URL%" >nul 2>&1
-%MGIT% fetch --depth=1 origin %BRANCH%
+%MGIT% fetch --depth=1 --force origin %BRANCH%
 if %errorlevel% neq 0 (
     echo.
     color 0C
@@ -101,6 +124,7 @@ if %errorlevel% neq 0 (
     echo  ------------------------------------------------------------
     echo   - Check your internet connection
     echo   - GitHub may be temporarily unavailable
+    echo   - Another Git process may be locking files
     echo   - Screenshot this window if you need help
     echo  ============================================================
     echo.
@@ -110,6 +134,18 @@ if %errorlevel% neq 0 (
 
 echo  [3/3] Applying update...
 %MGIT% reset --hard origin/%BRANCH%
+if %errorlevel% neq 0 (
+    echo.
+    color 0C
+    echo  ============================================================
+    echo   ERROR: Failed to apply update.
+    echo  ------------------------------------------------------------
+    echo   Close the game and any Git/updater windows, then try again.
+    echo  ============================================================
+    echo.
+    pause
+    exit /b 1
+)
 
 :: ============================================================
 ::  Re-read version after update
@@ -117,7 +153,7 @@ echo  [3/3] Applying update...
 set "NEW_VER=unknown"
 if exist "%VER_FILE%" (
     for /f "usebackq tokens=*" %%A in (
-        `powershell -NoProfile -Command "$m=(Select-String 'VERSION\s*=\s*""(.+)""' '%VER_FILE%'); if($m){$m.Matches[0].Groups[1].Value}else{'unknown'}"`
+        `powershell -NoProfile -Command "try{(Get-Content '%VER_FILE%' -Raw).Trim()}catch{'unknown'}"`
     ) do set "NEW_VER=%%A"
 )
 
