@@ -19,6 +19,7 @@ foundation. Detailed behavior still lives in the focused documentation files.
 Hoenn Reloaded currently has the following framework systems in place:
 
 - Bootstrap loader through one documented vanilla hook.
+- Runtime window title sync from `Reloaded/Version.md`.
 - Central settings file at `Reloaded/Settings.txt`.
 - Central logging with modes, reports, bug-report export, and path sanitizing.
 - Event API through `Reloaded::Events`.
@@ -88,6 +89,8 @@ Mod authors should use:
 
 Reloaded uses `Major.Minor.Patch` versioning in `Reloaded/Version.md`.
 
+The current imported base Hoenn version is `1.1.0`.
+
 Each mod manifest includes `minimum_reloaded_version`, and the Mod Manager
 marks mods as outdated when the fork version is too old.
 
@@ -97,6 +100,17 @@ kept small and tracked in:
 ```text
 Reloaded/Documentation/VanillaChanges.md
 ```
+
+The developer-only upstream base updater lives in:
+
+```text
+Developer Tools/Base Game Updater/
+```
+
+It updates base files from upstream without touching Hoenn Reloaded's `.git`
+folder. It protects `Game.ini`, because it contains Reloaded-specific root
+configuration. `mkxp.json` may be refreshed from upstream, while Reloaded
+applies the current versioned window title again during boot.
 
 ## Detailed Documentation
 

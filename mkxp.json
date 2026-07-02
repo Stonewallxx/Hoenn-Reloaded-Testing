@@ -190,7 +190,7 @@
     // Override the game window title
     // (default: none)
     //
-    // "windowTitle": "Custom Title",
+    // "windowTitle": "Hoenn Reloaded 0.1.0",
 
 
     // Enforce a static frame rate

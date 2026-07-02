@@ -16,6 +16,7 @@ The updater does not copy over these paths:
 
 - `.git`
 - `.gitignore`
+- `Game.ini`
 - `Reloaded`
 - `Mods`
 - `ModDev`

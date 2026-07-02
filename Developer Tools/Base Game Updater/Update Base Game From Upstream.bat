@@ -58,7 +58,8 @@ echo  %GAME_ROOT%
 echo.
 echo  Protected HR paths:
 echo  .git, Reloaded, Mods, ModDev, ModsBackup, Modders Tools,
-echo  Admin Tools, Developer Tools, .gitignore, and HR installer files.
+echo  Admin Tools, Developer Tools, .gitignore, Game.ini, and
+echo  HR installer files.
 echo.
 set /p "go=Press ENTER to continue, or close this window to cancel: "
 echo.
@@ -92,7 +93,7 @@ echo.
 echo  [2/3] Copying upstream base files...
 robocopy "%UPSTREAM_DIR%" "%GAME_ROOT%" /E /R:2 /W:1 ^
     /XD ".git" "Reloaded" "Mods" "ModDev" "ModsBackup" "Modders Tools" "Admin Tools" "Developer Tools" "Releases" ^
-    /XF ".gitignore" "Hoenn Reloaded Installer.bat" "PIF Hoenn Installer.bat"
+    /XF ".gitignore" "Game.ini" "Hoenn Reloaded Installer.bat" "PIF Hoenn Installer.bat"
 
 set "ROBOCOPY_RESULT=%ERRORLEVEL%"
 if %ROBOCOPY_RESULT% GEQ 8 goto copy_failed

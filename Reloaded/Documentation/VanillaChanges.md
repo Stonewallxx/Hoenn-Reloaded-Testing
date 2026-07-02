@@ -50,3 +50,52 @@ base game boot flow intact. The real loader code lives in
 2. Find `PluginManager.runPlugins`.
 3. Confirm the bootstrap block appears immediately after it.
 4. Confirm `Compiler.main` still appears after the bootstrap block.
+
+---
+
+## CHANGE 002 - Reloaded Game Title
+
+**File:** `Game.ini`
+
+**Section:** `[Game]`
+
+**Field:** `Title`
+
+**Reason:** Shows the fork name as the game title instead of the upstream/base
+game title.
+
+**Code:**
+
+```ini
+Title=Hoenn Reloaded
+```
+
+**Reapply/check after base update:**
+
+1. Open `Game.ini`.
+2. Confirm `[Game]` contains `Title=Hoenn Reloaded`.
+3. Do not let the base updater overwrite this file.
+
+---
+
+## CHANGE 003 - Reloaded Window Title
+
+**File:** `mkxp.json`
+
+**Field:** `windowTitle`
+
+**Reason:** Shows the Reloaded fork name and Reloaded version in the game window
+title.
+
+**Code:**
+
+```json
+"windowTitle": "Hoenn Reloaded 0.1.0",
+```
+
+**Reapply/check after base update:**
+
+1. Open `Reloaded/Version.md`.
+2. Open `mkxp.json`.
+3. Confirm `windowTitle` matches `Hoenn Reloaded X.Y.Z`.
+4. Do not let the base updater overwrite this file.
