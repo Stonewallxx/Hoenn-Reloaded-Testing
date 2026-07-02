@@ -107,6 +107,20 @@ current warning/error counts, and the latest report blocks from `Log.txt`.
 Generated log files are ignored by Git. Only the logging system, documentation,
 `Settings.txt`, and logging-folder ignore files should be tracked.
 
+## Path Sanitizing
+
+Reloaded sanitizes log output before writing it. Absolute paths inside the game
+folder are shortened so logs do not expose local machine paths.
+
+Examples:
+
+```text
+E:/Downloads/POKEMON/Github/Hoenn-Reloaded-Testing/Reloaded/Core/file.rb
+/Reloaded/Core/file.rb
+```
+
+Paths under the game root are written relative to the game folder when possible.
+
 ## Project Rule
 
 Any new Reloaded-created file, or any system we substantially change, should

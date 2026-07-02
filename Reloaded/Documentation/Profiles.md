@@ -87,28 +87,75 @@ Profile import and export:
 ```ruby
 Reloaded::Profiles.export_profile("Default", "Mods/Reloaded/DefaultExport.json")
 Reloaded::Profiles.import_profile("Mods/Reloaded/DefaultExport.json")
+Reloaded::Profiles.import_data(profile_hash)
 ```
 
-These methods are intended for the future Mod Manager browser/downloader.
+The Mod Manager browser/downloader and profile-code import flow use these
+methods when creating local profiles from downloaded or pasted profile data.
 Downloaded modpacks should become imported profiles rather than a separate
 runtime system.
 
+## RLD Profile Codes
+
+Profiles can also be exported as a share code:
+
+```ruby
+code = Reloaded::ProfileCodes.export_profile("Default")
+Reloaded::ProfileCodes.import_code(code)
+```
+
+Profile codes start with:
+
+```text
+RLD-code-
+```
+
+The decoded payload format is named `RLD-code` and includes:
+
+- `preset_name`
+- `reloaded_version`
+- profile load data
+- profile-scoped `mod_settings`
+- referenced mod metadata when available
+
+Importing an RLD profile code always creates a new profile with a unique name.
+It does not overwrite or edit an existing profile.
+
+If an imported code references mods the player does not have installed, the UI
+will show the missing mods and ask whether to download them through
+`Reloaded::ModBrowser`.
+
+`Download` installs the missing mods, then imports the new profile with those
+newly downloaded missing mods disabled.
+
+`Download & Enable` installs the missing mods, then imports the new profile
+normally.
+
 ## In-Game Profile Page
 
-The Mod Manager includes a Profiles page from its page menu.
+The Mod Manager includes a Profiles page from its footer buttons.
 
 Current in-game profile actions:
 
-- Activate a profile.
-- Create a profile.
+- Use `Confirm (C)` on a profile to open that profile's actions.
+- Use `Menu (A)` on the Profiles page for page-level actions.
+- Enable/disable a profile.
+- Create a profile from the page menu.
 - Duplicate a profile.
 - Rename a profile.
 - Delete an inactive non-default profile.
+- Export a profile code to the clipboard.
+- Import a pasted profile code as a new profile.
 - View profile counts for enabled mods, disabled mods, load order entries, and
   profile-scoped mod settings.
+- View resolved enabled/disabled mod names when they are installed.
 
-Activating, creating, or duplicating a profile from the in-game UI marks the
-full Mod Manager as restart-required because the active loaded mod set may
+Creating a profile from the in-game UI seeds it from the current installed mod
+list so its enabled mod count, disabled mod count, and load order are populated
+immediately.
+
+Enabling, disabling, creating, or duplicating a profile from the in-game UI marks
+the full Mod Manager as restart-required because the active loaded mod set may
 change. The restart popup is only shown when leaving the full Mod Manager.
 
 Mod state:
@@ -138,9 +185,14 @@ Profile-scoped mod settings:
 Reloaded::Profiles.set_mod_setting("example_mod", "difficulty", "Hard")
 Reloaded::Profiles.mod_setting("example_mod", "difficulty", "Normal")
 Reloaded::Profiles.delete_mod_setting("example_mod", "difficulty")
+Reloaded::Profiles.delete_mod_settings("example_mod")
+Reloaded::Profiles.delete_mod_settings
 ```
 
 These settings are stored inside the active profile under `mod_settings`.
+Mods should usually use `Reloaded::ModSettings` instead of calling these
+profile methods directly, because `Reloaded::ModSettings` validates values
+against the mod's `Settings.json` schema.
 
 Utility methods:
 
@@ -155,8 +207,8 @@ Reloaded::Profiles.remove_mod("example_mod")
 
 ## Current Limits
 
-- Profile import/export exists, but the in-game browser/downloader is not built
-  yet.
-- The profile page does not yet expose a dedicated load order editor. Installed
-  mod order can still be adjusted from the installed mods screen.
+- Missing-mod downloads require browser source indexes that contain matching
+  mod IDs and download URLs.
+- The profile page does not expose a separate load order editor. Load order is
+  adjusted from the installed mods screen with Load Order mode.
 - Profiles do not control `ModDev`, `Logging Mode`, or Reloaded visual options.

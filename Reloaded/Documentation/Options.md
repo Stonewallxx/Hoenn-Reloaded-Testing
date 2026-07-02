@@ -8,7 +8,7 @@
 #   - Explain reusable option row types.
 #   - Explain Reloaded option theme settings.
 #   - Record how the options scene is patched.
-#   - Guide future options menu and Mod Manager settings work.
+#   - Guide options menu and Mod Manager settings work.
 #
 #======================================================
 
@@ -88,6 +88,7 @@ The consolidated Options menu receives:
 - `Menu Frame`
 - `Speech Follows Menu`
 - `Mod Manager`
+- `Mod Settings`
 - `ModDev`
 - `Logging Mode`
 
@@ -143,7 +144,7 @@ for the Options menu and base Pause menu command window. If `Options Cursor
 Color` is set to `White` while using a non-dark frame, Reloaded changes it to
 `Black` so the cursor remains visible.
 
-Future Reloaded UI screens should use `ReloadedDrawHelper#reloaded_cursor_fill`,
+Reloaded UI screens should use `ReloadedDrawHelper#reloaded_cursor_fill`,
 `ReloadedDrawHelper#reloaded_cursor_border`, and
 `ReloadedDrawHelper#reloaded_draw_selection_box` when drawing configurable
 selection highlights.
@@ -154,6 +155,7 @@ Hint text should use the format `Action (input)`. The normal order is:
 `MODS` currently contains:
 
 - `Mod Manager` - opens the in-game Reloaded Mod Manager UI.
+- `Mod Settings` - opens Options-style settings pages exposed by installed mods.
 - `ModDev` - toggles scanning `ModDev/` on the next mod scan or restart.
   Persists as `moddev=On/Off` in `Reloaded/Settings.txt`.
 
@@ -251,4 +253,6 @@ actual value. This supports negative ranges and custom intervals correctly.
 
 ## Future Work
 
-- Add Mod Manager profile/settings controls.
+- Add Economy options when the economy system exists.
+- Add additional base-game bridge options only when the underlying systems are
+  implemented.

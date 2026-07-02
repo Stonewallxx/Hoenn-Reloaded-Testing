@@ -2,9 +2,16 @@
   "id": "default",
   "name": "Default",
   "version": 1,
-  "enabled_mods": [],
-  "disabled_mods": [],
-  "load_order": [],
-  "mod_settings": {},
+  "enabled_mods": ["example_mod"],
+  "disabled_mods": ["new_mod"],
+  "load_order": ["example_mod", "new_mod"],
+  "mod_settings": {
+    "example_mod": {
+      "enable_example_message": true,
+      "example_mode": "Normal",
+      "example_scale": 2,
+      "example_count": 10
+    }
+  },
   "notes": "Default Reloaded mod profile."
 }

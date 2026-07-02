@@ -19,7 +19,9 @@ end
 
 module Reloaded
   module Profiles
-    PROFILE_ROOT = File.expand_path("./Mods/Reloaded/Profiles")
+    ROOT = File.expand_path(File.join(File.dirname(__FILE__), ".."))
+    GAME_ROOT = File.expand_path(File.join(ROOT, ".."))
+    PROFILE_ROOT = File.join(GAME_ROOT, "Mods", "Reloaded", "Profiles")
     DEFAULT_PROFILE_NAME = "Default"
     PROFILE_VERSION = 1
 
@@ -126,13 +128,18 @@ module Reloaded
         raise "Profile import file does not exist: #{source_path}" unless File.exist?(source_path)
         data = parse_json(File.read(source_path))
         fallback_name = File.basename(source_path, ".json")
+        saved = import_data(data, fallback_name: fallback_name, activate: activate, overwrite: overwrite)
+        saved
+      end
+
+      def import_data(data, fallback_name: DEFAULT_PROFILE_NAME, activate: false, overwrite: false)
         profile = normalize_profile(data, fallback_name)
         if exists?(profile["name"]) && !overwrite
           raise "Profile already exists: #{profile["name"]}"
         end
         saved = write_profile(profile)
         set_active(saved["name"]) if activate || same_profile?(active_name, saved["name"])
-        log_change("Imported mod profile #{saved["name"]} from #{source_path}")
+        log_change("Imported mod profile #{saved["name"]}")
         saved
       end
 
@@ -168,16 +175,23 @@ module Reloaded
         @active_profile = load_profile(normalized)
       end
 
-      def active
-        @active_profile ||= load_active_profile
+      def active(reload: false)
+        if reload || @active_profile.nil? || !same_profile?(@active_profile["name"], active_name)
+          load_active_profile
+        end
+        @active_profile
+      end
+
+      def refresh!
+        load_active_profile
       end
 
       def enabled_mod_ids
-        normalize_string_array(active["enabled_mods"])
+        profile_enabled_mod_ids(active)
       end
 
       def disabled_mod_ids
-        normalize_string_array(active["disabled_mods"])
+        profile_disabled_mod_ids(active)
       end
 
       def load_order
@@ -223,10 +237,30 @@ module Reloaded
         true
       end
 
+      def delete_mod_settings(mod_id = nil)
+        profile = active
+        profile["mod_settings"] = mod_settings
+        if mod_id
+          id = normalize_mod_id(mod_id)
+          return false unless profile["mod_settings"].has_key?(id)
+          profile["mod_settings"].delete(id)
+          log_change("Deleted all settings for #{id} in profile #{active_name}")
+        else
+          return false if profile["mod_settings"].empty?
+          profile["mod_settings"] = {}
+          log_change("Deleted all mod settings in profile #{active_name}")
+        end
+        save_active!
+        true
+      end
+
       def enabled?(mod_id)
         id = normalize_mod_id(mod_id)
-        return false if disabled_mod_ids.include?(id)
-        enabled_mod_ids.include?(id)
+        profile = active
+        disabled = profile_disabled_mod_ids(profile)
+        enabled = profile_enabled_mod_ids(profile)
+        return false if disabled.include?(id)
+        enabled.include?(id)
       end
 
       def enable_mod(mod_id)
@@ -241,8 +275,8 @@ module Reloaded
         id = normalize_mod_id(mod_id)
         raise "Mod id is required" if id.empty?
         profile = active
-        enabled_mods = normalize_string_array(profile["enabled_mods"])
-        disabled_mods = normalize_string_array(profile["disabled_mods"])
+        enabled_mods = profile_enabled_mod_ids(profile)
+        disabled_mods = profile_disabled_mod_ids(profile)
         if enabled
           enabled_mods = (enabled_mods + [id]).uniq
           disabled_mods.delete(id)
@@ -253,9 +287,9 @@ module Reloaded
         end
         profile["enabled_mods"] = enabled_mods
         profile["disabled_mods"] = disabled_mods
-        save_active!
+        @active_profile = write_profile(profile)
         log_change("#{enabled ? 'Enabled' : 'Disabled'} #{id} in profile #{active_name}")
-        profile
+        @active_profile
       end
 
       def set_enabled_mods(mod_ids)
@@ -313,14 +347,26 @@ module Reloaded
         referenced - available
       end
 
+      def profile_enabled_mod_ids(profile)
+        normalize_string_array(profile && profile["enabled_mods"])
+      end
+
+      def profile_disabled_mod_ids(profile)
+        normalize_string_array(profile && profile["disabled_mods"])
+      end
+
+      def profile_load_order(profile)
+        normalize_string_array(profile && profile["load_order"])
+      end
+
       def summary(name = nil)
         profile = name ? load_profile(name) : active
         {
           :id => profile["id"],
           :name => profile["name"],
-          :enabled_mods => normalize_string_array(profile["enabled_mods"]).length,
-          :disabled_mods => normalize_string_array(profile["disabled_mods"]).length,
-          :load_order => normalize_string_array(profile["load_order"]).length,
+          :enabled_mods => profile_enabled_mod_ids(profile).length,
+          :disabled_mods => profile_disabled_mod_ids(profile).length,
+          :load_order => profile_load_order(profile).length,
           :mod_settings => profile["mod_settings"].is_a?(Hash) ? profile["mod_settings"].keys.length : 0,
           :active => same_profile?(profile["name"], active_name)
         }
@@ -339,14 +385,24 @@ module Reloaded
 
       def load_active_profile
         @active_profile = load_profile(active_name)
+        if defined?(Reloaded::Log)
+          enabled = normalize_string_array(@active_profile["enabled_mods"]).join(",")
+          disabled = normalize_string_array(@active_profile["disabled_mods"]).join(",")
+          Reloaded::Log.debug("Loaded active profile #{active_name} from #{PROFILE_ROOT} enabled=#{enabled} disabled=#{disabled}", :mods)
+        end
+        @active_profile
       end
 
       def load_profile(name)
         ensure_profile_root
         normalized = normalize_profile_name(name)
         path = profile_path(normalized)
-        return default_profile.merge("name" => normalized) unless File.exist?(path)
+        unless File.exist?(path)
+          Reloaded::Log.warning("Profile file missing: #{path}", :mods) if defined?(Reloaded::Log)
+          return default_profile.merge("name" => normalized)
+        end
         data = parse_json(File.read(path))
+        Reloaded::Log.debug("Profile #{normalized} keys=#{data.keys.join(",")}", :mods) if defined?(Reloaded::Log) && data.respond_to?(:keys)
         normalize_profile(data, normalized)
       rescue Exception => e
         Reloaded::Log.exception("Failed to load mod profile #{name}", e, channel: :mods) if defined?(Reloaded::Log)
@@ -356,9 +412,15 @@ module Reloaded
       def write_profile(profile)
         ensure_profile_root
         data = normalize_profile(profile, profile["name"] || DEFAULT_PROFILE_NAME)
-        File.open(profile_path(data["name"]), "w") do |file|
+        path = profile_path(data["name"])
+        File.open(path, "w") do |file|
           file.write(json_text(data))
           file.write("\n")
+        end
+        if defined?(Reloaded::Log)
+          enabled = profile_enabled_mod_ids(data).join(",")
+          disabled = profile_disabled_mod_ids(data).join(",")
+          Reloaded::Log.debug("Saved profile #{data["name"]} to #{path} enabled=#{enabled} disabled=#{disabled}", :mods)
         end
         data
       end
@@ -379,12 +441,52 @@ module Reloaded
       private
 
       def json_text(data)
-        JSON.generate(data)
+        formatted_json(data)
+      end
+
+      def formatted_json(value, indent = 0)
+        pad = "  " * indent
+        child_pad = "  " * (indent + 1)
+        case value
+        when Hash
+          return "{}" if value.empty?
+          lines = value.map do |key, child|
+            "#{child_pad}#{JSON.generate(key.to_s)}: #{formatted_json(child, indent + 1)}"
+          end
+          "{\n#{lines.join(",\n")}\n#{pad}}"
+        when Array
+          return "[]" if value.empty?
+          if value.all? { |child| scalar_json?(child) }
+            "[#{value.map { |child| JSON.generate(child) }.join(", ")}]"
+          else
+            lines = value.map { |child| "#{child_pad}#{formatted_json(child, indent + 1)}" }
+            "[\n#{lines.join(",\n")}\n#{pad}]"
+          end
+        else
+          JSON.generate(value)
+        end
+      end
+
+      def scalar_json?(value)
+        value.nil? || value.is_a?(String) || value.is_a?(Numeric) || value == true || value == false
       end
 
       def parse_json(raw)
         raise "JSON parser is not available" unless defined?(JSON)
-        JSON.parse(raw)
+        stringify_json_keys(JSON.parse(raw))
+      end
+
+      def stringify_json_keys(value)
+        case value
+        when Hash
+          value.each_with_object({}) do |(key, child), memo|
+            memo[key.to_s] = stringify_json_keys(child)
+          end
+        when Array
+          value.map { |child| stringify_json_keys(child) }
+        else
+          value
+        end
       end
 
       def normalize_profile(data, fallback_name)

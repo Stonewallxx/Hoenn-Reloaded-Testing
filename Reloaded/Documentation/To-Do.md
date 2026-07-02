@@ -19,9 +19,10 @@ immediately.
 
 ## Logging
 
-- Add mod loader-specific logging once the mod loader exists.
-- Improve bug report exports after mod metadata, dependency checks, and load
-  order are implemented.
+- Continue tightening mod loader/browser/profile logging as new UI actions are
+  added.
+- Improve bug report exports with compact Mod Manager profile, browser source,
+  and latest validation summaries.
 - Consider log rotation or cleanup if generated logs become too large.
 
 ## Modding Documentation
@@ -45,7 +46,7 @@ immediately.
 ## Options
 
 - Decide whether the Mod Manager also needs a title-screen entry after the
-  Options entry is tested in-game.
+  Options entry is stable.
 
 ## Patches
 
@@ -55,10 +56,14 @@ immediately.
 
 ## Future Systems
 
-- Dedicated profile load order editor.
-- Profile import/export UI for downloaded modpack profiles.
-- In-game mod settings manager.
-- Mod Manager browser/download UI.
+- Publisher script fields for custom author overrides, description, tags,
+  changelog, and download URL fields.
+- Per-mod settings preset/share-code design and UI.
 - Data patching system.
 - Direct `Bitmap.new` asset redirect review if needed.
-- In-game Reloaded settings menu.
+- Dedicated Profile page load order editor, if the installed-list Load Order
+  mode proves too limited.
+- Mod Browser polish: richer changelog display, better source failure messages,
+  and clearer installed/update states.
+- Remaining Modders Tools from the reference folder, reviewed and rebuilt only
+  where they still fit the new Reloaded foundation.

@@ -7,7 +7,7 @@
 # Responsibilities:
 #   - Explain Reloaded systems intended for modding use.
 #   - Record recommended modding patterns as systems are added.
-#   - Point modders toward logging, events, patches, and future APIs.
+#   - Point modders toward logging, events, patches, and public APIs.
 #   - Keep compatibility notes in one central document.
 #
 #======================================================
@@ -16,6 +16,9 @@ This file is the main modder-facing reference for Hoenn Reloaded.
 
 It should be updated whenever a Reloaded system gains a public API that modders
 are expected to use.
+
+For a high-level status summary of the current fork foundation, see
+`Reloaded/Documentation/Foundation.md`.
 
 ## Current Status
 
@@ -29,7 +32,11 @@ are:
 - `Reloaded::SaveData`
 - `Reloaded::Assets`
 - `Reloaded::ModManager`
+- `Reloaded::ModBrowser`
+- `Reloaded::Publisher`
+- `Reloaded::ModderTools`
 - `Reloaded::Profiles`
+- `Reloaded::ModSettings`
 - `Reloaded::Options`
 - `Reloaded::Settings`
 
@@ -149,6 +156,62 @@ Current reusable types include:
 
 See `Reloaded/Documentation/Options.md` for the full options reference.
 
+## Per-Mod Settings
+
+Mods can define editable settings in:
+
+```text
+Mods/<mod folder>/Settings.json
+```
+
+Player values are stored in the active profile, not in the mod folder.
+Players can edit these values from `Options -> Mods -> Mod Settings`, or from
+the installed mod's `Settings` action in the Mod Manager.
+
+Use `Reloaded::ModSettings` at runtime:
+
+```ruby
+difficulty = Reloaded::ModSettings.get("example_mod", "difficulty", "Normal")
+Reloaded::ModSettings.set("example_mod", "difficulty", "Hard")
+```
+
+Supported setting types are `toggle`, `enum`, `slider`, `number`,
+`category_header`, and `spacer`.
+
+See `Reloaded/Documentation/Settings.md` for the full mod settings reference.
+
+## Browser Sources
+
+The Mod Browser backend reads downloadable mod indexes from GitHub-hosted
+`index.json` files. The built-in source is:
+
+```text
+https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded-Mods/main/index.json
+```
+
+Mods and published profiles listed in browser indexes can be downloaded by
+profile imports and the in-game Browser page. Reloaded does not require local
+Browser or Publish folders for public source data.
+
+See `Reloaded/Documentation/Browser.md` for the source and index formats.
+
+## Publishing
+
+Publishing uses the external Modders Tools script:
+
+```text
+Modders Tools/Publish to GitHub.bat
+```
+
+In-game, use:
+
+```text
+Mod Manager -> Tools -> Publish
+```
+
+The external script selects and validates the mod or profile, then does the
+GitHub work before pushing.
+
 ## UI Hint Text
 
 Use this format for Reloaded UI hint text:
@@ -192,7 +255,9 @@ Optional:
 - `Graphics/` - Graphics assets resolved at runtime.
 - `Audio/` - Audio assets resolved at runtime.
 - `Fonts/` - Font assets reserved for runtime resolution.
-- `Settings.json` - Reserved for future Mod Manager settings.
+- `Settings.json` - Editable per-mod settings schema.
+- `Changelog.txt` or `changelog.txt` - local changelog shown by the installed
+  mod `View Changelog` action when no `changelogurl` is set.
 - `Documentation/` - Mod author documentation.
 
 ## ModDev
@@ -213,7 +278,7 @@ version is used and the `Mods/` version is skipped.
 ModDev can be changed from the in-game options menu under:
 
 ```text
-MODS > ModDev
+Options -> Mods -> ModDev
 ```
 
 The setting is stored in:
@@ -287,16 +352,16 @@ logging, settings, events, patches, save data, assets, profiles, mod loading,
 and options.
 
 `Reloaded/Modules/` is for Reloaded-owned feature systems that load after Core
-is ready. Good examples are future gameplay systems, optional UI replacements,
-or feature modules that use the Core APIs.
+is ready. Good examples are gameplay systems, optional UI replacements, or
+feature modules that use the Core APIs.
 
 Mods should not be placed in `Reloaded/Modules/`. External mods belong in
-`Mods/<mod_id>/` or `ModDev/<mod_id>/`.
+`Mods/<mod folder>/` or `ModDev/<mod folder>/`.
 
 ## Mod Manager Backend API
 
-The Mod Manager exposes read-only helper methods for future UI screens and
-debug tooling.
+The Mod Manager exposes read-only helper methods for UI screens and debug
+tooling.
 
 ```ruby
 Reloaded::ModManager.mod_ids
@@ -324,10 +389,10 @@ Common status values:
 
 ## Mod Manager UI
 
-The first in-game Mod Manager UI is available from:
+The in-game Mod Manager UI is available from:
 
 ```text
-Options > MODS > Mod Manager
+Options -> Mods -> Mod Manager
 ```
 
 Current UI features:
@@ -339,7 +404,12 @@ Current UI features:
 - right-side mod details,
 - dependency and incompatibility details,
 - enable/disable through the active profile,
-- profile load order move up/down,
+- load order mode with pick-up/place controls,
+- installed mod update, changelog, settings, and uninstall actions,
+- Profiles footer page for profile management and profile code import/export,
+- Browser footer page for mod/profile downloads from the GitHub index,
+- Tools footer page for logs, backups, modder tools, publishing, and admin-only
+  index editing,
 - restart-required exit warning for mod load changes,
 - keyboard/controller and mouse hover/click support.
 
@@ -348,6 +418,74 @@ refreshes mod metadata. Changes that affect the loaded mod set or load order
 show a restart-required popup when leaving the full Mod Manager. Ruby scripts
 are not hot-loaded or unloaded while the game is running, so script changes
 should still be treated as restart-required.
+
+## Modder Tools
+
+The Mod Manager Tools page includes local utilities for mod development and
+debugging:
+
+```text
+Mod Manager -> Tools
+```
+
+Log Files:
+
+- `View Log.txt`
+- `View Mods.txt`
+- `View Coop.txt`
+- `View LatestBugReport.txt`
+- `Clear Logs`
+- `Export`
+
+Viewing a log opens the file directly from `Reloaded/Logging/`. Export uploads
+the selected log to `paste.rs` and copies the returned URL to the clipboard.
+`LatestBugReport.txt` is created automatically if it does not already exist.
+Clear Logs empties all Reloaded log files for a fresh troubleshooting run.
+
+Backup Mods:
+
+- `All Mods`
+- `Select Mods`
+
+Backups are written as timestamped `.zip` files under:
+
+```text
+ModsBackup/
+```
+
+Backups use the bundled `REQUIRED_BY_INSTALLER_UPDATER/7z.exe`. The profile
+folder `Mods/Reloaded/` is not included in mod backups.
+
+Tools menu order:
+
+- `Admin Tools` when local admin files are present
+- `Template Generator`
+- `Manifest Validator/Fixer`
+- `Log Files`
+- `Backup Mods`
+- `Publish`
+
+The manifest validator scans `Mods/` and enabled `ModDev/` folders and reports
+missing or invalid manifest fields. The fixer only applies safe structural
+defaults, such as missing `id`, `name`, `version`, `authors`, `dependencies`,
+`tags`, and `minimum_reloaded_version`. It does not rewrite mod code.
+
+The template generator can create:
+
+- a starter mod folder with `mod.json`, `Scripts/`, assets folders,
+  `Settings.json`, `Changelog.txt`, and documentation,
+- a starter profile under `Mods/Reloaded/Profiles/`.
+
+The backend API is:
+
+```ruby
+Reloaded::ModderTools.open_log("Log.txt")
+Reloaded::ModderTools.export_log("Mods.txt")
+Reloaded::ModderTools.backup_all_mods
+Reloaded::ModderTools.validate_manifests
+Reloaded::ModderTools.create_mod_template("My Mod")
+Reloaded::ModderTools.create_profile_template("My Profile")
+```
 
 ## Mod Manifest
 
@@ -363,17 +501,23 @@ Each mod must include `mod.json`:
   "minimum_reloaded_version": "1.0.0",
   "dependencies": [],
   "incompatible": [],
-  "tags": ["mod", "gameplay"]
+  "tags": ["mod", "gameplay"],
+  "changelogurl": "https://example.com/example_mod_changelog.txt"
 }
 ```
 
 Rules:
 
 - `id` must use lowercase letters, numbers, and underscores.
-- The mod folder name should match `id`.
+- `id` is the stable identifier Reloaded uses for profiles, dependencies,
+  browser entries, and published filenames.
+- The mod folder name does not need to match `id`.
 - `version` and `minimum_reloaded_version` use `Major.Minor.Patch`.
 - `authors`, `dependencies`, and `tags` are arrays.
 - `enabled` is legacy metadata; active profiles decide whether a mod loads.
+- `changelogurl` is optional and should point to a raw text changelog if used.
+  Mods can instead include a local `Changelog.txt`/`changelog.txt` in their mod
+  folder.
 - Dependencies load before mods that depend on them.
 
 `load_after`, `load_before`, `priority`, `type`, `scripts`, and
@@ -388,9 +532,19 @@ Reloaded/Core/005_ModManager.rb
 ```
 
 Author tags are grouped into role and content tags. System tags are assigned by
-Reloaded or the future Mod Manager.
+Reloaded or the Mod Manager.
 
 Unknown author tags log warnings rather than blocking a mod.
+
+Special entries are admin-controlled browser/index metadata. Mod authors cannot
+grant this placement through normal `mod.json` tags. `Special Entry`,
+and `Featured` are reserved admin labels; if they appear in normal mod tags,
+Reloaded ignores them as display tags and logs a warning.
+
+The current special-entry metadata is:
+
+- `featured`: curated/admin-highlighted entry. Shows above special entries.
+- `special_entry`: generic admin-highlighted entry shown above normal rows.
 
 ## Script Loading
 
@@ -446,13 +600,11 @@ The first resolver patches common helper paths:
 
 Reloaded does not globally patch `Bitmap.new` yet.
 
-## Future Sections
+## Planned Documentation Sections
 
 These sections should be added as the systems are created:
 
 - dependency rules,
 - custom content registration,
 - data patching,
-- asset overrides,
-- compatibility guidelines,
-- in-game settings integration.
+- compatibility guidelines.

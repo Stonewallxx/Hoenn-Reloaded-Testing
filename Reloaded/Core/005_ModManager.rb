@@ -21,44 +21,50 @@ end
 module Reloaded
   module ModManager
     ROOT = File.expand_path(File.join(File.dirname(__FILE__), ".."))
-    MODS_DIR = File.expand_path("./Mods")
-    MODDEV_DIR = File.expand_path("./ModDev")
+    GAME_ROOT = File.expand_path(File.join(ROOT, ".."))
+    MODS_DIR = File.join(GAME_ROOT, "Mods")
+    MODDEV_DIR = File.join(GAME_ROOT, "ModDev")
 
     DEFAULT_MODDEV_ENABLED = false
 
     AUTHOR_TAGS = {
       :role => [
-        "modpack",
-        "mod",
-        "patch",
-        "library"
+        "Mod",
+        "Patch",
+        "Library"
       ],
       :content => [
-        "gameplay",
-        "ui",
-        "graphics",
-        "audio",
-        "overhaul",
-        "balance",
-        "quality_of_life",
-        "story",
-        "maps",
-        "pokemon",
-        "items",
-        "abilities",
-        "moves",
-        "multiplayer"
+        "Gameplay",
+        "UI",
+        "Graphics",
+        "Audio",
+        "Overhaul",
+        "Balance",
+        "QoL",
+        "Story",
+        "Maps",
+        "Pokemon",
+        "Items",
+        "Abilities",
+        "Moves",
+        "Multiplayer"
       ]
     }.freeze
 
     SYSTEM_TAGS = [
-      "outdated",
-      "broken",
-      "missing_dependency",
-      "conflict",
-      "disabled",
-      "moddev",
-      "invalid"
+      "Outdated",
+      "Broken",
+      "Missing Dependency",
+      "Conflict",
+      "Disabled",
+      "ModDev",
+      "Invalid"
+    ].freeze
+
+    RESERVED_ADMIN_TAGS = [
+      "Special",
+      "Special Entry",
+      "Featured"
     ].freeze
 
     REQUIRED_FIELDS = [
@@ -82,6 +88,9 @@ module Reloaded
     @booted = false
     @moddev_enabled = nil
     @active_profile = nil
+    @profile_enabled_ids = []
+    @profile_disabled_ids = []
+    @profile_load_order = []
 
     class << self
       def boot
@@ -307,8 +316,15 @@ module Reloaded
           :warnings => Array(mod[:warnings]).map(&:to_s),
           :errors => Array(mod[:errors]).map(&:to_s),
           :scripts_loaded => scripts_loaded_for(id),
+          :settings_count => Array(mod[:settings_defs]).length,
+          :has_settings => Array(mod[:settings_defs]).length > 0,
           :moddev => mod[:source] == :moddev
         }
+      end
+
+      def settings_defs(mod_id)
+        mod = @mods[normalize_mod_id(mod_id)]
+        mod ? Array(mod[:settings_defs]).map { |setting| setting.dup } : []
       end
 
       def dependency_status_entry(mod, dependency)
@@ -337,11 +353,11 @@ module Reloaded
       end
 
       def profile_enabled?(mod_id)
-        defined?(Reloaded::Profiles) ? Reloaded::Profiles.enabled_mod_ids.include?(normalize_mod_id(mod_id)) : false
+        @profile_enabled_ids.include?(normalize_mod_id(mod_id))
       end
 
       def profile_disabled?(mod_id)
-        defined?(Reloaded::Profiles) ? Reloaded::Profiles.disabled_mod_ids.include?(normalize_mod_id(mod_id)) : false
+        @profile_disabled_ids.include?(normalize_mod_id(mod_id))
       end
 
       def loaded_mod_id?(mod_id)
@@ -368,7 +384,12 @@ module Reloaded
         @loaded_mods = []
         @skipped_mods = []
         @script_count = 0
-        @active_profile = defined?(Reloaded::Profiles) ? Reloaded::Profiles.active : nil
+        @active_profile = if defined?(Reloaded::Profiles)
+                            Reloaded::Profiles.load_active_profile
+                          else
+                            nil
+                          end
+        cache_profile_state(@active_profile)
       end
 
       def scan_folder(root, source)
@@ -396,6 +417,7 @@ module Reloaded
           :system_tags => [],
           :enabled => data.has_key?("enabled") ? !!data["enabled"] : true,
           :manifest_enabled => data.has_key?("enabled") ? !!data["enabled"] : true,
+          :settings_defs => read_settings_defs(folder_path),
           :manifest => data,
           :manifest_path => manifest_path.gsub("\\", "/"),
           :folder_path => folder_path.gsub("\\", "/"),
@@ -424,7 +446,65 @@ module Reloaded
 
       def parse_json(raw)
         raise "JSON parser is not available" unless defined?(JSON)
-        JSON.parse(raw)
+        stringify_json_keys(JSON.parse(raw))
+      end
+
+      def stringify_json_keys(value)
+        case value
+        when Hash
+          value.each_with_object({}) do |(key, child), memo|
+            memo[key.to_s] = stringify_json_keys(child)
+          end
+        when Array
+          value.map { |child| stringify_json_keys(child) }
+        else
+          value
+        end
+      end
+
+      def read_settings_defs(folder_path)
+        path = File.join(folder_path, "Settings.json")
+        return [] unless File.exist?(path)
+        normalize_settings_defs(parse_json(File.read(path)))
+      rescue Exception => e
+        Reloaded::Log.warning("Settings.json could not be parsed for #{File.basename(folder_path)}: #{e.class}: #{e}", :mods) if defined?(Reloaded::Log)
+        []
+      end
+
+      def normalize_settings_defs(data)
+        entries = if data.is_a?(Hash) && data["settings"].is_a?(Hash)
+                    data["settings"].map { |key, value| value.is_a?(Hash) ? value.merge("key" => key.to_s) : nil }
+                  elsif data.is_a?(Hash) && data["settings"].is_a?(Array)
+                    data["settings"]
+                  elsif data.is_a?(Hash)
+                    data.map { |key, value| value.is_a?(Hash) ? value.merge("key" => key.to_s) : nil }
+                  elsif data.is_a?(Array)
+                    data
+                  else
+                    []
+                  end
+        entries.compact.select { |entry| entry.is_a?(Hash) && !entry["key"].to_s.empty? }.map do |entry|
+          normalize_setting_def(entry)
+        end.compact
+      end
+
+      def normalize_setting_def(entry)
+        type = entry["type"].to_s.downcase
+        key = entry["key"].to_s.strip
+        return nil if key.empty?
+        {
+          "key" => key,
+          "type" => type,
+          "label" => (entry["label"] || entry["description"] || key).to_s,
+          "description" => entry["description"].to_s,
+          "default" => entry["default"],
+          "options" => entry["options"].is_a?(Array) ? entry["options"].map(&:to_s) : [],
+          "min" => entry.has_key?("min") ? entry["min"] : nil,
+          "max" => entry.has_key?("max") ? entry["max"] : nil,
+          "step" => entry.has_key?("step") ? entry["step"] : nil,
+          "restart_required" => truthy?(entry["restart_required"]),
+          "category" => entry["category"].to_s
+        }
       end
 
       def validate_candidate(candidate)
@@ -439,7 +519,6 @@ module Reloaded
         errors << "authors must be a non-empty array" unless candidate[:authors].is_a?(Array) && !candidate[:authors].empty?
         errors << "dependencies must be an array" unless candidate[:dependencies].is_a?(Array)
         errors << "tags must be an array" unless candidate[:tags].is_a?(Array)
-        errors << "folder name should match id" unless candidate[:folder_name].to_s.downcase == candidate[:id]
         if valid_version?(candidate[:minimum_reloaded_version]) && compare_versions(reloaded_version, candidate[:minimum_reloaded_version]) < 0
           errors << "Requires Reloaded #{candidate[:minimum_reloaded_version]} or newer"
           candidate[:system_tags] << "outdated"
@@ -450,17 +529,20 @@ module Reloaded
       end
 
       def validate_tags(candidate)
-        allowed = (AUTHOR_TAGS.values.flatten + SYSTEM_TAGS).uniq
-        candidate[:tags].each do |tag|
-          candidate[:warnings] << "Unknown tag: #{tag}" unless allowed.include?(tag)
+        allowed = (AUTHOR_TAGS.values.flatten + SYSTEM_TAGS).map { |tag| tag_key(tag) }.uniq
+        candidate[:tags] = candidate[:tags].reject do |tag|
+          if reserved_admin_tag?(tag)
+            candidate[:warnings] << "Reserved admin tag ignored: #{tag}"
+            true
+          else
+            candidate[:warnings] << "Unknown tag: #{tag}" unless allowed.include?(tag_key(tag))
+            false
+          end
         end
       end
 
       def validate_optional_folders(candidate)
-        ["Settings.json"].each do |file|
-          next unless File.exist?(File.join(candidate[:folder_path], file))
-          candidate[:warnings] << "#{file} is reserved for future Mod Manager settings support"
-        end
+        nil
       end
 
       def register_valid_candidate(candidate)
@@ -489,12 +571,18 @@ module Reloaded
 
       def apply_profile_state
         if defined?(Reloaded::Profiles)
-          missing = Reloaded::Profiles.missing_mod_ids(@mods.keys)
+          @active_profile = Reloaded::Profiles.refresh!
+          cache_profile_state(@active_profile)
+          enabled_ids = @profile_enabled_ids
+          disabled_ids = @profile_disabled_ids
+          missing = (@profile_enabled_ids + @profile_disabled_ids + @profile_load_order).uniq - normalize_string_array(@mods.keys)
           missing.each do |id|
             Reloaded::Log.warning("Active profile references missing mod: #{id}", :mods) if defined?(Reloaded::Log)
           end
+          Reloaded::Log.debug("Applying profile state: enabled=#{enabled_ids.join(",")} disabled=#{disabled_ids.join(",")}", :mods) if defined?(Reloaded::Log)
           @mods.each_value do |mod|
-            mod[:enabled] = Reloaded::Profiles.enabled?(mod[:id])
+            id = normalize_mod_id(mod[:id])
+            mod[:enabled] = enabled_ids.include?(id) && !disabled_ids.include?(id)
             mod[:system_tags] << "disabled" unless mod[:enabled] || mod[:system_tags].include?("disabled")
           end
         else
@@ -648,6 +736,14 @@ module Reloaded
         value.map { |entry| entry.to_s.strip.downcase }.reject { |entry| entry.empty? }
       end
 
+      def tag_key(value)
+        value.to_s.downcase.gsub(/[^a-z0-9]+/, "")
+      end
+
+      def reserved_admin_tag?(tag)
+        RESERVED_ADMIN_TAGS.map { |reserved| tag_key(reserved) }.include?(tag_key(tag))
+      end
+
       def normalize_mod_id(value)
         value.to_s.strip.downcase
       end
@@ -682,9 +778,23 @@ module Reloaded
 
       def ordered_ids
         if defined?(Reloaded::Profiles)
-          Reloaded::Profiles.ordered_mod_ids(@mods.keys)
+          available = normalize_string_array(@mods.keys)
+          ordered = @profile_load_order.select { |id| available.include?(id) }
+          ordered + (available - ordered).sort
         else
           @mods.keys.sort
+        end
+      end
+
+      def cache_profile_state(profile)
+        if defined?(Reloaded::Profiles) && profile
+          @profile_enabled_ids = Reloaded::Profiles.profile_enabled_mod_ids(profile)
+          @profile_disabled_ids = Reloaded::Profiles.profile_disabled_mod_ids(profile)
+          @profile_load_order = Reloaded::Profiles.profile_load_order(profile)
+        else
+          @profile_enabled_ids = []
+          @profile_disabled_ids = []
+          @profile_load_order = []
         end
       end
 

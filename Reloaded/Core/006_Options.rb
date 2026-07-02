@@ -537,6 +537,7 @@ module Reloaded
         )
         append_collapsible(master, "MODS", [
           mod_manager_option,
+          mod_settings_option,
           moddev_option
         ])
         append_collapsible(master, "DEVELOPER", [logging_mode_option])
@@ -754,6 +755,21 @@ module Reloaded
             end
           },
           _INTL("Open the Reloaded Mod Manager.")
+        )
+      end
+
+      def mod_settings_option
+        ActionButton.new(
+          _INTL("Mod Settings"),
+          proc {
+            if defined?(Reloaded::ModSettingsUI)
+              restart_required = Reloaded::ModSettingsUI.open
+              pbMessage(_INTL("Changes have been made.\nRestart Required")) if restart_required
+            else
+              pbMessage(_INTL("The Reloaded Mod Settings UI is not loaded.")) rescue nil
+            end
+          },
+          _INTL("Open settings pages exposed by installed Reloaded mods.")
         )
       end
 

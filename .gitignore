@@ -31,6 +31,22 @@ Data/pokedex/dex.json
 Data/sprites/*
 Data/bases/*
 
+# Reloaded user/runtime data
+Mods/*
+!Mods/Reloaded/
+!Mods/Reloaded/.gitkeep
+!Mods/Reloaded/Profiles/
+Mods/Reloaded/Profiles/*
+!Mods/Reloaded/Profiles/.gitkeep
+ModDev/*
+!Modders Tools/
+Modders Tools/_repo_cache/
+Modders Tools/*.tmp
+Admin Tools/
+Reloaded/Settings.txt
+Reloaded/Logging/*.txt
+Reloaded/Logging/Reports/*
+
 #THE REST
 Data/VERSION
 infinitefusion.sh

@@ -89,6 +89,10 @@ module Reloaded
       def boot_core_systems
         boot_system("Profiles", Reloaded::Profiles) if defined?(Reloaded::Profiles)
         boot_system("ModManager", Reloaded::ModManager) if defined?(Reloaded::ModManager)
+        boot_system("ModSettings", Reloaded::ModSettings) if defined?(Reloaded::ModSettings)
+        boot_system("ProfileCodes", Reloaded::ProfileCodes) if defined?(Reloaded::ProfileCodes)
+        boot_system("ModBrowser", Reloaded::ModBrowser) if defined?(Reloaded::ModBrowser)
+        boot_system("Publisher", Reloaded::Publisher) if defined?(Reloaded::Publisher)
       end
 
       def boot_system(label, system)

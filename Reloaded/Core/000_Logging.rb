@@ -225,6 +225,10 @@ module Reloaded
         @counts = Hash.new(0)
       end
 
+      def sanitize(value)
+        sanitize_text(value)
+      end
+
       private
 
       def ensure_dirs
