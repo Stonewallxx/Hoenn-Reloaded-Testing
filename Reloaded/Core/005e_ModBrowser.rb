@@ -137,10 +137,10 @@ module Reloaded
       end
 
       def download_mods(mod_ids, enable: false, versions: {})
-        plan = resolve_mod_ids(mod_ids, fetch_remote: true, versions: versions)
+        plan = build_download_plan(mod_ids, versions: versions, fetch_remote: true)
         installed = []
-        failed = plan[:missing].dup
-        plan[:found].each do |item|
+        failed = plan[:missing].dup + plan[:version_mismatches].map { |entry| entry[:id] }
+        plan[:entries].each do |item|
           id = item["id"].to_s
           if item["download_url"].to_s.strip.empty?
             failed << id
@@ -155,13 +155,40 @@ module Reloaded
         end
         Reloaded::ModManager.refresh_metadata if defined?(Reloaded::ModManager)
         if enable && defined?(Reloaded::Profiles)
-          installed.each { |id| Reloaded::Profiles.enable_mod(id) }
+          (installed + plan[:already_installed]).uniq.each { |id| Reloaded::Profiles.enable_mod(id) }
         end
         {
           :installed => installed.uniq,
           :failed => failed.uniq,
-          :missing => plan[:missing].uniq
+          :missing => plan[:missing].uniq,
+          :already_installed => plan[:already_installed].uniq,
+          :dependencies => plan[:dependencies].uniq,
+          :requested => plan[:requested].uniq,
+          :version_mismatches => plan[:version_mismatches]
         }
+      end
+
+      def build_download_plan(mod_ids, versions: {}, fetch_remote: true)
+        refresh(fetch_remote: fetch_remote) if fetch_remote || @entries.empty?
+        plan = {
+          :entries => [],
+          :requested => [],
+          :dependencies => [],
+          :missing => [],
+          :already_installed => [],
+          :version_mismatches => []
+        }
+        version_map = normalize_version_map(versions)
+        visiting = {}
+        visited = {}
+        normalize_string_array(mod_ids).each do |id|
+          collect_download_entry(id, version_map[id], nil, plan, visiting, visited, true)
+        end
+        plan[:missing].uniq!
+        plan[:already_installed].uniq!
+        plan[:requested].uniq!
+        plan[:dependencies].uniq!
+        plan
       end
 
       def import_published_profile(profile_id, download_missing: true, enable_missing: true, activate: true)
@@ -191,9 +218,13 @@ module Reloaded
           return {
             :success => false,
             :profile => nil,
-            :missing => missing,
+            :missing_profile_mods => missing,
+            :missing => Array(result[:missing]),
             :installed => installed,
-            :failed => failed
+            :failed => failed,
+            :already_installed => Array(result[:already_installed]),
+            :dependencies => Array(result[:dependencies]),
+            :version_mismatches => Array(result[:version_mismatches])
           } unless failed.empty?
         end
         disable_ids = enable_missing ? [] : installed
@@ -201,9 +232,12 @@ module Reloaded
         {
           :success => true,
           :profile => profile,
-          :missing => missing,
+          :missing_profile_mods => missing,
+          :missing => [],
           :installed => installed,
-          :failed => failed
+          :failed => failed,
+          :already_installed => [],
+          :dependencies => []
         }
       end
 
@@ -251,6 +285,81 @@ module Reloaded
       end
 
       private
+
+      def collect_download_entry(id, exact_version, minimum_version, plan, visiting, visited, requested)
+        mod_id = normalize_mod_id(id)
+        return if mod_id.empty?
+        plan[requested ? :requested : :dependencies] << mod_id
+        if !requested && installed_version_satisfies?(mod_id, minimum_version)
+          plan[:already_installed] << mod_id
+          return
+        end
+        key = "#{mod_id}@#{exact_version || minimum_version}"
+        return if visited[key]
+        if visiting[key]
+          log("Dependency cycle found while planning download for #{mod_id}", :warning)
+          return
+        end
+        visiting[key] = true
+        item = if exact_version && !exact_version.to_s.empty?
+                 entry_for(mod_id, exact_version)
+               elsif minimum_version && !minimum_version.to_s.empty?
+                 entry_for_minimum_version(mod_id, minimum_version)
+               else
+                 entry_for(mod_id)
+               end
+        if item.nil?
+          if minimum_version && !minimum_version.to_s.empty? && @entries[mod_id]
+            plan[:version_mismatches] << {
+              :id => mod_id,
+              :required_version => minimum_version.to_s,
+              :available_version => @entries[mod_id]["latest_version"].to_s
+            }
+          else
+            plan[:missing] << mod_id
+          end
+          visiting.delete(key)
+          visited[key] = true
+          return
+        end
+        Array(item["dependencies"]).each do |dependency|
+          collect_download_entry(dependency["id"], nil, dependency["version"], plan, visiting, visited, false)
+        end
+        plan[:entries] << item unless plan[:entries].any? { |entry| entry["id"] == item["id"] }
+        visiting.delete(key)
+        visited[key] = true
+      end
+
+      def entry_for_minimum_version(mod_id, minimum_version)
+        item = @entries[normalize_mod_id(mod_id)]
+        return nil unless item
+        minimum = minimum_version.to_s
+        selected = Array(item["versions"]).find do |entry|
+          !entry["version"].to_s.empty? && compare_versions(entry["version"], minimum) >= 0
+        end
+        selected ? with_version(item, selected["version"]) : nil
+      end
+
+      def installed_version_satisfies?(mod_id, minimum_version)
+        return false unless defined?(Reloaded::ModManager)
+        row = Reloaded::ModManager.mod_row(mod_id)
+        return false unless row
+        minimum = minimum_version.to_s
+        return true if minimum.empty?
+        compare_versions(row[:version], minimum) >= 0
+      rescue
+        false
+      end
+
+      def compare_versions(left, right)
+        a = left.to_s.split(".").map(&:to_i)
+        b = right.to_s.split(".").map(&:to_i)
+        3.times do |i|
+          result = (a[i] || 0) <=> (b[i] || 0)
+          return result unless result == 0
+        end
+        0
+      end
 
       def load_sources
         sources = [{

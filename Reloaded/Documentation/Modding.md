@@ -355,6 +355,19 @@ Example species ability patch:
 existing species. Use `replace` and provide the full arrays. Broad species data
 patching is still future work.
 
+Trainer patches:
+
+- use `trainers.classic`, `trainers.remix`, or `trainers.expert`,
+- target trainers by `TRAINER_TYPE|Trainer Name|Version`,
+- can patch party Pokemon, held items, trainer battle items, trainer info text,
+  battle intro text, lose text, and rematch text fields,
+- validate species, moves, items, abilities, party slots, and missing trainer
+  targets before runtime data is applied.
+
+Trainer type patches use `trainer_types` for trainer-class-wide data such as
+AI skill level, AI flags/skill code, and reward money multipliers. These affect
+every trainer using that trainer type while the mod is enabled.
+
 Runtime access:
 
 ```ruby
@@ -803,7 +816,13 @@ Rules:
 - `changelogurl` is optional and should point to a raw text changelog if used.
   Mods can instead include a local `Changelog.txt`/`changelog.txt` in their mod
   folder.
-- Dependencies load before mods that depend on them.
+- Dependencies load before mods that depend on them. Dependency `version`
+  values are minimum required versions, not exact locks.
+- If a dependency is missing, disabled in the active profile, or installed below
+  the required version, Reloaded skips the dependent mod and reports the exact
+  reason in the dependency details/logs.
+- Browser downloads install dependency chains before the selected mod when the
+  required dependency entries exist in the GitHub index.
 
 `load_after`, `load_before`, `priority`, `type`, `scripts`, and
 `minimum_base_version` are not part of the current manifest format.

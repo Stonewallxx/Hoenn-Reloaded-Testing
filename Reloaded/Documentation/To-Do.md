@@ -27,8 +27,8 @@ immediately.
 
 ## Modding Documentation
 
-- Add dependency rules once finalized.
 - Add compatibility guidelines after patch/data systems mature.
+- Add more worked examples as real mods begin using the public APIs.
 
 ## Events
 
@@ -69,7 +69,7 @@ immediately.
 - Direct `Bitmap.new` asset redirect review if needed.
 - Dedicated Profile page load order editor, if the installed-list Load Order
   mode proves too limited.
-- Mod Browser polish: richer changelog display, better source failure messages,
-  and clearer installed/update states.
+- Mod Browser polish: richer changelog display and clearer installed/update
+  states.
 - Remaining Modders Tools from the reference folder, reviewed and rebuilt only
   where they still fit the new Reloaded foundation.

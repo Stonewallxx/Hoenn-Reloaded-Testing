@@ -65,6 +65,9 @@ The Mod Manager uses the active profile after scanning and validating manifests.
 - If a profile references a missing mod, Reloaded logs a warning.
 - If an enabled mod depends on a disabled mod, the enabled mod is skipped for a
   missing disabled dependency.
+- If an enabled mod depends on a newer dependency version than the installed
+  one, the enabled mod is skipped and the dependency details show the installed
+  and required versions.
 
 ## Profile API
 
@@ -130,6 +133,12 @@ newly downloaded missing mods disabled.
 
 `Download & Enable` installs the missing mods, then imports the new profile
 normally.
+
+Both profile-code imports and published-profile imports use the browser
+download planner. That planner also resolves dependency chains for downloaded
+mods, reuses already installed dependencies that satisfy the minimum version,
+and reports whether a failure came from a missing browser entry, a too-old
+indexed dependency, or a download/install failure.
 
 ## In-Game Profile Page
 

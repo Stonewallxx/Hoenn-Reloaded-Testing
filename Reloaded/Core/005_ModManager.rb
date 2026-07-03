@@ -330,7 +330,7 @@ module Reloaded
       end
 
       def dependency_status_entry(mod, dependency)
-        dep_id = dependency[:id].to_s.downcase
+        dep_id = normalize_mod_id(dependency[:id])
         required = dependency[:version].to_s
         required = nil if required.empty?
         dep_mod = @mods[dep_id]
@@ -350,8 +350,24 @@ module Reloaded
           :installed_version => dep_mod ? dep_mod[:version] : nil,
           :installed => !dep_mod.nil?,
           :enabled => dep_mod ? !!dep_mod[:enabled] : false,
-          :status => status
+          :status => status,
+          :status_text => dependency_status_text(status, dep_mod, required)
         }
+      end
+
+      def dependency_status_text(status, dep_mod, required)
+        case status
+        when :ok
+          required ? "Installed and enabled. Requires v#{required} or newer." : "Installed and enabled."
+        when :missing
+          required ? "Missing. Requires v#{required} or newer." : "Missing."
+        when :disabled
+          "Installed but disabled in the active profile."
+        when :version_mismatch
+          "Installed v#{dep_mod ? dep_mod[:version] : "unknown"}, requires v#{required} or newer."
+        else
+          status.to_s
+        end
       end
 
       def profile_enabled?(mod_id)
@@ -640,18 +656,20 @@ module Reloaded
         end
         visiting[id] = true
         mod[:dependencies].each do |dependency|
-          dep_id = dependency[:id]
+          dep_id = normalize_mod_id(dependency[:id])
+          required = dependency[:version].to_s
+          required = nil if required.empty?
           dep_mod = @mods[dep_id]
           if dep_mod.nil?
-            mark_missing_dependency(mod, dep_id)
+            mark_missing_dependency(mod, "#{dep_id} (not installed)")
             next
           end
           unless dep_mod[:enabled]
-            mark_missing_dependency(mod, "#{dep_id} (disabled)")
+            mark_missing_dependency(mod, "#{dep_id} (installed but disabled in profile #{active_profile_name})")
             next
           end
-          if dependency[:version] && compare_versions(dep_mod[:version], dependency[:version]) < 0
-            mark_missing_dependency(mod, "#{dep_id} >= #{dependency[:version]}")
+          if required && compare_versions(dep_mod[:version], required) < 0
+            mark_missing_dependency(mod, "#{dep_id} requires v#{required} or newer; installed v#{dep_mod[:version]}")
             next
           end
           visit_mod(dep_id, ordered, visiting, visited)
@@ -757,11 +775,11 @@ module Reloaded
         value.map do |entry|
           if entry.is_a?(Hash)
             {
-              :id => (entry["id"] || entry["mod_id"] || entry["uid"]).to_s,
+              :id => normalize_mod_id(entry["id"] || entry["mod_id"] || entry["uid"]),
               :version => (entry["version"] || entry["minimum_version"] || entry["min_version"])
             }
           else
-            { :id => entry.to_s, :version => nil }
+            { :id => normalize_mod_id(entry), :version => nil }
           end
         end.reject { |entry| entry[:id].empty? }
       end

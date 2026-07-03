@@ -15,8 +15,8 @@
 `Reloaded::DataPatches` lets enabled mods add or change structured runtime data
 without replacing whole base game files.
 
-This first layer is intentionally conservative. It collects, validates, logs,
-and applies JSON-style runtime data only. It does not permanently rewrite base
+This runtime layer is intentionally conservative. It collects, validates, logs,
+and applies JSON-style data in memory only. It does not permanently rewrite base
 game `.dat`, `.rxdata`, `.json`, or PBS files.
 
 ## Folder Layout
@@ -969,11 +969,11 @@ Data patch code lives in the `008` core range:
 - `008e_DataPatchSpecies.rb` - active bridge for species core data, learnsets,
   evolutions, and ability lists.
 - `008f_DataPatchTrainers.rb` - active bridge for classic, remix, and expert
-  trainer party data.
+  trainer parties, trainer bag items, held items, text metadata, and validation.
 - `008g_DataPatchEncounters.rb` - active encounter bridge for classic, remix,
   and randomized wild encounter tables.
 - `008i_DataPatchTrainerTypes.rb` - active bridge for trainer type AI skill
-  data and skill code flags.
+  data, skill code flags, and reward money multipliers.
 - `008h_DataPatchQuests.rb` - reserved quest bridge.
 
 Reserved bridge files are intentionally loaded but inactive. They give future

@@ -205,6 +205,20 @@ module Reloaded
         draw_hint_text(bitmap, text, 2, height - 20, width - 12, 16, 0, 0)
       end
 
+      def download_failure_message(result)
+        lines = ["Could not download:"]
+        missing = Array(result[:missing])
+        mismatches = Array(result[:version_mismatches])
+        failed = Array(result[:failed]) - missing - mismatches.map { |entry| entry[:id].to_s }
+        lines << "Missing from browser index: #{missing.join(", ")}" unless missing.empty?
+        mismatches.each do |entry|
+          lines << "#{entry[:id]} needs v#{entry[:required_version]} or newer. Latest indexed: v#{entry[:available_version]}."
+        end
+        lines << "Failed install/download: #{failed.join(", ")}" unless failed.empty?
+        lines << "No details returned." if lines.length == 1
+        lines.join("\n")
+      end
+
       def footer_button_rect(index, buttons)
         count = [buttons.length, 1].max
         width = SCREEN_W / count
@@ -1347,7 +1361,7 @@ module Reloaded
           failed = Array(result[:failed])
           installed = Array(result[:installed])
           unless failed.empty?
-            show_message("Some mods could not be downloaded:\n#{failed.join(", ")}")
+            show_message(download_failure_message(result))
             return
           end
           disable_after_download = installed if choice == 0
@@ -2095,7 +2109,7 @@ module Reloaded
           show_message(enable ? "Downloaded and enabled." : "Downloaded.")
           return true
         else
-          show_message("Could not download:\n#{failed.join(", ")}")
+          show_message(download_failure_message(result))
           return false
         end
       rescue Exception => e
@@ -2121,13 +2135,7 @@ module Reloaded
         item["latest_version"] = selected["version"].to_s
         item["download_url"] = selected["download_url"].to_s
         item["dependencies"] = selected["dependencies"] if selected.has_key?("dependencies")
-        ok = Reloaded::ModBrowser.download_and_install(item)
-        if ok
-          Reloaded::Profiles.enable_mod(row["id"]) if enable && defined?(Reloaded::Profiles)
-          { :installed => [row["id"]], :failed => [], :missing => [] }
-        else
-          { :installed => [], :failed => [row["id"]], :missing => [] }
-        end
+        Reloaded::ModBrowser.download_mods([row["id"]], enable: enable, versions: { row["id"] => selected["version"].to_s })
       end
 
       def installed_mod_version(mod_id)
@@ -2165,9 +2173,7 @@ module Reloaded
           draw_all
           show_message("Profile imported.")
         else
-          failed = Array(result[:failed])
-          missing = Array(result[:missing])
-          show_message("Profile import failed.\nMissing: #{missing.join(", ")}\nFailed: #{failed.join(", ")}")
+          show_message("Profile import failed.\n#{download_failure_message(result)}")
         end
       rescue Exception => e
         Reloaded::Log.exception("Published profile import failed", e, channel: :mods) if defined?(Reloaded::Log)
@@ -3241,7 +3247,9 @@ module Reloaded
           return
         end
         lines = deps.map do |dep|
-          "#{dep[:name]} - #{dep[:status]}#{dep[:required_version] ? " >= #{dep[:required_version]}" : ""}"
+          text = dep[:status_text].to_s
+          text = dep[:status].to_s if text.empty?
+          "#{dep[:name]} - #{text}"
         end
         show_message(lines.join("\n"))
       end

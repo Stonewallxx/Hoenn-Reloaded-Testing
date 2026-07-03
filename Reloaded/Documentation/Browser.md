@@ -92,7 +92,9 @@ Recommended format:
       "authors": ["Mod Author"],
       "description": "Short description.",
       "tags": ["gameplay"],
-      "dependencies": [],
+      "dependencies": [
+        { "id": "example_library", "version": "1.0.0" }
+      ],
       "changelogurl": "https://example.com/example_mod_changelog.txt",
       "versions": [
         {
@@ -135,6 +137,12 @@ Recommended format:
 `author` is accepted as an alias for `authors`.
 
 `url` is accepted as an alias for `download_url`.
+
+`dependencies` entries use mod IDs and optional minimum versions. The browser
+download planner installs dependencies before the selected mod. If a dependency
+is already installed at the required version or newer, it is reused instead of
+downloaded again. If the dependency cannot be found in the GitHub index, or the
+index has no version new enough, the UI reports that specifically.
 
 `changelogurl` may point to a raw text file. The Mod Browser exposes it through
 `View Changelog` and displays the text in the right panel with scrolling.
@@ -199,6 +207,11 @@ The player-facing choices are:
 - `Download & Enable` - install missing mods, then import the profile normally.
 - `Back` - cancel the import.
 
+Missing profile mods are resolved through the browser index. Their own
+dependencies are also planned and installed. Profile mod versions are treated as
+exact requests when the index has that version; dependency versions are treated
+as minimum required versions.
+
 ## API
 
 ```ruby
@@ -209,6 +222,7 @@ Reloaded::ModBrowser.profile_entries
 Reloaded::ModBrowser.entry("example_mod")
 Reloaded::ModBrowser.entry_for("example_mod", "1.0.0")
 Reloaded::ModBrowser.resolve_mod_ids(["example_mod"])
+Reloaded::ModBrowser.build_download_plan(["example_mod"])
 Reloaded::ModBrowser.download_mods(["example_mod"], enable: true)
 Reloaded::ModBrowser.import_published_profile("challenge_profile")
 ```

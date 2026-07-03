@@ -29,11 +29,13 @@ Hoenn Reloaded currently has the following framework systems in place:
 - Reloaded save bucket through `Reloaded::SaveData`.
 - Runtime asset resolver for active mod assets.
 - Mod scanning, validation, dependency-safe load ordering, and script loading.
+- Browser-backed dependency-chain downloads with clearer missing, disabled, and
+  version-mismatch reporting.
 - Runtime data patch collector and JSON-style data registry in the `008` core
   range.
 - Active item, move, ability, species core, species learnset, species evolution,
-  species ability list, encounter, and outfit data patch targets, with reserved
-  bridge files for future trainer and quest targets.
+  species ability list, trainer, trainer type, encounter, and outfit data patch
+  targets, with a reserved bridge file for future quest data.
 - Runtime core fixes in `Reloaded/Core/009_CoreFixes.rb`, currently including
   the locked overworld Pokemon interaction battle fix.
 - Script-facing Ability API for registering modded ability behavior through the
@@ -95,8 +97,8 @@ Mod authors should use:
 - `Reloaded::ModSettings` for profile-backed mod settings.
 - `Reloaded::Assets` indirectly by placing assets in the mod folder.
 - `Reloaded::DataPatches` for runtime item, move, ability, species core,
-  species learnset, species evolution, species ability list, encounter, and
-  outfit data.
+  species learnset, species evolution, species ability list, trainer, trainer
+  type, encounter, and outfit data.
 - `Reloaded::Abilities` for custom ability behavior.
 
 ## Version And Update Notes
@@ -147,10 +149,8 @@ applies the current versioned window title again during boot.
 The foundation is usable for early Reloaded modding, but these areas still need
 future work:
 
-- Direct base game data patch targets for species forms, trainers, maps, and
-  quests.
+- Direct base game data patch targets for species forms, safe map/event edits,
+  and quests.
 - Economy/Reloaded Mart system for shop behavior and mart stock.
-- Stronger compatibility/dependency documentation as real mod conflicts appear.
 - More official event bridge points as real integration points are needed.
-- Mod Browser polish and richer source failure reporting.
 - Remaining Modders Tools review against the reference folder.
