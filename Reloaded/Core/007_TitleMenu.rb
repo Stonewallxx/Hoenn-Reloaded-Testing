@@ -210,6 +210,7 @@ if defined?(PokemonLoadScreen)
     type: :replace,
     file: "Reloaded/Core/007_TitleMenu.rb",
     reason: "Adds Mod Manager above Options in the title menu while preserving title command indexes.",
-    recommended_fix: "Recompare with base PokemonLoadScreen#pbStartLoadScreen after title menu updates."
+    recommended_fix: "Recompare with base PokemonLoadScreen#pbStartLoadScreen after title menu updates.",
+    conflict_group: "title_load_screen"
   ) if defined?(Reloaded::Patches)
 end

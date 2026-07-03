@@ -1,0 +1,298 @@
+#======================================================
+# Reloaded Data Patch Items
+# Author: Stonewall
+#======================================================
+# Direct runtime data patch target for base-game item data.
+#
+# Responsibilities:
+#   - Register the item data patch target.
+#   - Apply patched item entries to GameData::Item::DATA.
+#   - Refresh the item target after GameData.load_all refreshes base data.
+#   - Restore Reloaded-managed item entries before each rebuild.
+#   - Provide safe text fallbacks for modded item names and descriptions.
+#   - Register the item data patch bridge with Reloaded::Patches.
+#
+#======================================================
+
+module Reloaded
+  module DataPatchItems
+    TARGET = "items".freeze
+
+    ITEM_FIELDS = [
+      "id",
+      "id_number",
+      "name",
+      "name_plural",
+      "pocket",
+      "price",
+      "description",
+      "field_use",
+      "battle_use",
+      "type",
+      "move"
+    ].freeze
+
+    @base_entries = {}
+    @managed_symbols = []
+    @managed_numbers = []
+
+    class << self
+      def install
+        install_text_fallbacks
+        register_target
+        register_events
+        register_patch_point
+        Reloaded::Log.info("Installed Reloaded item data patch bridge", :mods) if defined?(Reloaded::Log)
+        true
+      rescue Exception => e
+        Reloaded::Log.exception("Item data patch bridge install failed", e, channel: :mods) if defined?(Reloaded::Log)
+        false
+      end
+
+      def register_target
+        return unless defined?(Reloaded::DataPatches)
+        refresh_base_entries
+        Reloaded::DataPatches.register_target(
+          TARGET,
+          @base_entries,
+          owner: :reloaded,
+          description: "Runtime item data patch target."
+        )
+      end
+
+      def apply_all
+        return false unless defined?(GameData::Item)
+        restore_managed_entries
+        touched_ids = patched_item_ids
+        applied = 0
+        touched_ids.each do |id|
+          raw_data = Reloaded::DataPatches.entry(TARGET, id)
+          applied += 1 if apply_entry(id, raw_data)
+        end
+        log_applied(applied) if applied > 0
+        true
+      rescue Exception => e
+        Reloaded::Log.exception("Failed to apply item data patches", e, channel: :mods) if defined?(Reloaded::Log)
+        false
+      end
+
+      private
+
+      def refresh_base_entries
+        @base_entries = {}
+        return unless defined?(GameData::Item)
+        GameData::Item::DATA.each do |key, item|
+          next if key.is_a?(Integer)
+          next unless item.is_a?(GameData::Item)
+          @base_entries[key.to_s] = item_to_hash(item)
+        end
+        @base_entries
+      end
+
+      def item_to_hash(item)
+        {
+          "id" => item.id.to_s,
+          "id_number" => item.id_number,
+          "name" => item.real_name,
+          "name_plural" => item.real_name_plural,
+          "pocket" => item.pocket,
+          "price" => item.price,
+          "description" => item.real_description,
+          "field_use" => item.field_use,
+          "battle_use" => item.battle_use,
+          "type" => item.type,
+          "move" => item.move ? item.move.to_s : nil
+        }
+      end
+
+      def restore_managed_entries
+        return unless defined?(GameData::Item)
+        Array(@managed_numbers).each { |key| GameData::Item::DATA.delete(key) }
+        Array(@managed_symbols).each do |key|
+          if @base_entries.key?(key.to_s)
+            restore_base_entry(key.to_s)
+          else
+            GameData::Item::DATA.delete(key)
+          end
+        end
+        @managed_symbols = []
+        @managed_numbers = []
+      end
+
+      def restore_base_entry(id)
+        data = normalize_data(id, @base_entries[id])
+        item = GameData::Item.new(data)
+        GameData::Item::DATA[data[:id]] = item
+        GameData::Item::DATA[data[:id_number]] = item
+      end
+
+      def apply_entry(id, raw_data)
+        data = normalize_data(id, raw_data)
+        id_symbol = data[:id]
+        id_number = data[:id_number]
+        existing_number_owner = GameData::Item::DATA[id_number]
+        if existing_number_owner && existing_number_owner.id != id_symbol && !managed_number?(id_number)
+          log_error("Item patch #{id_symbol} cannot use id_number #{id_number}; it already belongs to #{existing_number_owner.id}.")
+          return false
+        end
+
+        item = GameData::Item.new(data)
+        item.instance_variable_set(:@reloaded_data_patch, true)
+        GameData::Item::DATA[id_symbol] = item
+        GameData::Item::DATA[id_number] = item
+        @managed_symbols << id_symbol unless @managed_symbols.include?(id_symbol)
+        @managed_numbers << id_number unless @managed_numbers.include?(id_number)
+        true
+      rescue Exception => e
+        Reloaded::Log.exception("Failed to apply item patch #{id}", e, channel: :mods) if defined?(Reloaded::Log)
+        false
+      end
+
+      def normalize_data(id, raw_data)
+        raw = stringify_keys(raw_data.is_a?(Hash) ? raw_data : {})
+        base = base_entry(id)
+        data = {}
+        ITEM_FIELDS.each { |field| data[field] = raw.key?(field) ? raw[field] : base[field] }
+        data["id"] = id if blank?(data["id"])
+        data["id_number"] = next_id_number if blank?(data["id_number"])
+        data["name"] = data["id"].to_s if blank?(data["name"])
+        data["name_plural"] = data["name"] if blank?(data["name_plural"])
+        data["description"] = "???" if blank?(data["description"])
+
+        {
+          :id => normalize_symbol(data["id"]),
+          :id_number => data["id_number"].to_i,
+          :name => data["name"].to_s,
+          :name_plural => data["name_plural"].to_s,
+          :pocket => data["pocket"].to_i,
+          :price => data["price"].to_i,
+          :description => data["description"].to_s,
+          :field_use => data["field_use"].to_i,
+          :battle_use => data["battle_use"].to_i,
+          :type => data["type"].to_i,
+          :move => blank?(data["move"]) ? nil : normalize_symbol(data["move"])
+        }
+      end
+
+      def base_entry(id)
+        key = normalize_symbol(id).to_s
+        @base_entries[key] || {}
+      end
+
+      def next_id_number
+        keys = []
+        GameData::Item::DATA.each_key { |key| keys << key if key.is_a?(Integer) }
+        value = keys.empty? ? 1 : keys.max + 1
+        value += 1 while GameData::Item::DATA.key?(value)
+        value
+      end
+
+      def patched_item_ids
+        return [] unless defined?(Reloaded::DataPatches)
+        Reloaded::DataPatches.applied(TARGET).map { |patch| patch[:id] }.uniq
+      rescue
+        []
+      end
+
+      def managed_number?(key)
+        @managed_numbers.include?(key)
+      end
+
+      def normalize_symbol(value)
+        value.to_s.strip.upcase.gsub(/[^A-Z0-9_]+/, "_").to_sym
+      end
+
+      def stringify_keys(hash)
+        result = {}
+        hash.each { |key, value| result[key.to_s] = value }
+        result
+      rescue
+        {}
+      end
+
+      def blank?(value)
+        value.nil? || value.to_s.strip.empty?
+      end
+
+      def log_applied(count)
+        message = "Applied #{count} item data patch entr#{count == 1 ? 'y' : 'ies'}"
+        if defined?(Reloaded::Log)
+          if Reloaded::Log.respond_to?(:info_once)
+            Reloaded::Log.info_once(message, :mods, key: "item_data_patch_applied:#{count}")
+          else
+            Reloaded::Log.info(message, :mods)
+          end
+        end
+      end
+
+      def log_error(message)
+        if defined?(Reloaded::Log)
+          if Reloaded::Log.respond_to?(:error_once)
+            Reloaded::Log.error_once(message, :mods, key: "item_data_patch_error:#{message}")
+          else
+            Reloaded::Log.error(message, :mods)
+          end
+        end
+      end
+
+      def register_events
+        return unless defined?(Reloaded::Events)
+        Reloaded::Events.on(:game_data_loaded, :item_data_patch_target_refresh, priority: 50) do |_context|
+          Reloaded::DataPatchItems.register_target if defined?(Reloaded::DataPatchItems)
+        end
+        Reloaded::Events.on(:data_patches_loaded, :item_data_patch_bridge, priority: 100) do |_context|
+          Reloaded::DataPatchItems.apply_all if defined?(Reloaded::DataPatchItems)
+        end
+      end
+
+      private
+
+      def install_text_fallbacks
+        return unless defined?(GameData::Item)
+        return if GameData::Item.method_defined?(:reloaded_data_patch_item_name)
+
+        GameData::Item.class_eval do
+          alias_method :reloaded_data_patch_item_name, :name
+          alias_method :reloaded_data_patch_item_name_plural, :name_plural
+          alias_method :reloaded_data_patch_item_description, :description
+
+          def reloaded_data_patch_item?
+            !!@reloaded_data_patch
+          end
+
+          def name
+            return @real_name if reloaded_data_patch_item?
+            reloaded_data_patch_item_name
+          end
+
+          def name_plural
+            return @real_name_plural if reloaded_data_patch_item?
+            reloaded_data_patch_item_name_plural
+          end
+
+          def description
+            return @real_description if reloaded_data_patch_item?
+            reloaded_data_patch_item_description
+          end
+        end
+      end
+
+      def register_patch_point
+        return unless defined?(Reloaded::Patches)
+        Reloaded::Patches.register(
+          :item_data_patch_bridge,
+          :target => "GameData::Item::DATA",
+          :type => :runtime_data_bridge,
+          :file => __FILE__,
+          :owner => :reloaded,
+          :priority => 100,
+          :reason => "Applies Reloaded item data patches after enabled mods are scanned.",
+          :recommended_fix => "Review Reloaded::DataPatchItems if patched items fail to appear.",
+          :conflict_group => "game_data_items"
+        )
+      end
+    end
+  end
+end
+
+Reloaded::DataPatchItems.install if defined?(Reloaded::DataPatchItems)

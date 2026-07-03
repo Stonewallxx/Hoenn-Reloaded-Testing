@@ -100,6 +100,7 @@ module Reloaded
         validate
         build_load_order
         Reloaded::Assets.rebuild(@active_mods) if defined?(Reloaded::Assets)
+        Reloaded::DataPatches.rebuild(@active_mods) if defined?(Reloaded::DataPatches)
         load_active_mods
         emit(:mods_loaded, :mods => @loaded_mods, :skipped => @skipped_mods)
         write_summary
@@ -114,6 +115,7 @@ module Reloaded
         validate
         build_load_order
         Reloaded::Assets.rebuild(@active_mods) if defined?(Reloaded::Assets)
+        Reloaded::DataPatches.rebuild(@active_mods) if defined?(Reloaded::DataPatches)
         write_summary
         true
       rescue Exception => e
@@ -551,11 +553,23 @@ module Reloaded
         if existing && existing[:source] == :mods && candidate[:source] == :moddev
           @mods[candidate[:id]] = candidate
           @skipped_mods << skip_entry(existing, "Overridden by ModDev version")
-          Reloaded::Log.info("ModDev override: #{candidate[:id]} from #{candidate[:folder_path]}", :mods) if defined?(Reloaded::Log)
+          if defined?(Reloaded::Log)
+            if Reloaded::Log.respond_to?(:info_once)
+              Reloaded::Log.info_once("ModDev override: #{candidate[:id]} from #{candidate[:folder_path]}", :mods, key: "moddev_override:#{candidate[:id]}")
+            else
+              Reloaded::Log.info("ModDev override: #{candidate[:id]} from #{candidate[:folder_path]}", :mods)
+            end
+          end
         elsif existing
           candidate[:system_tags] << "conflict"
           @skipped_mods << skip_entry(candidate, "Duplicate mod id already registered")
-          Reloaded::Log.warning("Duplicate mod id skipped: #{candidate[:id]} at #{candidate[:folder_path]}", :mods) if defined?(Reloaded::Log)
+          if defined?(Reloaded::Log)
+            if Reloaded::Log.respond_to?(:warning_once)
+              Reloaded::Log.warning_once("Duplicate mod id skipped: #{candidate[:id]} at #{candidate[:folder_path]}", :mods, key: "duplicate_mod:#{candidate[:id]}:#{candidate[:folder_path]}")
+            else
+              Reloaded::Log.warning("Duplicate mod id skipped: #{candidate[:id]} at #{candidate[:folder_path]}", :mods)
+            end
+          end
         else
           @mods[candidate[:id]] = candidate
         end
@@ -577,7 +591,13 @@ module Reloaded
           disabled_ids = @profile_disabled_ids
           missing = (@profile_enabled_ids + @profile_disabled_ids + @profile_load_order).uniq - normalize_string_array(@mods.keys)
           missing.each do |id|
-            Reloaded::Log.warning("Active profile references missing mod: #{id}", :mods) if defined?(Reloaded::Log)
+            if defined?(Reloaded::Log)
+              if Reloaded::Log.respond_to?(:warning_once)
+                Reloaded::Log.warning_once("Active profile references missing mod: #{id}", :mods, key: "profile_missing_mod:#{active_profile_name}:#{id}")
+              else
+                Reloaded::Log.warning("Active profile references missing mod: #{id}", :mods)
+              end
+            end
           end
           Reloaded::Log.debug("Applying profile state: enabled=#{enabled_ids.join(",")} disabled=#{disabled_ids.join(",")}", :mods) if defined?(Reloaded::Log)
           @mods.each_value do |mod|
@@ -645,7 +665,13 @@ module Reloaded
         mod[:system_tags] << "missing_dependency"
         mod[:enabled] = false
         @skipped_mods << skip_entry(mod, "Missing dependency: #{dependency}")
-        Reloaded::Log.critical("Mod #{mod[:id]} skipped: missing dependency #{dependency}", :mods) if defined?(Reloaded::Log)
+        if defined?(Reloaded::Log)
+          if Reloaded::Log.respond_to?(:critical_once)
+            Reloaded::Log.critical_once("Mod #{mod[:id]} skipped: missing dependency #{dependency}", :mods, key: "missing_dependency:#{mod[:id]}:#{dependency}")
+          else
+            Reloaded::Log.critical("Mod #{mod[:id]} skipped: missing dependency #{dependency}", :mods)
+          end
+        end
       end
 
       def load_mod_scripts(mod)
@@ -696,6 +722,8 @@ module Reloaded
           :loaded_mods => @loaded_mods.length,
           :skipped_mods => @skipped_mods.length,
           :scripts_loaded => @script_count,
+          :data_patches => defined?(Reloaded::DataPatches) ? Reloaded::DataPatches.summary[:patches] : 0,
+          :data_patches_applied => defined?(Reloaded::DataPatches) ? Reloaded::DataPatches.summary[:applied] : 0,
           :active_profile => active_profile_name,
           :moddev_enabled => moddev_enabled?
         ) if defined?(Reloaded::Log)
@@ -703,7 +731,14 @@ module Reloaded
 
       def log_invalid(candidate)
         Array(candidate[:errors]).each do |error|
-          Reloaded::Log.critical("Invalid mod #{candidate[:manifest_path]}: #{error}", :mods) if defined?(Reloaded::Log)
+          if defined?(Reloaded::Log)
+            message = "Invalid mod #{candidate[:manifest_path]}: #{error}"
+            if Reloaded::Log.respond_to?(:critical_once)
+              Reloaded::Log.critical_once(message, :mods, key: "invalid_mod:#{candidate[:manifest_path]}:#{error}")
+            else
+              Reloaded::Log.critical(message, :mods)
+            end
+          end
         end
       end
 

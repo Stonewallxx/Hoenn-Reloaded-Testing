@@ -50,6 +50,7 @@ module Reloaded
 
     @counts = Hash.new(0)
     @mode = nil
+    @once_keys = {}
 
     class << self
       def mode
@@ -128,6 +129,37 @@ module Reloaded
         line
       rescue
         nil
+      end
+
+      def write_once(channel, message, level: :info, key: nil)
+        normalized_level = normalize_level(level)
+        once_key = key || [channel.to_s, normalized_level.to_s, sanitize_text(message)].join("|")
+        return nil if @once_keys[once_key]
+        @once_keys[once_key] = true
+        write(channel, message, level: normalized_level)
+      rescue
+        nil
+      end
+
+      def debug_once(message, channel = :framework, key: nil)
+        return unless developer?
+        write_once(channel, message, level: :debug, key: key)
+      end
+
+      def info_once(message, channel = :framework, key: nil)
+        write_once(channel, message, level: :info, key: key)
+      end
+
+      def warning_once(message, channel = :framework, key: nil)
+        write_once(channel, message, level: :warning, key: key)
+      end
+
+      def error_once(message, channel = :framework, key: nil)
+        write_once(channel, message, level: :error, key: key)
+      end
+
+      def critical_once(message, channel = :framework, key: nil)
+        write_once(channel, message, level: :critical, key: key)
       end
 
       def exception(message, error, channel: :framework, level: :error)
@@ -223,6 +255,10 @@ module Reloaded
 
       def reset_counts
         @counts = Hash.new(0)
+      end
+
+      def reset_once_keys
+        @once_keys = {}
       end
 
       def sanitize(value)

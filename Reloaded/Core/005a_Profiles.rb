@@ -388,7 +388,12 @@ module Reloaded
         if defined?(Reloaded::Log)
           enabled = normalize_string_array(@active_profile["enabled_mods"]).join(",")
           disabled = normalize_string_array(@active_profile["disabled_mods"]).join(",")
-          Reloaded::Log.debug("Loaded active profile #{active_name} from #{PROFILE_ROOT} enabled=#{enabled} disabled=#{disabled}", :mods)
+          message = "Loaded active profile #{active_name} from #{PROFILE_ROOT} enabled=#{enabled} disabled=#{disabled}"
+          if Reloaded::Log.respond_to?(:debug_once)
+            Reloaded::Log.debug_once(message, :mods, key: "profile_loaded:#{active_name}:#{enabled}:#{disabled}")
+          else
+            Reloaded::Log.debug(message, :mods)
+          end
         end
         @active_profile
       end
@@ -402,7 +407,14 @@ module Reloaded
           return default_profile.merge("name" => normalized)
         end
         data = parse_json(File.read(path))
-        Reloaded::Log.debug("Profile #{normalized} keys=#{data.keys.join(",")}", :mods) if defined?(Reloaded::Log) && data.respond_to?(:keys)
+        if defined?(Reloaded::Log) && data.respond_to?(:keys)
+          message = "Profile #{normalized} keys=#{data.keys.join(",")}"
+          if Reloaded::Log.respond_to?(:debug_once)
+            Reloaded::Log.debug_once(message, :mods, key: "profile_keys:#{normalized}:#{data.keys.join(",")}")
+          else
+            Reloaded::Log.debug(message, :mods)
+          end
+        end
         normalize_profile(data, normalized)
       rescue Exception => e
         Reloaded::Log.exception("Failed to load mod profile #{name}", e, channel: :mods) if defined?(Reloaded::Log)

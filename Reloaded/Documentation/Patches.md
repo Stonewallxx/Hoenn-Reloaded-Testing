@@ -28,6 +28,7 @@ Reloaded::Patches.register(
   :file => __FILE__,
   :owner => :reloaded,
   :priority => 100,
+  :conflict_group => "mart_buy_screen",
   :reason => "Route marts through Reloaded's custom mart UI.",
   :recommended_fix => "Disable one mart UI patch or move the change to an event hook."
 )
@@ -49,15 +50,50 @@ Reloaded::Patches.register(
 The registry marks a conflict when multiple patches target the same method,
 data file, or asset and at least one of these is true:
 
+- either patch explicitly lists the other in `:metadata => { :conflicts_with => [...] }`,
 - either patch uses `:replace`,
 - either patch uses `:asset_override`,
-- both patches use the same type and same priority.
+- both patches use the same `:conflict_group`,
+- both patches use the same type and same priority,
+- both patches are order-sensitive and share the same priority.
 
 `:replace` and `:asset_override` conflicts are logged as critical because only
 one replacement can usually win cleanly.
 
 Same-type/same-priority conflicts are logged as warnings because load order may
 matter and should be reviewed.
+
+`:event_bridge` patches are stackable by default. Use them when possible if a
+system is only exposing a vanilla behavior as a Reloaded event.
+
+## Conflict Metadata
+
+Optional fields can make conflict reports more accurate:
+
+```ruby
+Reloaded::Patches.register(
+  :example_patch,
+  :target => "SomeClass#some_method",
+  :type => :wrap,
+  :owner => :example_mod,
+  :priority => 100,
+  :conflict_group => "some_method_ui_flow",
+  :allow_multiple => false,
+  :severity => :warning,
+  :metadata => {
+    :compatible_with => ["other_mod/known_safe_patch"],
+    :conflicts_with => ["other_mod/known_conflicting_patch"]
+  }
+)
+```
+
+- `:conflict_group` marks patches that compete for the same broader behavior
+  even if their raw target strings differ.
+- `:allow_multiple` tells the registry not to conflict this patch with other
+  patches on the same target.
+- `:severity` can raise an order-sensitive conflict to `:critical`.
+- `:compatible_with` suppresses a known safe pair.
+- `:conflicts_with` forces a known unsafe pair to conflict.
 
 ## Log Output
 
@@ -83,6 +119,9 @@ Reloaded::Patches.conflicts
 Reloaded::Patches.conflict?("PokemonMartScreen#pbBuyScreen")
 Reloaded::Patches.summary
 Reloaded::Patches.write_summary
+Reloaded::Patches.targets
+Reloaded::Patches.target_summary("PokemonMartScreen#pbBuyScreen")
+Reloaded::Patches.grouped_by_target
 ```
 
 ## Project Rule

@@ -51,15 +51,21 @@ immediately.
 ## Patches
 
 - Register patch points whenever Reloaded systems alter vanilla behavior.
-- Add stronger conflict rules after the mod loader and load order rules exist.
 - Consider helper APIs for safe method wrapping after the registry proves useful.
+- Expand real compatibility rules as more third-party mods register patch
+  metadata.
 
 ## Future Systems
 
 - Publisher script fields for custom author overrides, description, tags,
   changelog, and download URL fields.
 - Per-mod settings preset/share-code design and UI.
-- Data patching system.
+- Data patch follow-up targets:
+  - Species forms, after forms need mod support.
+  - Quests, after the quest data model is reviewed.
+  - Direct event/map edits, only after a safe map/event patch format is designed.
+  - New trainer type asset workflow, including required graphics/audio checks.
+- Economy/Reloaded Mart system for shop behavior and mart stock.
 - Direct `Bitmap.new` asset redirect review if needed.
 - Dedicated Profile page load order editor, if the installed-list Load Order
   mode proves too limited.

@@ -31,6 +31,8 @@ are:
 - `Reloaded::Patches`
 - `Reloaded::SaveData`
 - `Reloaded::Assets`
+- `Reloaded::DataPatches`
+- `Reloaded::Abilities`
 - `Reloaded::ModManager`
 - `Reloaded::ModBrowser`
 - `Reloaded::Publisher`
@@ -140,6 +142,275 @@ Reloaded API that can handle the use case.
 
 See `Reloaded/Documentation/SaveData.md` for the full save data reference.
 
+## Data Patches
+
+Use `DataPatches/**/*.json` for structured runtime data that should be added or
+changed by a mod without replacing whole base files.
+
+```text
+Mods/<mod folder>/DataPatches/example_data.json
+```
+
+Supported operations:
+
+- `add`
+- `edit`
+- `merge`
+- `replace`
+
+`remove` is not supported.
+
+Example:
+
+```json
+{
+  "target": "example_data",
+  "operation": "add",
+  "id": "example_entry",
+  "data": {
+    "name": "Example Entry",
+    "value": 10
+  }
+}
+```
+
+Example item patch:
+
+```json
+{
+  "target": "items",
+  "operation": "add",
+  "id": "example_reloaded_item",
+  "data": {
+    "name": "Example Reloaded Item",
+    "name_plural": "Example Reloaded Items",
+    "pocket": 1,
+    "price": 100,
+    "description": "A safe example item added by a Reloaded data patch.",
+    "field_use": 0,
+    "battle_use": 0,
+    "type": 0
+  }
+}
+```
+
+For item patches, `id_number` may be provided manually, but it is optional.
+Reloaded assigns the next available runtime number when it is omitted.
+
+Example move patch:
+
+```json
+{
+  "target": "moves",
+  "operation": "add",
+  "id": "example_reloaded_move",
+  "data": {
+    "name": "Example Reloaded Move",
+    "function_code": "000",
+    "base_damage": 40,
+    "type": "NORMAL",
+    "category": "Physical",
+    "accuracy": 100,
+    "total_pp": 35,
+    "effect_chance": 0,
+    "target": "NearOther",
+    "priority": 0,
+    "flags": "abef",
+    "description": "A safe example move added by a Reloaded data patch."
+  }
+}
+```
+
+For move patches, `function_code` points to existing battle behavior. Use `000`
+for a normal damage-only move. Custom move behavior still requires a Ruby script.
+
+Example ability patch:
+
+```json
+{
+  "target": "abilities",
+  "operation": "add",
+  "id": "example_reloaded_ability",
+  "data": {
+    "name": "Example Reloaded Ability",
+    "description": "A safe example ability added by a Reloaded data patch."
+  }
+}
+```
+
+Ability patches make the ability exist and display. Custom ability behavior
+still requires Ruby battle handler code.
+
+Example species core patch:
+
+```json
+{
+  "target": "species.core",
+  "operation": "merge",
+  "id": "treecko",
+  "data": {
+    "base_stats": {
+      "SPEED": 75
+    },
+    "catch_rate": 45,
+    "hatch_steps": 5120
+  }
+}
+```
+
+`species.core` changes core fields on existing species, such as types, stats,
+EV yields, growth rate, gender ratio, catch rate, egg groups, hatch steps,
+height, weight, color, shape, habitat, and generation. It does not add new
+species or patch evolutions/forms.
+
+Example species learnset patch:
+
+```json
+{
+  "target": "species.learnsets",
+  "operation": "merge",
+  "id": "treecko",
+  "data": {
+    "add_moves": [
+      {
+        "level": 8,
+        "move": "example_reloaded_move"
+      }
+    ],
+    "add_tutor_moves": ["example_reloaded_move"],
+    "add_egg_moves": ["example_reloaded_move"]
+  }
+}
+```
+
+`species.learnsets` changes level-up, tutor, and egg moves for existing
+species. Use `add_moves`, `add_tutor_moves`, and `add_egg_moves` for small
+additions. Use `moves`, `tutor_moves`, or `egg_moves` only when replacing the
+full list.
+
+Example species evolution patch:
+
+```json
+{
+  "target": "species.evolutions",
+  "operation": "merge",
+  "id": "treecko",
+  "data": {
+    "add_evolutions": [
+      {
+        "species": "grovyle",
+        "method": "Level",
+        "parameter": 16
+      }
+    ]
+  }
+}
+```
+
+`species.evolutions` changes forward evolutions for existing species. Reloaded
+rebuilds generated prevolution entries after applying these patches.
+
+Example encounter patch:
+
+```json
+{
+  "target": "encounters.classic",
+  "operation": "merge",
+  "id": "101_0",
+  "data": {
+    "add_types": {
+      "Land": [
+        {
+          "chance": 5,
+          "species": "example_species",
+          "min_level": 8,
+          "max_level": 10
+        }
+      ]
+    }
+  }
+}
+```
+
+Encounter targets are `encounters.classic`, `encounters.remix`, and
+`encounters.randomized`. IDs use `<map_id>_<version>`, such as `101_0`.
+Use `add_types` for small additions and `types` for full encounter table
+replacement.
+
+Example species ability patch:
+
+```json
+{
+  "target": "species.abilities",
+  "operation": "replace",
+  "id": "treecko",
+  "data": {
+    "abilities": ["overgrow"],
+    "hidden_abilities": ["example_reloaded_ability"]
+  }
+}
+```
+
+`species.abilities` only changes the normal and hidden ability arrays for an
+existing species. Use `replace` and provide the full arrays. Broad species data
+patching is still future work.
+
+Runtime access:
+
+```ruby
+entry = Reloaded::DataPatches.entry("example_data", "example_entry")
+all_entries = Reloaded::DataPatches.data("example_data")
+```
+
+Data patches are validated, logged, and registered with `Reloaded::Patches`.
+They are applied in memory at startup and do not permanently edit base files.
+
+See `Reloaded/Documentation/DataPatches.md` for the full data patch reference.
+
+## Ability Behavior
+
+Use `Reloaded::Abilities` when a modded ability needs battle behavior.
+
+Example speed behavior:
+
+```ruby
+Reloaded::Abilities.on_speed_calc(:EXAMPLE_RELOADED_ABILITY) do |_ability, battler, mult|
+  next mult * 2 if [:Rain, :HeavyRain].include?(battler.battle.pbWeather)
+end
+```
+
+This uses the same underlying `BattleHandlers` system as vanilla abilities, but
+with clearer Reloaded helper names.
+
+General handler form:
+
+```ruby
+Reloaded::Abilities.on(:switch_in, :EXAMPLE_RELOADED_ABILITY) do |ability, battler, battle|
+  # behavior here
+end
+```
+
+Useful helpers include:
+
+- `on_speed_calc`
+- `on_status_immunity`
+- `on_stat_loss_immunity`
+- `on_move_immunity_target`
+- `on_damage_calc_user`
+- `on_damage_calc_target`
+- `on_switch_in`
+- `on_switch_out`
+- `on_eor_effect`
+
+Mods can also copy existing vanilla behavior:
+
+```ruby
+Reloaded::Abilities.copy_behavior(:SWIFTSWIM, :EXAMPLE_RELOADED_ABILITY)
+```
+
+`Reloaded::Abilities.register` can create ability data from Ruby scripts, but
+JSON `abilities` data patches are preferred for normal mod data.
+
 ## Options
 
 Use the Reloaded options framework for new in-game settings screens.
@@ -155,6 +426,20 @@ Current reusable types include:
 - `Spacer`
 
 See `Reloaded/Documentation/Options.md` for the full options reference.
+
+Mods can add rows to supported Reloaded categories:
+
+```ruby
+Reloaded::Options.register_category_option("DEVELOPER", :debug_toggle, priority: 50) do |_scene|
+  EnumOption.new(
+    _INTL("Debug"),
+    [_INTL("Off"), _INTL("On")],
+    proc { $DEBUG ? 1 : 0 },
+    proc { |value| $DEBUG = value.to_i == 1 },
+    _INTL("Toggles debug mode for this play session.")
+  )
+end
+```
 
 ## Per-Mod Settings
 
@@ -605,6 +890,5 @@ Reloaded does not globally patch `Bitmap.new` yet.
 These sections should be added as the systems are created:
 
 - dependency rules,
-- custom content registration,
-- data patching,
+- broader custom content registration,
 - compatibility guidelines.

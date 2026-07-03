@@ -196,7 +196,8 @@ module Reloaded
           :owner => :reloaded,
           :priority => 100,
           :reason => "Adds one central save bucket for Reloaded systems and mods.",
-          :recommended_fix => "Only one system should register the :reloaded save key."
+          :recommended_fix => "Only one system should register the :reloaded save key.",
+          :conflict_group => "save_data_key:reloaded"
         )
       end
     end

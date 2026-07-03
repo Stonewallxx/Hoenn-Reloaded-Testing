@@ -172,7 +172,8 @@ module Reloaded
           :owner => :reloaded_assets,
           :priority => 100,
           :reason => "Multiple active mods provide the same asset.",
-          :recommended_fix => "Disable one asset override or adjust mod load order in the future Mod Manager."
+          :recommended_fix => "Disable one asset override or adjust mod load order in the future Mod Manager.",
+          :conflict_group => "asset:#{conflict[:asset]}"
         )
       end
 
@@ -209,7 +210,8 @@ module Reloaded
           :owner => :reloaded,
           :priority => 100,
           :reason => "Allows active mod assets to override vanilla assets without copying files.",
-          :recommended_fix => "Review Reloaded::Assets if graphics or audio files resolve incorrectly."
+          :recommended_fix => "Review Reloaded::Assets if graphics or audio files resolve incorrectly.",
+          :conflict_group => "runtime_asset_resolution"
         )
       end
 

@@ -24,10 +24,20 @@ Hoenn Reloaded currently has the following framework systems in place:
 - Central logging with modes, reports, bug-report export, and path sanitizing.
 - Event API through `Reloaded::Events`.
 - `Reloaded::Hooks` compatibility alias.
-- Patch/conflict registry through `Reloaded::Patches`.
+- Patch/conflict registry through `Reloaded::Patches`, including conflict
+  groups, explicit compatibility metadata, and per-target summaries.
 - Reloaded save bucket through `Reloaded::SaveData`.
 - Runtime asset resolver for active mod assets.
 - Mod scanning, validation, dependency-safe load ordering, and script loading.
+- Runtime data patch collector and JSON-style data registry in the `008` core
+  range.
+- Active item, move, ability, species core, species learnset, species evolution,
+  species ability list, encounter, and outfit data patch targets, with reserved
+  bridge files for future trainer and quest targets.
+- Runtime core fixes in `Reloaded/Core/009_CoreFixes.rb`, currently including
+  the locked overworld Pokemon interaction battle fix.
+- Script-facing Ability API for registering modded ability behavior through the
+  existing battle handler system.
 - Profile system stored in `Mods/Reloaded/Profiles/`.
 - Profile code export/import using `RLD-code-`.
 - Per-mod settings API and Options-style settings UI.
@@ -84,6 +94,10 @@ Mod authors should use:
 - `Reloaded::SaveData` for persistent save data.
 - `Reloaded::ModSettings` for profile-backed mod settings.
 - `Reloaded::Assets` indirectly by placing assets in the mod folder.
+- `Reloaded::DataPatches` for runtime item, move, ability, species core,
+  species learnset, species evolution, species ability list, encounter, and
+  outfit data.
+- `Reloaded::Abilities` for custom ability behavior.
 
 ## Version And Update Notes
 
@@ -115,8 +129,10 @@ applies the current versioned window title again during boot.
 ## Detailed Documentation
 
 - `Browser.md` - Mod Browser, GitHub index, publishing, and Manager Editor.
+- `DataPatches.md` - runtime data patch format, validation, conflicts, and API.
 - `Events.md` - event API.
 - `Logging.md` - logging files, modes, reports, and path sanitizing.
+- `MapIDs.md` - map ID reference for encounter data patches.
 - `Modding.md` - main modder-facing reference.
 - `Options.md` - Options menu framework and categories.
 - `Patches.md` - patch registry and conflict reports.
@@ -131,8 +147,10 @@ applies the current versioned window title again during boot.
 The foundation is usable for early Reloaded modding, but these areas still need
 future work:
 
-- Data patching system.
-- Stronger compatibility/dependency documentation.
+- Direct base game data patch targets for species forms, trainers, maps, and
+  quests.
+- Economy/Reloaded Mart system for shop behavior and mart stock.
+- Stronger compatibility/dependency documentation as real mod conflicts appear.
 - More official event bridge points as real integration points are needed.
 - Mod Browser polish and richer source failure reporting.
 - Remaining Modders Tools review against the reference folder.

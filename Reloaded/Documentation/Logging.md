@@ -71,6 +71,26 @@ Reloaded::Log.mod("example_mod", "Loaded settings")
 Reloaded::Log.coop("Session started")
 ```
 
+Use once-per-boot helpers for messages that can repeat during scans, refreshes,
+or validation passes:
+
+```ruby
+Reloaded::Log.warning_once(
+  "Active profile references missing mod: example_mod",
+  :mods,
+  key: "profile_missing_mod:Default:example_mod"
+)
+```
+
+Available once helpers:
+
+- `write_once(channel, message, level: :info, key: nil)`
+- `debug_once(message, channel = :framework, key: nil)`
+- `info_once(message, channel = :framework, key: nil)`
+- `warning_once(message, channel = :framework, key: nil)`
+- `error_once(message, channel = :framework, key: nil)`
+- `critical_once(message, channel = :framework, key: nil)`
+
 ## Exceptions
 
 ```ruby
@@ -120,6 +140,8 @@ E:/Downloads/POKEMON/Github/Hoenn-Reloaded-Testing/Reloaded/Core/file.rb
 ```
 
 Paths under the game root are written relative to the game folder when possible.
+All logging APIs sanitize before writing, including normal lines, reports,
+summaries, exported bug reports, and once-per-boot messages.
 
 ## Project Rule
 

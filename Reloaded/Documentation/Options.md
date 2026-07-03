@@ -91,6 +91,7 @@ The consolidated Options menu receives:
 - `Mod Settings`
 - `ModDev`
 - `Logging Mode`
+- `Time Changer`
 
 ## Consolidated Categories
 
@@ -163,6 +164,28 @@ Hint text should use the format `Action (input)`. The normal order is:
 
 - `Logging Mode` - writes `logging_mode=...` to `Reloaded/Settings.txt`
   through `Reloaded::Log`.
+- `Time Changer` - removable Developer test option from
+  `Reloaded/Core/006a_TimeChanger.rb`. Jumps to Morning, Day, Afternoon,
+  Evening, or Night for testing time-based systems.
+- `Test Reloaded Trainer` - removable Developer test action from the same file.
+  Starts the Example Mod trainer battle if that trainer patch is loaded.
+
+Mods can add options to existing Reloaded categories with:
+
+```ruby
+Reloaded::Options.register_category_option("DEVELOPER", :my_option, priority: 100) do |_scene|
+  EnumOption.new(
+    _INTL("My Option"),
+    [_INTL("Off"), _INTL("On")],
+    proc { 0 },
+    proc { |value| nil },
+    _INTL("Example option added by a mod.")
+  )
+end
+```
+
+Supported category names currently include `MODS` and `DEVELOPER`.
+Lower priority values appear earlier inside the category.
 
 When `Speech Follows Menu` is On, dialogue boxes use the selected menu frame.
 

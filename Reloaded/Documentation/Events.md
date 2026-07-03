@@ -68,10 +68,97 @@ Reloaded::Events.remove(:bootstrap_loaded, :my_feature)
   exist.
 - `:core_loaded` - all files in `Reloaded/Core` have been loaded.
 - `:modules_loaded` - all files in `Reloaded/Modules` have been loaded.
+- `:game_data_loaded` - base `GameData.load_all` finished and Reloaded is
+  refreshing runtime data patch targets.
+- `:data_patches_loaded` - enabled mod data patch files have been scanned and
+  applied to Reloaded's runtime registry.
+- `:mods_loaded` - the Mod Manager finished scanning and loading enabled mods.
+- `:reloaded_save_loaded` - Reloaded's central save bucket was loaded.
+- `:reloaded_save_saving` - Reloaded's central save bucket is about to save.
 
 More events should be added only when a real base-game integration point is
 needed. Any new base-file edit must also be documented in
 `Reloaded/Documentation/VanillaChanges.md`.
+
+## Gameplay Bridge Events
+
+`Reloaded/Core/001a_EventBridges.rb` emits notification-only events around
+common vanilla methods. These events do not alter vanilla results.
+
+Item events:
+
+- `:item_receive_started`
+- `:item_received`
+
+Context:
+
+- `:method` - wrapped method name, usually `:pbReceiveItem`.
+- `:args` - original method arguments.
+- `:received` - after-event result, normally `true` or `false`.
+- `:result` - same raw return value as `:received`.
+
+Money events:
+
+- `:money_change_started`
+- `:money_changed`
+
+Context:
+
+- `:method` - wrapped method name, usually `:pbReceiveMoney`.
+- `:args` - original method arguments. The first entry is the money delta.
+- `:result` - raw return value.
+
+Wild battle request events:
+
+- `:wild_battle_requested`
+- `:wild_battle_finished`
+
+Context:
+
+- `:method` - wrapped method name, usually `:pbWildBattle`.
+- `:args` - original method arguments.
+- `:player_won` - after-event result from `pbWildBattle`.
+- `:result` - same raw return value as `:player_won`.
+
+Trainer battle request events:
+
+- `:trainer_battle_requested`
+- `:trainer_battle_finished`
+
+Context:
+
+- `:method` - wrapped method name, usually `:pbTrainerBattle`.
+- `:args` - original method arguments.
+- `:player_won` - after-event result from `pbTrainerBattle`.
+- `:result` - same raw return value as `:player_won`.
+
+Battle lifecycle events:
+
+- `:battle_started`
+- `:battle_ended`
+
+Context:
+
+- `:battle` - active `PokeBattle_Battle` instance.
+- `:wild` - whether the battle is a wild battle.
+- `:trainer` - whether the battle is a trainer battle.
+- `:decision` - battle decision on `:battle_ended`.
+
+Map events:
+
+- `:map_setup_started`
+- `:map_setup_finished`
+- `:player_transfer_started`
+- `:player_transfer_finished`
+
+Context:
+
+- `:map_id` - map being set up, for map setup events.
+- `:old_map_id` - previous map ID when known.
+- `:new_map_id` - target/current map ID for transfer events.
+- `:x`, `:y`, `:direction` - player transfer position data when known.
+- `:game_map` - active `Game_Map` instance for map setup events.
+- `:scene` - active `Scene_Map` instance for transfer events.
 
 ## Logging
 

@@ -57,6 +57,8 @@ module Reloaded
     LOG_MODE_VALUES = [:player, :developer, :bug_report].freeze
     LOG_MODE_NAMES = ["Player", "Developer", "Bug Report"].freeze
 
+    @category_extensions = Hash.new { |hash, key| hash[key] = [] }
+
     class << self
       def install
         install_pokemon_system_settings
@@ -455,6 +457,22 @@ module Reloaded
         visible_consolidated_options(master)
       end
 
+      def register_category_option(category, option_id, priority: 100, &block)
+        key = category_key(category)
+        return false if key.empty? || option_id.to_s.empty? || !block
+        @category_extensions[key].delete_if { |entry| entry[:id] == option_id.to_sym }
+        @category_extensions[key] << {
+          :id => option_id.to_sym,
+          :priority => priority.to_i,
+          :block => block
+        }
+        Reloaded::Log.debug("Registered options extension #{key}/#{option_id}", :options) if defined?(Reloaded::Log)
+        true
+      rescue Exception => e
+        Reloaded::Log.exception("Failed to register options extension #{category}/#{option_id}", e, channel: :options) if defined?(Reloaded::Log)
+        false
+      end
+
       def build_consolidated_master(scene, inloadscreen = false)
         system = source_options(SystemOptionsScene, inloadscreen)
         gameplay = source_options(GameplayOptionsScene, inloadscreen)
@@ -539,8 +557,8 @@ module Reloaded
           mod_manager_option,
           mod_settings_option,
           moddev_option
-        ])
-        append_collapsible(master, "DEVELOPER", [logging_mode_option])
+        ] + category_extension_options("MODS", scene))
+        append_collapsible(master, "DEVELOPER", [logging_mode_option] + category_extension_options("DEVELOPER", scene))
         leftovers = system + gameplay + visuals + challenge
         append_collapsible(master, "OTHER", leftovers) unless leftovers.empty?
         master
@@ -559,6 +577,20 @@ module Reloaded
         return if rows.empty?
         target << CollapsibleHeader.new(_INTL(label), category_description(label), collapsed: collapsed)
         target.concat(rows)
+      end
+
+      def category_extension_options(category, scene)
+        key = category_key(category)
+        @category_extensions[key].sort_by { |entry| [entry[:priority], entry[:id].to_s] }.flat_map do |entry|
+          Array(entry[:block].call(scene)).compact
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Failed to build options extensions for #{category}", e, channel: :options) if defined?(Reloaded::Log)
+        []
+      end
+
+      def category_key(category)
+        category.to_s.strip.upcase
       end
 
       def economy_options(_scene)
@@ -726,7 +758,7 @@ module Reloaded
           proc { logging_mode_index },
           proc { |value|
             next_mode = LOG_MODE_VALUES[value.to_i] || :developer
-            Reloaded::Log.set_mode(next_mode) if defined?(Reloaded::Log)
+            Reloaded::Log.set_mode(next_mode) if defined?(Reloaded::Log) && Reloaded::Log.mode != next_mode
           },
           _INTL("Controls how much detail Reloaded writes to its log files.")
         )
@@ -979,7 +1011,8 @@ module Reloaded
           :owner => :reloaded,
           :priority => 100,
           :reason => "Adds Reloaded option row types, themes, small text, frame options, consolidated categories, option window improvements, and themed bag/mart cursors.",
-          :recommended_fix => "Review Reloaded::Options if the options menu fails to draw or save settings."
+          :recommended_fix => "Review Reloaded::Options if the options menu fails to draw or save settings.",
+          :conflict_group => "options_scene_framework"
         )
       end
     end
