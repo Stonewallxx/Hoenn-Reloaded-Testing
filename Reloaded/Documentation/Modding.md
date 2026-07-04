@@ -41,6 +41,7 @@ are:
 - `Reloaded::ModSettings`
 - `Reloaded::Options`
 - `Reloaded::Settings`
+- `ReloadedPauseMenu`
 
 ## Recommended Modding Rules
 
@@ -459,6 +460,94 @@ Reloaded::Options.register_category_option("DEVELOPER", :debug_toggle, priority:
 end
 ```
 
+## Pause Menu Modules
+
+The Reloaded Pause Menu is implemented in:
+
+```text
+Reloaded/Modules/001_ReloadedPauseMenu.rb
+```
+
+The active pause menu is controlled by the `Pause Menu` option in the
+`RELOADED` category:
+
+```text
+Standard / Reloaded
+```
+
+Default value: `Reloaded`.
+
+### Registering a Module
+
+Future Reloaded systems and mods can add pause menu entries with:
+
+```ruby
+ReloadedPauseMenu.register_module(
+  :MYMODULE,
+  label: "My Module",
+  icon: "Mods/My Mod/Graphics/my_icon",
+  handler: proc { MyModule.open },
+  condition: proc { true },
+  hidden: false,
+  lock_reason: "This module is not available yet."
+)
+```
+
+Fields:
+
+- `key`: unique symbol used for ordering, favorites, saved custom rows, and icon fallback.
+- `label`: text shown in the menu.
+- `icon`: optional path without `.png`.
+- `handler`: code run when the entry is selected.
+- `condition`: optional proc; false means the module is locked.
+- `hidden`: if true, a false condition hides the module instead of showing it locked.
+- `lock_reason`: optional string or proc shown when the player selects a locked module.
+
+If `icon` is omitted, REPM loads the icon from:
+
+```text
+Reloaded/Graphics/ReloadedMenu/<KEY>.png
+```
+
+Example:
+
+```ruby
+ReloadedPauseMenu.register_module(
+  :QUESTLOG,
+  label: "Quest Log",
+  handler: proc { ReloadedQuestLog.open },
+  condition: proc { defined?(ReloadedQuestLog) },
+  lock_reason: "Quest Log is not available yet."
+)
+```
+
+### Ordering Rules
+
+Ordering is controlled by the REPM order config near the top of
+`001_ReloadedPauseMenu.rb`:
+
+- `FIXED_ROW_ORDER`: the fixed first row. Users do not customize this row.
+- `CAROUSEL_ORDER`: the default carousel order. Registered modules not listed here are appended to the end.
+- The second row is controlled only by the player's custom row save data.
+
+A registered module does not need to be listed in either order constant. If it is
+not listed, it can still appear in the carousel after the configured entries and
+can be added to the customizable second row by the player.
+
+### Locked and Hidden Modules
+
+When `condition` returns false:
+
+- `hidden: false` shows the module as locked.
+- Selecting the locked module shows `lock_reason`.
+- `hidden: true` removes the module from the visible menu until it becomes available.
+
+Use locked modules when players should know the feature exists. Use hidden
+modules for developer/debug entries or systems that should not be advertised yet.
+
+Current default REPM modules are Pokedex, Pokemon, Bag, PokeNav, Trainer Info,
+Outfit, Save, Options, Debug, Title, Reloaded Mart, and TM Vault. Reloaded Mart
+and TM Vault stay locked unless their systems exist.
 ## Per-Mod Settings
 
 Mods can define editable settings in:
@@ -790,6 +879,28 @@ Reloaded::ModderTools.create_mod_template("My Mod")
 Reloaded::ModderTools.create_profile_template("My Profile")
 ```
 
+
+## Foundation Test Mod
+
+`Mods/Foundation Test Mod/` is the permanent Reloaded regression test mod. It
+replaces the old throwaway Example Mod and should stay small, stable, and easy
+to inspect.
+
+It intentionally covers:
+
+- manifest loading through `mod.json`,
+- per-mod settings through `Settings.json`,
+- script loading through `Scripts/`,
+- data patch coverage through `DataPatches/`,
+- asset indexing through `Graphics/`,
+- local changelog viewing through `Changelog.txt`,
+- dependency shape documentation in `Documentation/dependency_example.json`.
+
+Gameplay checks included by default:
+
+- Route 101 classic `Land` and `LandDay` encounters are patched to Treecko.
+- The first Hoenn rival fight is patched by script because it is not normal
+  trainer data.
 ## Mod Manifest
 
 Each mod must include `mod.json`:

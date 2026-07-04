@@ -1806,7 +1806,7 @@ module Reloaded
         tag_w = [bitmap.text_size(tag).width + 8, 32].max
         y += 5
         draw_rounded_rect(bitmap, x, y + 1, tag_w, 15, color_with_alpha(entry[:color], 90))
-        text_y = tag == "OK" || tag == "Update" ? y + 1 : y - 2
+        text_y = tag == "OK" || tag == "Update" ? y + 1 : y
         pbDrawShadowText(bitmap, x, text_y, tag_w, 15, tag, entry[:color], Color.new(0, 0, 0, 0), 1)
         bitmap.font.size = 15 rescue nil
         text = "#{entry[:name]} #{entry[:version]}".strip

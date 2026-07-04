@@ -597,8 +597,8 @@ module Reloaded
         []
       end
 
-      def reloaded_options(_scene)
-        []
+      def reloaded_options(scene)
+        category_extension_options("RELOADED", scene)
       end
 
       def setup_collapsible_callbacks(scene, master)
@@ -1672,3 +1672,4 @@ if defined?(PokemonOption_Scene)
 end
 
 Reloaded::Options.install if defined?(Reloaded::Options)
+

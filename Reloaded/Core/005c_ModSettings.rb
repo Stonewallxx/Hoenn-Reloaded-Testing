@@ -94,6 +94,7 @@ module Reloaded
         raise "Unknown setting #{key} for #{id}" unless setting
         raise "Cannot set non-value setting #{key}" if non_value_type?(setting["type"])
         normalized = normalize_value(setting, value)
+        return normalized if get(id, key) == normalized
         Reloaded::Profiles.set_mod_setting(id, key.to_s, normalized) if defined?(Reloaded::Profiles)
         Reloaded::Log.debug("Set #{id}.#{key}=#{normalized}", :mods) if defined?(Reloaded::Log)
         normalized

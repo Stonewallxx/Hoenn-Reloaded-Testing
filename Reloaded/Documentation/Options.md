@@ -29,6 +29,7 @@ $PokemonSystem.reloaded_category_theme
 $PokemonSystem.reloaded_cursor_theme
 $PokemonSystem.reloaded_options_cursor_theme
 $PokemonSystem.reloaded_small_text
+$PokemonSystem.reloaded_pause_menu
 ```
 
 `reloaded_small_text` controls the global small text toggle.
@@ -41,6 +42,7 @@ Reloaded option defaults:
 - `Menu Frame`: `RLD Transparent Dark`
 - `Speech Follows Menu`: `On`
 - `Global Small Text`: `On`
+- `Pause Menu`: `Reloaded`
 - `Options Cursor Color`: `White`
 
 ## Theme Data
@@ -92,6 +94,7 @@ The consolidated Options menu receives:
 - `ModDev`
 - `Logging Mode`
 - `Time Changer`
+- `Pause Menu`, provided by `Reloaded/Modules/001_ReloadedPauseMenu.rb`
 
 ## Consolidated Categories
 
@@ -107,8 +110,9 @@ The main Options menu is reorganized into collapsible categories:
 - `DEVELOPER`
 - `OTHER`, only if an unknown option is left over
 
-`RELOADED` is first in the category order, but it is hidden while it has no
-options. The old button hub is replaced with one flat menu. Existing base game
+`RELOADED` is first in the category order and can receive options registered by
+Reloaded modules. It is hidden while it has no options. The old button hub is
+replaced with one flat menu. Existing base game
 option objects are moved into these groups without replacing their original
 getters/setters where possible.
 
@@ -184,7 +188,7 @@ Reloaded::Options.register_category_option("DEVELOPER", :my_option, priority: 10
 end
 ```
 
-Supported category names currently include `MODS` and `DEVELOPER`.
+Supported category names currently include `RELOADED`, `MODS`, and `DEVELOPER`.
 Lower priority values appear earlier inside the category.
 
 When `Speech Follows Menu` is On, dialogue boxes use the selected menu frame.
