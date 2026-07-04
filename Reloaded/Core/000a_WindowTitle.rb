@@ -24,7 +24,7 @@ module Reloaded
       def apply
         if defined?(pbSetWindowText)
           pbSetWindowText(title)
-          Reloaded::Log.write(:framework, "Window title set to #{title}") if defined?(Reloaded::Log)
+          Reloaded::Log.debug_once("Window title set to #{title}", :framework, key: "window_title_set") if defined?(Reloaded::Log) && Reloaded::Log.respond_to?(:debug_once)
           return true
         end
         false

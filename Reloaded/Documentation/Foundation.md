@@ -45,7 +45,8 @@ Hoenn Reloaded currently has the following framework systems in place:
 - Per-mod settings API and Options-style settings UI.
 - In-game Mod Manager with installed mods, profiles, browser, tools, and admin
   entry points.
-- Mod Browser using the GitHub index for mods and published profiles.
+- Mod Browser using the GitHub index for mods and published profiles, with
+  dependency-aware installs, old-version confirmation, and install rollback.
 - Publisher batch tool for uploading mods/profiles to the GitHub index.
 - Admin-only Manager Editor for editing GitHub index metadata.
 - Consolidated Options menu with collapsible categories.
@@ -127,6 +128,25 @@ It updates base files from upstream without touching Hoenn Reloaded's `.git`
 folder. It protects `Game.ini`, because it contains Reloaded-specific root
 configuration. `mkxp.json` may be refreshed from upstream, while Reloaded
 applies the current versioned window title again during boot.
+
+Current installer/update tools:
+
+- `Hoenn Reloaded Installer.bat` installs/updates from
+  `Stonewallxx/Hoenn-Reloaded`.
+- `Hoenn Reloaded Testing Installer.bat` installs/updates from
+  `Stonewallxx/Hoenn-Reloaded-Testing`.
+- `Developer Tools/Base Game Updater/Update Base Game From Upstream.bat`
+  imports upstream base-game files into the development fork while excluding
+  Reloaded-owned paths and installer files.
+
+The base updater writes:
+
+```text
+Developer Tools/Base Game Updater/LastUpdateReport.txt
+```
+
+That report records the source, branch, protected paths, copy result, and cache
+cleanup result for easier review.
 
 ## Detailed Documentation
 

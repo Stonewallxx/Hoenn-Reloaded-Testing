@@ -39,8 +39,8 @@ module Reloaded
         log("Boot complete")
       rescue Exception => e
         log("Boot failed: #{e.class}: #{e}", "ERROR") rescue nil
-        puts("[Reloaded] Boot failed: #{e.class}: #{e}") rescue nil
-        puts(e.backtrace.join("\n")) rescue nil
+        console("Boot failed: #{e.class}: #{e}", "ERROR") rescue nil
+        console(Array(e.backtrace).map { |line| sanitize_path(line) }.join("\n"), "ERROR") rescue nil
       end
 
       def ensure_log_dir
@@ -54,13 +54,14 @@ module Reloaded
 
       def log(message, level = "INFO")
         ensure_log_dir
-        line = "[#{timestamp}] [#{level}] #{message}"
+        sanitized = sanitize_path(message)
+        line = "[#{timestamp}] [#{level}] #{sanitized}"
         if defined?(Reloaded::Log)
-          Reloaded::Log.write(:bootstrap, message, level: level.downcase.to_sym)
+          Reloaded::Log.write(:bootstrap, sanitized, level: level.downcase.to_sym)
         else
           File.open(LOG_FILE, "a") { |f| f.puts(line) } rescue nil
         end
-        puts("[Reloaded] #{message}") rescue nil
+        console(sanitized, level)
       end
 
       def load_folder(folder_name)
@@ -119,17 +120,33 @@ module Reloaded
 
       def load_file(path)
         load path
-        log("Loaded #{relative_path(path)}")
+        log("Loaded #{relative_path(path)}", "DEBUG")
       rescue Exception => e
         log("Error loading #{relative_path(path)}: #{e.class}: #{e}", "ERROR")
-        puts("[Reloaded] Error loading #{path}: #{e.class}: #{e}") rescue nil
-        puts(e.backtrace.first(5).join("\n")) rescue nil
+        console("Error loading #{relative_path(path)}: #{e.class}: #{e}", "ERROR") rescue nil
+        console(Array(e.backtrace).first(5).map { |line| sanitize_path(line) }.join("\n"), "ERROR") rescue nil
       end
 
       def relative_path(path)
         path.to_s.sub(ROOT + File::SEPARATOR, "").gsub("\\", "/")
       rescue
         path.to_s
+      end
+
+      def sanitize_path(value)
+        text = value.to_s.gsub("\\", "/")
+        root = ROOT.gsub("\\", "/")
+        game_root = File.expand_path(File.join(ROOT, "..")).gsub("\\", "/")
+        text = text.gsub(/#{Regexp.escape(game_root)}(?=\/|\z)/i, "")
+        text = text.gsub(/#{Regexp.escape(root)}(?=\/|\z)/i, "/Reloaded")
+        text
+      rescue
+        value.to_s
+      end
+
+      def console(message, level = "INFO")
+        return unless ["ERROR", "WARNING", "WARN", "FATAL", "CRITICAL"].include?(level.to_s.upcase)
+        puts("[Reloaded] #{sanitize_path(message)}") rescue nil
       end
     end
   end

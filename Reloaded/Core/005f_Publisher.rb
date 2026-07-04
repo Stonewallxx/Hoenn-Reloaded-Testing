@@ -36,9 +36,31 @@ module Reloaded
         File.exist?(PUBLISH_BAT)
       end
 
+      def status_text
+        return "Publisher ready." if available?
+        return "Publisher folder is missing: #{display_path(TOOL_DIR)}" unless Dir.exist?(TOOL_DIR)
+        "Publisher batch file is missing: #{display_path(PUBLISH_BAT)}"
+      end
+
       def launch_tool
-        raise "Publisher batch file is missing: #{PUBLISH_BAT}" unless available?
-        system("start \"\" \"#{PUBLISH_BAT.gsub("/", "\\")}\"")
+        raise status_text unless available?
+        command = "cmd /c start \"\" /D \"#{windows_path(TOOL_DIR)}\" \"#{windows_path(PUBLISH_BAT)}\""
+        ok = system(command)
+        raise "Windows could not launch the publisher tool." unless ok
+        Reloaded::Log.info("Publisher tool launched from #{display_path(PUBLISH_BAT)}", :mods) if defined?(Reloaded::Log)
+        true
+      end
+
+      private
+
+      def windows_path(path)
+        path.to_s.gsub("/", "\\")
+      end
+
+      def display_path(path)
+        root = GAME_ROOT.to_s.gsub("\\", "/")
+        value = path.to_s.gsub("\\", "/")
+        value.sub(root, "")
       end
     end
   end

@@ -62,6 +62,7 @@ module Reloaded
 
       def apply_all
         return false unless defined?(GameData::Item)
+        return true unless game_data_ready?
         restore_managed_entries
         touched_ids = patched_item_ids
         applied = 0
@@ -128,6 +129,7 @@ module Reloaded
 
       def apply_entry(id, raw_data)
         data = normalize_data(id, raw_data)
+        return false unless validate_data(data)
         id_symbol = data[:id]
         id_number = data[:id_number]
         existing_number_owner = GameData::Item::DATA[id_number]
@@ -174,6 +176,18 @@ module Reloaded
         }
       end
 
+      def validate_data(data)
+        unless data[:id_number].is_a?(Integer) && data[:id_number] > 0
+          log_error("Item patch #{data[:id]} has invalid id_number #{data[:id_number].inspect}.")
+          return false
+        end
+        if data[:move] && !data_id_exists?("GameData::Move", data[:move])
+          log_error("Item patch #{data[:id]} references unknown move #{data[:move]}.")
+          return false
+        end
+        true
+      end
+
       def base_entry(id)
         key = normalize_symbol(id).to_s
         @base_entries[key] || {}
@@ -212,6 +226,31 @@ module Reloaded
 
       def blank?(value)
         value.nil? || value.to_s.strip.empty?
+      end
+
+      def game_data_ready?
+        defined?(GameData::Item) &&
+          GameData::Item.const_defined?(:DATA) &&
+          !GameData::Item::DATA.empty?
+      rescue
+        false
+      end
+
+      def data_id_exists?(class_name, value)
+        klass = resolve_class(class_name)
+        return true unless klass && klass.const_defined?(:DATA)
+        klass::DATA.key?(value)
+      rescue
+        true
+      end
+
+      def resolve_class(class_name)
+        class_name.to_s.split("::").inject(Object) do |scope, name|
+          return nil unless scope.const_defined?(name)
+          scope.const_get(name)
+        end
+      rescue
+        nil
       end
 
       def log_applied(count)

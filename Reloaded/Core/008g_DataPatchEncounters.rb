@@ -53,6 +53,7 @@ module Reloaded
       end
 
       def apply_all
+        return true unless game_data_ready?
         restore_managed_entries
         applied = {}
         TARGETS.each_key do |target|
@@ -142,6 +143,7 @@ module Reloaded
 
       def apply_entry(target, klass, entry_id, raw_data)
         data = normalize_data(target, entry_id, raw_data)
+        return false unless validate_data(target, entry_id, data)
         register_encounter(klass, data)
         @managed_entries[target] ||= []
         @managed_entries[target] << normalize_entry_id(data["map"], data["version"]) unless @managed_entries[target].include?(normalize_entry_id(data["map"], data["version"]))
@@ -180,6 +182,47 @@ module Reloaded
           "step_chances" => normalize_step_chances(step_chances),
           "types" => normalize_types(types)
         }
+      end
+
+      def validate_data(target, entry_id, data)
+        if data["map"].to_i <= 0
+          log_error("Encounter patch #{target}/#{entry_id} has invalid map #{data["map"].inspect}.")
+          return false
+        end
+        stringify_keys(data["step_chances"]).each do |type, chance|
+          type_id = normalize_encounter_type(type)
+          unless data_id_exists?("GameData::EncounterType", type_id)
+            log_error("Encounter patch #{target}/#{entry_id} references unknown encounter type #{type}.")
+            return false
+          end
+          if chance.to_i < 0
+            log_error("Encounter patch #{target}/#{entry_id} has invalid step chance #{type}=#{chance.inspect}.")
+            return false
+          end
+        end
+        stringify_keys(data["types"]).each do |type, entries|
+          type_id = normalize_encounter_type(type)
+          unless data_id_exists?("GameData::EncounterType", type_id)
+            log_error("Encounter patch #{target}/#{entry_id} references unknown encounter table #{type}.")
+            return false
+          end
+          Array(entries).each_with_index do |entry, index|
+            chance, species, min_level, max_level = entry
+            unless data_id_exists?("GameData::Species", species)
+              log_error("Encounter patch #{target}/#{entry_id} #{type}[#{index}] references unknown species #{species}.")
+              return false
+            end
+            if chance.to_i <= 0
+              log_error("Encounter patch #{target}/#{entry_id} #{type}[#{index}] has invalid chance #{chance.inspect}.")
+              return false
+            end
+            if min_level.to_i <= 0 || max_level.to_i <= 0 || min_level.to_i > max_level.to_i
+              log_error("Encounter patch #{target}/#{entry_id} #{type}[#{index}] has invalid levels #{min_level.inspect}-#{max_level.inspect}.")
+              return false
+            end
+          end
+        end
+        true
       end
 
       def encounter_to_hash(encounter)
@@ -391,6 +434,40 @@ module Reloaded
 
       def blank?(value)
         value.nil? || value.to_s.strip.empty?
+      end
+
+      def game_data_ready?
+        data_table_ready?("GameData::EncounterType") &&
+          data_table_ready?("GameData::Species")
+      rescue
+        false
+      end
+
+      def data_table_ready?(class_name)
+        klass = resolve_class(class_name)
+        return true unless klass && klass.const_defined?(:DATA)
+        !klass::DATA.empty?
+      rescue
+        false
+      end
+
+      def data_id_exists?(class_name, value)
+        return true if value.nil?
+        klass = resolve_class(class_name)
+        return true unless klass && klass.const_defined?(:DATA)
+        klass::DATA.key?(value)
+      rescue
+        true
+      end
+
+      def log_error(message)
+        if defined?(Reloaded::Log)
+          if Reloaded::Log.respond_to?(:error_once)
+            Reloaded::Log.error_once(message, :mods, key: "encounter_data_patch_error:#{message}")
+          else
+            Reloaded::Log.error(message, :mods)
+          end
+        end
       end
 
       def log_encounter_summary(klass, entry_id, encounter)

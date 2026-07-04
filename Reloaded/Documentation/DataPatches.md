@@ -705,8 +705,9 @@ Trainer patch validation:
 - `edit_pokemon` references existing zero-based party slots only. If the slot
   does not exist, Reloaded logs a warning and ignores that edit. Use
   `add_pokemon` to append a new party member.
-- `replace_pokemon` can target an empty slot up to the normal party size limit,
-  but invalid slots are logged as warnings and ignored.
+- `replace_pokemon` references existing zero-based party slots only. If the slot
+  does not exist, Reloaded logs a warning and ignores that replacement. Use
+  `add_pokemon` to append a new party member.
 - Patches that target a missing trainer without using `add` are logged as
   warnings. Check the trainer type, trainer name, and version if the patch was
   meant to modify an existing trainer.
@@ -996,6 +997,33 @@ Each patch must include:
 
 Invalid patches are skipped and logged through `Reloaded::Log`. The data patch
 system writes summary counts into the main Reloaded log.
+
+GameData-backed patch targets also validate runtime references before writing
+into the engine data tables:
+
+- item patches reject invalid `id_number` values and unknown linked `move` IDs;
+- move patches reject invalid `id_number` values, unknown `type` IDs, unknown
+  `target` IDs, invalid categories, invalid accuracy values, and invalid PP;
+- ability patches reject invalid `id_number` values and empty names;
+- species core patches reject unknown type, growth rate, gender ratio, item,
+  egg group, color, shape, and habitat IDs;
+- species `base_stats` and `evs` must be stat objects using valid stat names and
+  numeric values;
+- species learnset patches reject unknown move IDs;
+- species ability-list patches reject unknown ability IDs;
+- species evolution patches reject unknown target species and unknown evolution
+  methods;
+- encounter patches reject unknown encounter types, unknown species, invalid
+  chances, invalid map IDs, and invalid level ranges;
+- trainer patches reject unknown required trainer types, unknown required
+  Pokemon species, invalid Pokemon levels, and invalid party slot edits;
+- trainer optional IDs such as moves, held items, bag items, abilities, and
+  natures are checked against their matching `GameData` tables and omitted with
+  warnings if invalid.
+
+Validation is intentionally strict for data that can crash battles, saves,
+evolutions, encounters, or debug menus. If a patch is rejected, check
+`Reloaded/Logging/Mods.txt` for the exact field and ID that failed.
 
 ## Conflicts
 

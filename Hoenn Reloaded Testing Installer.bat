@@ -1,17 +1,17 @@
 @echo off
 setlocal enabledelayedexpansion
-title Hoenn Reloaded - Full Update
+title Hoenn Reloaded Testing - Full Update
 color 0A
 
 :: ============================================================
 ::  CONFIG
 :: ============================================================
-set "REPO_URL=https://github.com/Stonewallxx/Hoenn-Reloaded.git"
-set "REPO_RAW=https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/main"
+set "REPO_URL=https://github.com/Stonewallxx/Hoenn-Reloaded-Testing.git"
+set "REPO_RAW=https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded-Testing/main"
 set "BRANCH=main"
 set "SCRIPT_DIR=%~dp0"
 set "GAME_ROOT="
-set "FILES_PROTECTED=REQUIRED_BY_INSTALLER_UPDATER plus ignored/user-created files. Other tracked release files are updated."
+set "FILES_PROTECTED=REQUIRED_BY_INSTALLER_UPDATER plus ignored/user-created files. Other tracked testing files are updated."
 set "FILES_UPDATED=Not started"
 set "CLEANUP_STATUS=No temporary cleanup needed"
 
@@ -27,12 +27,12 @@ set "VER_FILE=%GAME_ROOT%\Reloaded\Version.md"
 :: ============================================================
 echo.
 echo  ============================================================
-echo   Hoenn Reloaded Installer
+echo   Hoenn Reloaded Testing Installer
 echo  ============================================================
 echo   Purpose:
-echo   - Install or update Hoenn Reloaded from the public release repo.
-echo   - Keep this folder connected to Stonewallxx/Hoenn-Reloaded.
-echo   - Replace tracked release files with the latest release branch files.
+echo   - Install or update Hoenn Reloaded from the testing repo.
+echo   - Keep this folder connected to Stonewallxx/Hoenn-Reloaded-Testing.
+echo   - Replace tracked testing files with the latest testing branch files.
 echo.
 echo   Protected:
 echo   - REQUIRED_BY_INSTALLER_UPDATER is protected so bundled Git is not replaced while running.
@@ -40,7 +40,7 @@ echo   - Git ignored/user-created files are left alone by Git.
 echo   - Save data is not stored in this repo and is not changed by this tool.
 echo.
 echo   Not protected:
-echo   - Tracked release files outside REQUIRED_BY_INSTALLER_UPDATER are updated.
+echo   - Tracked testing files outside REQUIRED_BY_INSTALLER_UPDATER are updated.
 echo  ============================================================
 echo.
 
@@ -71,19 +71,19 @@ for /f "usebackq tokens=*" %%A in (
 :: ============================================================
 echo.
 echo  ============================================================
-echo   Hoenn Reloaded  ^|  Full Update
+echo   Hoenn Reloaded Testing  ^|  Full Update
 echo  ============================================================
 echo   Installed Version  : !LOCAL_VER!
 echo   Available Version  : !REMOTE_VER!
 echo   Target Folder      : %GAME_ROOT%
 echo  ------------------------------------------------------------
 echo.
-echo   This will pull the full Hoenn Reloaded release from GitHub,
+echo   This will pull the full Hoenn Reloaded Testing build from GitHub,
 echo   including all game files and Mod Manager files.
 echo.
 echo   Your saves will NOT be affected.
 echo.
-echo   SOURCE: github.com/Stonewallxx/Hoenn-Reloaded
+echo   SOURCE: github.com/Stonewallxx/Hoenn-Reloaded-Testing
 echo  ============================================================
 echo.
 set /p "go=  Press ENTER to update, or close this window to cancel: "
@@ -136,7 +136,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo  [2/3] Fetching latest release from GitHub...
+echo  [2/3] Fetching latest testing build from GitHub...
 "%MGIT%" remote remove origin >nul 2>&1
 "%MGIT%" remote add origin "%REPO_URL%" >nul 2>&1
 "%MGIT%" fetch --depth=1 --force origin %BRANCH%
@@ -144,7 +144,7 @@ if %errorlevel% neq 0 (
     echo.
     color 0C
     echo  ============================================================
-    echo   ERROR: Failed to fetch update from GitHub.
+    echo   ERROR: Failed to fetch testing update from GitHub.
     echo  ------------------------------------------------------------
     echo   - Check your internet connection
     echo   - GitHub may be temporarily unavailable
@@ -168,7 +168,7 @@ if %errorlevel% neq 0 (
     echo.
     color 0C
     echo  ============================================================
-    echo   ERROR: Failed to apply update.
+    echo   ERROR: Failed to apply testing update.
     echo  ------------------------------------------------------------
     echo   Close the game and any Git/updater windows, then try again.
     echo  ============================================================
@@ -195,7 +195,7 @@ if exist "%VER_FILE%" (
 :: ============================================================
 echo.
 echo  ============================================================
-echo   Update Complete!
+echo   Testing Update Complete!
 echo  ------------------------------------------------------------
 echo   Previous Version  : !LOCAL_VER!
 echo   Installed Version : !NEW_VER!

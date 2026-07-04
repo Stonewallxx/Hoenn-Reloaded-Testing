@@ -142,7 +142,8 @@ Recommended format:
 download planner installs dependencies before the selected mod. If a dependency
 is already installed at the required version or newer, it is reused instead of
 downloaded again. If the dependency cannot be found in the GitHub index, or the
-index has no version new enough, the UI reports that specifically.
+index has no version new enough, the UI reports that specifically. Entries that
+exist in the index but do not have a `download_url` are also reported separately.
 
 `changelogurl` may point to a raw text file. The Mod Browser exposes it through
 `View Changelog` and displays the text in the right panel with scrolling.
@@ -165,6 +166,10 @@ If `versions` is present, `latest_version` decides the default download. Older
 versions are kept in the same entry so the browser can expose them later without
 guessing from GitHub folder names. The archive files may still physically live
 in an `Old Versions` folder on GitHub.
+
+The in-game version picker labels versions as `Latest`, `Installed`, `Older`,
+or `Newer` when that context is known. Installing an older version over a newer
+installed version requires an extra confirmation.
 
 Published profiles are listed under `profiles`. These replace traditional
 modpacks internally. The UI may still call them modpacks for players, but the
@@ -194,6 +199,11 @@ with the same manifest `id` already exists, the existing folder is updated.
 Otherwise the extracted folder name is preserved. The manifest `id`, not the
 folder name, is the stable identifier for profiles, dependencies, and browser
 entries.
+
+Archive installs are rollback-protected. Before replacing an existing mod
+folder, Reloaded moves the old folder into `Mods/.ReloadedInstallBackups/`.
+If extraction or copying fails, Reloaded restores the previous folder and
+removes the partial install. Successful installs clean up the backup folder.
 
 ## Profile Import Downloads
 

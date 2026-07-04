@@ -314,7 +314,9 @@ module Reloaded
           log_error("Species core patch #{species_id} cannot apply; species does not exist.")
           return false
         end
+        return false unless validate_core_raw_data(species_id, raw_data)
         data = normalize_core_data(species_id, raw_data)
+        return false unless validate_core_data(species_id, data)
         set_core_fields(species, data)
         species.instance_variable_set(:@reloaded_data_patch_core, true)
         @managed_core_species << species_id unless @managed_core_species.include?(species_id)
@@ -332,6 +334,7 @@ module Reloaded
           return false
         end
         data = normalize_ability_data(species_id, raw_data)
+        return false unless validate_ability_data(species_id, data)
         set_ability_arrays(species, data)
         @managed_ability_species << species_id unless @managed_ability_species.include?(species_id)
         true
@@ -348,6 +351,7 @@ module Reloaded
           return false
         end
         data = normalize_learnset_data(species_id, raw_data)
+        return false unless validate_learnset_data(species_id, data)
         set_learnset_fields(species, data)
         @managed_learnset_species << species_id unless @managed_learnset_species.include?(species_id)
         true
@@ -363,7 +367,9 @@ module Reloaded
           log_error("Species evolution patch #{species_id} cannot apply; species does not exist.")
           return false
         end
+        return false unless validate_evolution_raw_data(species_id, raw_data)
         data = normalize_evolution_data(species_id, raw_data)
+        return false unless validate_evolution_data(species_id, data)
         set_evolution_fields(species, data)
         @managed_evolution_species << species_id unless @managed_evolution_species.include?(species_id)
         true
@@ -446,11 +452,175 @@ module Reloaded
         base = @base_evolution_entries[normalize_entry_id(id)] || {}
         data = {}
         EVOLUTION_FIELDS.each { |field| data[field] = raw.key?(field) ? raw[field] : base[field] }
-        evolutions = raw.key?("evolutions") ? normalize_evolutions(data["evolutions"]) : normalize_evolutions(base["evolutions"])
-        evolutions = merge_evolutions(evolutions, normalize_evolutions(data["add_evolutions"]))
+        context = "#{id} evolutions"
+        evolutions = raw.key?("evolutions") ? normalize_evolutions(data["evolutions"], context) : normalize_evolutions(base["evolutions"], context)
+        evolutions = merge_evolutions(evolutions, normalize_evolutions(data["add_evolutions"], context))
         {
           "evolutions" => evolutions
         }
+      end
+
+      def validate_core_data(id, data)
+        checks = [
+          ["type1", "GameData::Type"],
+          ["type2", "GameData::Type"],
+          ["growth_rate", "GameData::GrowthRate"],
+          ["gender_ratio", "GameData::GenderRatio"],
+          ["wild_item_common", "GameData::Item"],
+          ["wild_item_uncommon", "GameData::Item"],
+          ["wild_item_rare", "GameData::Item"],
+          ["incense", "GameData::Item"],
+          ["color", "GameData::BodyColor"],
+          ["shape", "GameData::BodyShape"],
+          ["habitat", "GameData::Habitat"]
+        ]
+        checks.each do |field, class_name|
+          next if data[field].nil?
+          next if data_id_exists?(class_name, data[field])
+          log_error("Species core patch #{id} references unknown #{field} #{data[field]}.")
+          return false
+        end
+        Array(data["egg_groups"]).each do |egg_group|
+          next if data_id_exists?("GameData::EggGroup", egg_group)
+          log_error("Species core patch #{id} references unknown egg_group #{egg_group}.")
+          return false
+        end
+        return false unless validate_stat_hash(id, "base_stats", data["base_stats"], 1)
+        return false unless validate_stat_hash(id, "evs", data["evs"], 0)
+        true
+      end
+
+      def validate_core_raw_data(id, raw_data)
+        raw = stringify_keys(raw_data.is_a?(Hash) ? raw_data : {})
+        ["base_stats", "evs"].each do |field|
+          next unless raw.key?(field)
+          unless raw[field].is_a?(Hash)
+            log_error("Species core patch #{id} has invalid #{field}; expected a stat object.")
+            return false
+          end
+          unless validate_raw_stat_hash(id, field, raw[field])
+            return false
+          end
+        end
+        true
+      end
+
+      def validate_raw_stat_hash(id, field, value)
+        raw = stringify_keys(value.is_a?(Hash) ? value : {})
+        valid_keys = stat_ids.map(&:to_s)
+        raw.each do |key, amount|
+          unless valid_keys.include?(key.to_s.upcase)
+            log_error("Species core patch #{id} has unknown #{field} stat #{key.inspect}.")
+            return false
+          end
+          unless amount.to_s =~ /\A-?\d+\z/
+            log_error("Species core patch #{id} has non-numeric #{field}.#{key}=#{amount.inspect}.")
+            return false
+          end
+        end
+        true
+      end
+
+      def validate_ability_data(id, data)
+        ["abilities", "hidden_abilities"].each do |field|
+          Array(data[field]).each do |ability|
+            next if data_id_exists?("GameData::Ability", ability)
+            log_error("Species ability patch #{id} references unknown ability #{ability}.")
+            return false
+          end
+        end
+        true
+      end
+
+      def validate_learnset_data(id, data)
+        Array(data["moves"]).each do |entry|
+          move = entry[1] rescue nil
+          next if data_id_exists?("GameData::Move", move)
+          log_error("Species learnset patch #{id} references unknown move #{move}.")
+          return false
+        end
+        ["tutor_moves", "egg_moves"].each do |field|
+          Array(data[field]).each do |move|
+            next if data_id_exists?("GameData::Move", move)
+            log_error("Species learnset patch #{id} references unknown #{field} entry #{move}.")
+            return false
+          end
+        end
+        true
+      end
+
+      def validate_evolution_data(id, data)
+        Array(data["evolutions"]).each do |entry|
+          species = entry[0] rescue nil
+          method = entry[1] rescue nil
+          next_species = data_id_exists?("GameData::Species", species)
+          next_method = data_id_exists?("GameData::Evolution", method)
+          unless next_species
+            log_error("Species evolution patch #{id} references unknown evolution species #{species}.")
+            return false
+          end
+          unless next_method
+            log_error("Species evolution patch #{id} references unknown evolution method #{method}.")
+            return false
+          end
+        end
+        true
+      end
+
+      def validate_evolution_raw_data(id, raw_data)
+        raw = stringify_keys(raw_data.is_a?(Hash) ? raw_data : {})
+        ["evolutions", "add_evolutions"].each do |field|
+          next unless raw.key?(field)
+          unless raw[field].is_a?(Array)
+            log_error("Species evolution patch #{id} has invalid #{field}; expected an array.")
+            return false
+          end
+          raw[field].each_with_index do |entry, index|
+            species, method = raw_evolution_species_and_method(entry)
+            if blank?(species) || blank?(method)
+              log_error("Species evolution patch #{id} #{field}[#{index}] is missing species or method.")
+              return false
+            end
+            unless data_id_exists?("GameData::Species", normalize_symbol(species))
+              log_error("Species evolution patch #{id} #{field}[#{index}] references unknown species #{species.inspect}.")
+              return false
+            end
+            method_id = resolve_data_id("GameData::Evolution", method, nil)
+            unless data_id_exists?("GameData::Evolution", method_id)
+              log_error("Species evolution patch #{id} #{field}[#{index}] references unknown evolution method #{method.inspect}.")
+              return false
+            end
+          end
+        end
+        true
+      end
+
+      def raw_evolution_species_and_method(entry)
+        if entry.is_a?(Hash)
+          raw = stringify_keys(entry)
+          return [raw["species"] || raw["id"] || raw["target"], raw["method"] || raw["type"]]
+        end
+        return [entry[0], entry[1]] if entry.is_a?(Array)
+        [nil, nil]
+      end
+
+      def validate_stat_hash(id, field, value, minimum)
+        unless value.is_a?(Hash)
+          log_error("Species core patch #{id} has invalid #{field}; expected a stat object.")
+          return false
+        end
+        stat_ids.each do |stat|
+          unless value.key?(stat)
+            log_error("Species core patch #{id} is missing #{field}.#{stat}.")
+            return false
+          end
+          amount = value[stat].to_i
+          if amount < minimum
+            log_error("Species core patch #{id} has invalid #{field}.#{stat}=#{value[stat].inspect}.")
+            return false
+          end
+        end
+        true
       end
 
       def set_core_fields(species, data)
@@ -581,16 +751,16 @@ module Reloaded
         result
       end
 
-      def normalize_evolutions(value)
+      def normalize_evolutions(value, context = "species evolution")
         entries = []
         Array(value).each do |entry|
-          normalized = normalize_evolution(entry)
+          normalized = normalize_evolution(entry, context)
           entries << normalized if normalized
         end
         entries
       end
 
-      def normalize_evolution(entry)
+      def normalize_evolution(entry, context = "species evolution")
         if entry.is_a?(Hash)
           raw = stringify_keys(entry)
           species = raw["species"] || raw["id"] || raw["target"]
@@ -607,6 +777,14 @@ module Reloaded
         end
         return nil if blank?(species) || blank?(method)
         method_id = resolve_data_id("GameData::Evolution", method, :None)
+        unless data_id_exists?("GameData::Species", normalize_symbol(species))
+          log_error("#{context} references unknown species #{species.inspect}.")
+          return nil
+        end
+        unless data_id_exists?("GameData::Evolution", method_id)
+          log_error("#{context} references unknown evolution method #{method.inspect}.")
+          return nil
+        end
         [normalize_symbol(species), method_id, normalize_evolution_parameter(method_id, parameter), !!prevolution]
       end
 
@@ -706,6 +884,15 @@ module Reloaded
 
       def normalize_lookup_key(value)
         value.to_s.strip.downcase.gsub(/[^a-z0-9]+/, "")
+      end
+
+      def data_id_exists?(class_name, value)
+        return true if value.nil?
+        klass = resolve_class(class_name)
+        return true unless klass && klass.const_defined?(:DATA)
+        klass::DATA.key?(value)
+      rescue
+        true
       end
 
       def int_value(value, default)

@@ -33,8 +33,11 @@ module Reloaded
 
       def set(key, value, persist: true)
         load!
-        @values[normalize_key(key)] = value.to_s
-        save! if persist
+        normalized = normalize_key(key)
+        next_value = value.to_s
+        changed = @values[normalized] != next_value
+        @values[normalized] = next_value
+        save! if persist && changed
         value
       rescue Exception => e
         Reloaded::Log.exception("Failed to set Reloaded setting #{key}", e, channel: :framework) if defined?(Reloaded::Log)

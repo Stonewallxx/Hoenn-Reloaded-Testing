@@ -209,14 +209,39 @@ module Reloaded
         lines = ["Could not download:"]
         missing = Array(result[:missing])
         mismatches = Array(result[:version_mismatches])
-        failed = Array(result[:failed]) - missing - mismatches.map { |entry| entry[:id].to_s }
+        no_download_url = Array(result[:no_download_url])
+        failed = Array(result[:failed]) - missing - no_download_url - mismatches.map { |entry| entry[:id].to_s }
         lines << "Missing from browser index: #{missing.join(", ")}" unless missing.empty?
+        lines << "No download URL in index: #{no_download_url.join(", ")}" unless no_download_url.empty?
         mismatches.each do |entry|
           lines << "#{entry[:id]} needs v#{entry[:required_version]} or newer. Latest indexed: v#{entry[:available_version]}."
         end
         lines << "Failed install/download: #{failed.join(", ")}" unless failed.empty?
         lines << "No details returned." if lines.length == 1
         lines.join("\n")
+      end
+
+      def fetch_changelog_text_value(value)
+        text = value.to_s.strip
+        raise "Changelog path is empty." if text.empty?
+        if text[/\Ahttps?:\/\//i]
+          raise "Mod Browser is not available." unless defined?(Reloaded::ModBrowser)
+          return Reloaded::ModBrowser.fetch_url(text, cache_bust: true).to_s
+        end
+        path = resolve_local_changelog_path(text)
+        raise "Changelog file was not found: #{text}" if path.empty?
+        File.read(path)
+      end
+
+      def resolve_local_changelog_path(value)
+        root = File.expand_path(File.join(File.dirname(__FILE__), "..", ".."))
+        candidates = [
+          File.expand_path(value.to_s),
+          File.expand_path(File.join(root, value.to_s)),
+          File.expand_path(File.join(".", value.to_s))
+        ].uniq
+        found = candidates.find { |path| File.exist?(path) && !File.directory?(path) }
+        found || ""
       end
 
       def footer_button_rect(index, buttons)
@@ -2151,12 +2176,26 @@ module Reloaded
           show_message("No versions listed.")
           return
         end
-        labels = versions.map { |entry| entry["version"].to_s } + ["Back"]
+        labels = versions.map { |entry| version_choice_label(row, entry) } + ["Back"]
         choice = show_message("Choose Version", labels)
-        label = labels[choice]
-        return if label.nil? || label == "Back"
-        action = show_message("Download v#{label}?", ["Download", "Download & Enable", "Back"])
-        download_mod(row, action == 1, label) if action == 0 || action == 1
+        return if choice.nil? || choice >= versions.length
+        selected = versions[choice]
+        version = selected["version"].to_s
+        action = show_message("Download v#{version}?", ["Download", "Download & Enable", "Back"])
+        download_mod(row, action == 1, version) if action == 0 || action == 1
+      end
+
+      def version_choice_label(row, entry)
+        version = entry["version"].to_s
+        tags = []
+        latest = row["latest_version"].to_s
+        installed = installed_mod_version(row["id"])
+        tags << "Latest" if !latest.empty? && version == latest
+        tags << "Installed" if !installed.empty? && version == installed
+        if !installed.empty? && !version.empty? && version != installed
+          tags << (compare_versions(version, installed) < 0 ? "Older" : "Newer")
+        end
+        tags.empty? ? version : "#{version} (#{tags.join(", ")})"
       end
 
       def import_profile(row, enable_missing)
@@ -2260,15 +2299,7 @@ module Reloaded
       end
 
       def fetch_changelog_text(url)
-        value = url.to_s.strip
-        if value[/\Ahttps?:\/\//i]
-          raise "Mod Browser is not available." unless defined?(Reloaded::ModBrowser)
-          Reloaded::ModBrowser.fetch_url(value, cache_bust: true).to_s
-        else
-          path = File.expand_path(value)
-          path = File.expand_path(File.join(".", value)) unless File.exist?(path)
-          File.read(path)
-        end
+        fetch_changelog_text_value(url)
       end
 
       def request_exit
@@ -3105,7 +3136,7 @@ module Reloaded
           reload_after_profile_change
           show_message("Updated to v#{latest}.")
         else
-          show_message("Could not update:\n#{failed.join(", ")}")
+          show_message(download_failure_message(result))
         end
       rescue Exception => e
         Reloaded::Log.exception("Failed to update #{row[:id]}", e, channel: :mods) if defined?(Reloaded::Log)
@@ -3174,15 +3205,7 @@ module Reloaded
       end
 
       def fetch_installed_changelog_text(url)
-        value = url.to_s.strip
-        if value[/\Ahttps?:\/\//i]
-          raise "Mod Browser is not available." unless defined?(Reloaded::ModBrowser)
-          Reloaded::ModBrowser.fetch_url(value, cache_bust: true).to_s
-        else
-          path = File.expand_path(value)
-          path = File.expand_path(File.join(".", value)) unless File.exist?(path)
-          File.read(path)
-        end
+        fetch_changelog_text_value(url)
       end
 
       def disable_mod(row)
@@ -3600,6 +3623,10 @@ module Reloaded
       def open_publisher_tool
         unless defined?(Reloaded::Publisher)
           show_message("Publisher tools are not available.")
+          return
+        end
+        unless Reloaded::Publisher.available?
+          show_message(Reloaded::Publisher.status_text)
           return
         end
         Reloaded::Publisher.launch_tool

@@ -140,9 +140,11 @@ module Reloaded
         plan = build_download_plan(mod_ids, versions: versions, fetch_remote: true)
         installed = []
         failed = plan[:missing].dup + plan[:version_mismatches].map { |entry| entry[:id] }
+        no_download_url = []
         plan[:entries].each do |item|
           id = item["id"].to_s
           if item["download_url"].to_s.strip.empty?
+            no_download_url << id
             failed << id
             log("No download URL configured for #{id}", :warning)
             next
@@ -164,7 +166,8 @@ module Reloaded
           :already_installed => plan[:already_installed].uniq,
           :dependencies => plan[:dependencies].uniq,
           :requested => plan[:requested].uniq,
-          :version_mismatches => plan[:version_mismatches]
+          :version_mismatches => plan[:version_mismatches],
+          :no_download_url => no_download_url.uniq
         }
       end
 
@@ -224,7 +227,8 @@ module Reloaded
             :failed => failed,
             :already_installed => Array(result[:already_installed]),
             :dependencies => Array(result[:dependencies]),
-            :version_mismatches => Array(result[:version_mismatches])
+            :version_mismatches => Array(result[:version_mismatches]),
+            :no_download_url => Array(result[:no_download_url])
           } unless failed.empty?
         end
         disable_ids = enable_missing ? [] : installed
@@ -237,7 +241,8 @@ module Reloaded
           :installed => installed,
           :failed => failed,
           :already_installed => [],
-          :dependencies => []
+          :dependencies => [],
+          :no_download_url => []
         }
       end
 
@@ -257,6 +262,7 @@ module Reloaded
         return false unless File.exist?(archive_path)
         ensure_directory(MODS_DIR)
         staging = File.join(temp_root, "rld_install_#{Time.now.to_i}_#{rand(100000)}")
+        backups = []
         ensure_directory(staging)
         unless extract_archive(archive_path, staging)
           delete_tree(staging)
@@ -268,13 +274,15 @@ module Reloaded
           delete_tree(staging)
           return false
         end
-        roots.each { |root| install_mod_root(root) }
+        roots.each { |root| install_mod_root(root, backups) }
         delete_tree(staging)
+        cleanup_install_backups(backups)
         Reloaded::ModManager.refresh_metadata if defined?(Reloaded::ModManager)
         log("Installed #{roots.length} mod folder(s) from #{File.basename(archive_path)}")
         true
       rescue Exception => e
         Reloaded::Log.exception("Archive install failed", e, channel: :mods) if defined?(Reloaded::Log)
+        restore_install_backups(backups) if backups
         delete_tree(staging) if staging
         false
       end
@@ -615,17 +623,64 @@ module Reloaded
         found
       end
 
-      def install_mod_root(root)
+      def install_mod_root(root, backups = [])
         manifest = parse_json_file(File.join(root, "mod.json"))
         id = manifest.is_a?(Hash) ? normalize_mod_id(manifest["id"]) : ""
         id = normalize_mod_id(File.basename(root)) if id.empty?
         raise "Installed mod is missing an id" if id.empty?
         destination = installed_mod_folder(id) || File.join(MODS_DIR, install_folder_name(root, id))
-        delete_tree(destination) if File.directory?(destination)
+        backups << prepare_install_backup(destination)
         ensure_directory(destination)
         copy_tree(root, destination)
         log("Installed mod #{id} to #{File.basename(destination)}")
         id
+      end
+
+      def prepare_install_backup(destination)
+        entry = {
+          :destination => destination,
+          :backup => nil,
+          :existed => File.directory?(destination)
+        }
+        return entry unless entry[:existed]
+        backup = File.join(install_backup_root, "#{safe_filename(File.basename(destination))}_#{Time.now.to_i}_#{rand(100000)}")
+        move_tree(destination, backup)
+        entry[:backup] = backup
+        log("Created install rollback backup for #{File.basename(destination)}")
+        entry
+      rescue Exception
+        delete_tree(backup) if backup && File.directory?(backup)
+        raise
+      end
+
+      def restore_install_backups(backups)
+        Array(backups).reverse.each do |entry|
+          destination = entry[:destination]
+          delete_tree(destination) if File.directory?(destination)
+          if entry[:existed] && entry[:backup] && File.directory?(entry[:backup])
+            move_tree(entry[:backup], destination)
+            log("Restored previous mod folder #{File.basename(destination)} after failed install", :warning)
+          end
+        end
+      end
+
+      def cleanup_install_backups(backups)
+        Array(backups).each do |entry|
+          delete_tree(entry[:backup]) if entry[:backup] && File.directory?(entry[:backup])
+        end
+        delete_tree(install_backup_root) if Dir.exist?(install_backup_root) && Dir[glob_path(install_backup_root, "*")].empty?
+      end
+
+      def move_tree(source, destination)
+        ensure_directory(File.dirname(destination))
+        File.rename(source, destination)
+      rescue
+        copy_tree(source, destination)
+        delete_tree(source)
+      end
+
+      def install_backup_root
+        File.join(MODS_DIR, ".ReloadedInstallBackups")
       end
 
       def installed_mod_folder(id)

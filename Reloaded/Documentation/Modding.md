@@ -197,6 +197,11 @@ Example item patch:
 For item patches, `id_number` may be provided manually, but it is optional.
 Reloaded assigns the next available runtime number when it is omitted.
 
+Reloaded validates GameData-backed patches before applying them. Unknown
+species, moves, abilities, items, encounter types, evolution methods, trainer
+types, invalid stat objects, invalid encounter levels, and invalid trainer party
+slot edits are logged and skipped instead of being allowed into runtime data.
+
 Example move patch:
 
 ```json

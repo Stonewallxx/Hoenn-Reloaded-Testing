@@ -62,9 +62,10 @@ module Reloaded
       end
 
       def set_mode(value, persist: true)
+        previous_mode = mode
         self.mode = value
         Reloaded::Settings.set("logging_mode", mode_label) if persist && defined?(Reloaded::Settings)
-        info("Log Mode changed to #{mode_label}", :framework)
+        info("Log Mode changed to #{mode_label}", :framework) if previous_mode != mode
         mode
       end
 

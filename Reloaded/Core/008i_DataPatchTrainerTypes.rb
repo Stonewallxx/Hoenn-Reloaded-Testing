@@ -57,12 +57,14 @@ module Reloaded
           TARGET,
           @base_entries,
           owner: :reloaded,
-          description: "Runtime trainer type AI and skill data patch target."
+          description: "Runtime trainer type AI and skill data patch target.",
+          defer_missing_entries: true
         )
       end
 
       def apply_all
         return false unless defined?(GameData::TrainerType)
+        return true unless game_data_ready?
         restore_managed_entries
         applied = 0
         patched_trainer_type_ids.each do |id|
@@ -233,6 +235,14 @@ module Reloaded
 
       def blank?(value)
         value.nil? || value.to_s.strip.empty?
+      end
+
+      def game_data_ready?
+        defined?(GameData::TrainerType) &&
+          GameData::TrainerType.const_defined?(:DATA) &&
+          !GameData::TrainerType::DATA.empty?
+      rescue
+        false
       end
 
       def log_applied(count)

@@ -137,6 +137,7 @@ module Reloaded
         TARGETS.each do |target, class_name|
           klass = resolve_class(class_name)
           next unless trainer_class?(klass)
+          next unless game_data_ready?(klass)
           restore_managed_entries(target, klass)
           count = apply_target(target, klass)
           total += count
@@ -223,14 +224,16 @@ module Reloaded
         apply_text_aliases(data, raw)
         data["id_number"] = next_id_number(target_class_for(target)) if blank?(data["id_number"])
         context = "#{target}/#{entry_id}"
+        trainer_type = resolve_valid_data_id("GameData::TrainerType", data["trainer_type"], context, "trainer type", required: true)
+        return nil unless trainer_type
         party = normalize_party(data["pokemon"], context)
         party = replace_party_slots(party, data["replace_pokemon"], context)
         party = edit_party_slots(party, data["edit_pokemon"], context)
         party = add_party_members(party, data["add_pokemon"], context)
         {
-          :id => [normalize_symbol(data["trainer_type"]), data["name"].to_s, data["version"].to_i],
+          :id => [trainer_type, data["name"].to_s, data["version"].to_i],
           :id_number => data["id_number"].to_i,
-          :trainer_type => normalize_symbol(data["trainer_type"]),
+          :trainer_type => trainer_type,
           :name => data["name"].to_s,
           :version => data["version"].to_i,
           :items => normalize_valid_data_id_list("GameData::Item", data["items"], context, "trainer bag item"),
@@ -259,7 +262,7 @@ module Reloaded
         Array(replacements).each do |entry|
           raw = stringify_keys(entry.is_a?(Hash) ? entry : {})
           slot = raw.key?("slot") ? raw["slot"].to_i : nil
-          if slot.nil? || slot < 0 || slot >= Settings::MAX_PARTY_SIZE
+          if slot.nil? || slot < 0 || slot >= result.length
             log_warning("Trainer patch #{context} ignored replace_pokemon entry with invalid slot #{raw["slot"].inspect}.")
             next
           end
@@ -309,6 +312,10 @@ module Reloaded
           :species => species,
           :level => int_value(data["level"], int_value(base_data["level"], 1))
         }
+        if result[:level].to_i <= 0
+          log_error("Trainer patch #{context} has invalid Pokemon level #{result[:level].inspect}.")
+          return nil
+        end
         result[:form] = data["form"].to_i unless blank?(data["form"])
         result[:name] = data["name"].to_s unless blank?(data["name"])
         result[:moves] = normalize_valid_data_id_list("GameData::Move", data["moves"], context, "move") if data.key?("moves") || raw.key?("moves")
@@ -325,9 +332,12 @@ module Reloaded
           result[:item] = item if item
         end
         result[:gender] = normalize_gender(data["gender"]) unless blank?(data["gender"])
-        result[:nature] = resolve_data_id("GameData::Nature", data["nature"], nil) unless blank?(data["nature"])
-        result[:iv] = normalize_stat_hash(data["iv"]) if data["iv"].is_a?(Hash)
-        result[:ev] = normalize_stat_hash(data["ev"]) if data["ev"].is_a?(Hash)
+        unless blank?(data["nature"])
+          nature = resolve_valid_data_id("GameData::Nature", data["nature"], context, "nature")
+          result[:nature] = nature if nature
+        end
+        result[:iv] = normalize_stat_hash(data["iv"], context, "iv") if data["iv"].is_a?(Hash)
+        result[:ev] = normalize_stat_hash(data["ev"], context, "ev") if data["ev"].is_a?(Hash)
         result[:happiness] = data["happiness"].to_i unless blank?(data["happiness"])
         result[:shininess] = truthy?(data["shininess"]) unless blank?(data["shininess"])
         result[:shadowness] = truthy?(data["shadowness"]) unless blank?(data["shadowness"])
@@ -462,13 +472,24 @@ module Reloaded
       rescue
       end
 
-      def normalize_stat_hash(value)
+      def normalize_stat_hash(value, context = "trainer pokemon", label = "stat")
         raw = stringify_keys(value.is_a?(Hash) ? value : {})
         result = {}
+        valid_keys = stat_ids.map(&:to_s)
+        raw.keys.each do |key|
+          next if valid_keys.include?(key.to_s.upcase)
+          log_warning("Trainer patch #{context} ignored unknown #{label} stat #{key.inspect}.")
+        end
         stat_ids.each do |stat|
           string_id = stat.to_s
           raw_value = raw.key?(string_id) ? raw[string_id] : raw[string_id.downcase]
-          result[stat] = raw_value.to_i unless raw_value.nil?
+          next if raw_value.nil?
+          amount = raw_value.to_i
+          if amount < 0
+            log_warning("Trainer patch #{context} clamped negative #{label}.#{stat}=#{raw_value.inspect} to 0.")
+            amount = 0
+          end
+          result[stat] = amount
         end
         result
       end
@@ -575,6 +596,23 @@ module Reloaded
 
       def blank?(value)
         value.nil? || value.to_s.strip.empty?
+      end
+
+      def game_data_ready?(klass)
+        trainer_class?(klass) &&
+          !klass::DATA.empty? &&
+          data_table_ready?("GameData::TrainerType") &&
+          data_table_ready?("GameData::Species")
+      rescue
+        false
+      end
+
+      def data_table_ready?(class_name)
+        klass = resolve_class(class_name)
+        return true unless klass && klass.const_defined?(:DATA)
+        !klass::DATA.empty?
+      rescue
+        false
       end
 
       def register_events

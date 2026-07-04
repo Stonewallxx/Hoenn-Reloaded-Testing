@@ -91,6 +91,7 @@ module Reloaded
     @profile_enabled_ids = []
     @profile_disabled_ids = []
     @profile_load_order = []
+    @last_summary_key = nil
 
     class << self
       def boot
@@ -252,7 +253,7 @@ module Reloaded
         reset
         scan_folder(MODS_DIR, :mods)
         scan_folder(MODDEV_DIR, :moddev) if moddev_enabled?
-        Reloaded::Log.info("Scanned #{@candidates.length} mod candidate(s)", :mods) if defined?(Reloaded::Log)
+        Reloaded::Log.debug("Scanned #{@candidates.length} mod candidate(s)", :mods) if defined?(Reloaded::Log)
         @candidates
       end
 
@@ -733,7 +734,8 @@ module Reloaded
       end
 
       def write_summary
-        Reloaded::Log.summary(
+        return unless defined?(Reloaded::Log)
+        fields = {
           :mod_candidates => @candidates.length,
           :valid_mods => @mods.length,
           :active_mods => @active_mods.length,
@@ -744,7 +746,12 @@ module Reloaded
           :data_patches_applied => defined?(Reloaded::DataPatches) ? Reloaded::DataPatches.summary[:applied] : 0,
           :active_profile => active_profile_name,
           :moddev_enabled => moddev_enabled?
-        ) if defined?(Reloaded::Log)
+        }
+        summary_key = fields.map { |key, value| "#{key}=#{value}" }.join("|")
+        summary_key += "|enabled=#{@profile_enabled_ids.sort.join(",")}|disabled=#{@profile_disabled_ids.sort.join(",")}"
+        return if @last_summary_key == summary_key
+        @last_summary_key = summary_key
+        Reloaded::Log.summary(fields)
       end
 
       def log_invalid(candidate)

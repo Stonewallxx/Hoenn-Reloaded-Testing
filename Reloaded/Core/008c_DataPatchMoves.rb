@@ -71,6 +71,7 @@ module Reloaded
 
       def apply_all
         return false unless defined?(GameData::Move)
+        return true unless game_data_ready?
         restore_managed_entries
         touched_ids = patched_move_ids
         applied = 0
@@ -140,6 +141,7 @@ module Reloaded
 
       def apply_entry(id, raw_data)
         data = normalize_data(id, raw_data)
+        return false unless validate_data(data)
         id_symbol = data[:id]
         id_number = data[:id_number]
         existing_number_owner = GameData::Move::DATA[id_number]
@@ -196,6 +198,34 @@ module Reloaded
           :flags => data["flags"].to_s,
           :description => data["description"].to_s
         }
+      end
+
+      def validate_data(data)
+        unless data[:id_number].is_a?(Integer) && data[:id_number] > 0
+          log_error("Move patch #{data[:id]} has invalid id_number #{data[:id_number].inspect}.")
+          return false
+        end
+        unless data_id_exists?("GameData::Type", data[:type])
+          log_error("Move patch #{data[:id]} references unknown type #{data[:type]}.")
+          return false
+        end
+        unless data_id_exists?("GameData::Target", data[:target])
+          log_error("Move patch #{data[:id]} references unknown target #{data[:target]}.")
+          return false
+        end
+        unless [0, 1, 2].include?(data[:category].to_i)
+          log_error("Move patch #{data[:id]} has invalid category #{data[:category].inspect}.")
+          return false
+        end
+        if data[:accuracy].to_i < 0 || data[:accuracy].to_i > 100
+          log_error("Move patch #{data[:id]} has invalid accuracy #{data[:accuracy].inspect}.")
+          return false
+        end
+        if data[:total_pp].to_i <= 0
+          log_error("Move patch #{data[:id]} has invalid total_pp #{data[:total_pp].inspect}.")
+          return false
+        end
+        true
       end
 
       def base_entry(id)
@@ -275,6 +305,32 @@ module Reloaded
 
       def blank?(value)
         value.nil? || value.to_s.strip.empty?
+      end
+
+      def data_id_exists?(class_name, value)
+        klass = resolve_class(class_name)
+        return true unless klass && klass.const_defined?(:DATA)
+        klass::DATA.key?(value)
+      rescue
+        true
+      end
+
+      def game_data_ready?
+        defined?(GameData::Move) &&
+          GameData::Move.const_defined?(:DATA) &&
+          !GameData::Move::DATA.empty? &&
+          data_table_ready?("GameData::Type") &&
+          data_table_ready?("GameData::Target")
+      rescue
+        false
+      end
+
+      def data_table_ready?(class_name)
+        klass = resolve_class(class_name)
+        return true unless klass && klass.const_defined?(:DATA)
+        !klass::DATA.empty?
+      rescue
+        false
       end
 
       def log_applied(count)

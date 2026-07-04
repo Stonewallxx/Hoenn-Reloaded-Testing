@@ -55,6 +55,7 @@ module Reloaded
 
       def apply_all
         return false unless defined?(GameData::Ability)
+        return true unless game_data_ready?
         restore_managed_entries
         touched_ids = patched_ability_ids
         applied = 0
@@ -114,6 +115,7 @@ module Reloaded
 
       def apply_entry(id, raw_data)
         data = normalize_data(id, raw_data)
+        return false unless validate_data(data)
         id_symbol = data[:id]
         id_number = data[:id_number]
         existing_number_owner = GameData::Ability::DATA[id_number]
@@ -150,6 +152,18 @@ module Reloaded
           :name => data["name"].to_s,
           :description => data["description"].to_s
         }
+      end
+
+      def validate_data(data)
+        unless data[:id_number].is_a?(Integer) && data[:id_number] > 0
+          log_error("Ability patch #{data[:id]} has invalid id_number #{data[:id_number].inspect}.")
+          return false
+        end
+        if blank?(data[:name])
+          log_error("Ability patch #{data[:id]} has an empty name.")
+          return false
+        end
+        true
       end
 
       def base_entry(id)
@@ -190,6 +204,14 @@ module Reloaded
 
       def blank?(value)
         value.nil? || value.to_s.strip.empty?
+      end
+
+      def game_data_ready?
+        defined?(GameData::Ability) &&
+          GameData::Ability.const_defined?(:DATA) &&
+          !GameData::Ability::DATA.empty?
+      rescue
+        false
       end
 
       def log_applied(count)
