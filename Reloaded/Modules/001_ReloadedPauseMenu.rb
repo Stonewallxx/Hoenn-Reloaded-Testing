@@ -6,7 +6,7 @@
 #
 # Responsibilities:
 #   - Register the Standard/Reloaded pause menu option.
-#   - Wire REPM save defaults into PokemonSystem.
+#   - Store REPM layout and favorite state in the Reloaded save bucket.
 #   - Draw the REPM grid, carousel, module icons, favorites, and row customizer.
 #   - Register reference pause-menu modules.
 #   - Route the normal pause-menu call to REPM when the Reloaded option is active.
@@ -49,22 +49,6 @@ module Reloaded
 
           def reloaded_pause_menu=(value)
             self.hr_pause_menu = value
-          end
-
-          def hr_repm_custom_row
-            @hr_repm_custom_row ||= []
-          end
-
-          def hr_repm_custom_row=(value)
-            @hr_repm_custom_row = Array(value).map { |entry| entry.to_sym }
-          end
-
-          def hr_repm_favorite
-            @hr_repm_favorite
-          end
-
-          def hr_repm_favorite=(value)
-            @hr_repm_favorite = value
           end
         end
       end
@@ -161,6 +145,39 @@ module ReloadedPauseMenu
     _apply_order(_active_all, CAROUSEL_ORDER)
   end
 
+  SAVE_SYSTEM = :reloaded_pause_menu
+
+  def self.custom_row
+    if defined?(Reloaded::SaveData)
+      Array(Reloaded::SaveData.get(SAVE_SYSTEM, :custom_row, [], section: :systems)).map { |entry| entry.to_sym }
+    else
+      @fallback_custom_row ||= []
+    end
+  end
+
+  def self.custom_row=(value)
+    normalized = Array(value).map { |entry| entry.to_sym }
+    if defined?(Reloaded::SaveData)
+      Reloaded::SaveData.set(SAVE_SYSTEM, :custom_row, normalized.map { |entry| entry.to_s }, section: :systems)
+    else
+      @fallback_custom_row = normalized
+    end
+  end
+
+  def self.favorite_module_key
+    value = defined?(Reloaded::SaveData) ? Reloaded::SaveData.get(SAVE_SYSTEM, :favorite, nil, section: :systems) : @fallback_favorite
+    value.nil? || value.to_s.empty? ? nil : value.to_sym
+  end
+
+  def self.favorite_module_key=(value)
+    normalized = value.nil? ? nil : value.to_sym
+    if defined?(Reloaded::SaveData)
+      Reloaded::SaveData.set(SAVE_SYSTEM, :favorite, normalized ? normalized.to_s : nil, section: :systems)
+    else
+      @fallback_favorite = normalized
+    end
+  end
+
   def self.lock_reason_for(mod)
     reason = mod[:lock_reason]
     reason = reason.call if reason.respond_to?(:call)
@@ -184,7 +201,7 @@ module ReloadedPauseMenu
   end
   def self.all_row_modules_with_state(r)
     if r == 1
-      order = ($PokemonSystem.hr_repm_custom_row rescue []) || []
+      order = ReloadedPauseMenu.custom_row
     else
       order = FIXED_ROW_ORDER
     end
@@ -399,7 +416,7 @@ module ReloadedPauseMenu
     end
 
     def cached_module_box(mod, w, h, show_label, locked)
-      fav_key = ($PokemonSystem.hr_repm_favorite rescue nil)
+      fav_key = ReloadedPauseMenu.favorite_module_key
       key = [mod[:key], w, h, show_label ? 1 : 0, locked ? 1 : 0, fav_key == mod[:key] ? 1 : 0]
       return @module_box_cache[key] if @module_box_cache[key]
       bitmap = Bitmap.new(w, h)
@@ -408,7 +425,7 @@ module ReloadedPauseMenu
     end
 
     def draw_module_box_uncached(b, mod, x, y, w, h, selected, show_label = true, locked = false)
-      fav_key = ($PokemonSystem.hr_repm_favorite rescue nil)
+      fav_key = ReloadedPauseMenu.favorite_module_key
       is_fav  = fav_key && fav_key == mod[:key]
 
       if show_label
@@ -637,7 +654,7 @@ module ReloadedPauseMenu
           @focus = :row0; clamp_slot(0); pbPlayCursorSE; draw_grid; draw_carousel
         end
       elsif Input.trigger?(Input::SPECIAL)
-        fav_key = ($PokemonSystem.hr_repm_favorite rescue nil)
+        fav_key = ReloadedPauseMenu.favorite_module_key
         if fav_key
           entry = @all_entries.find { |e| e[:mod][:key] == fav_key }
           if entry && !entry[:locked]
@@ -701,7 +718,7 @@ module ReloadedPauseMenu
       elsif Input.trigger?(Input::AUX2)
         @focus = :carousel; pbPlayCursorSE; draw_grid; draw_carousel
       elsif Input.trigger?(Input::SPECIAL)
-        fav_key = ($PokemonSystem.hr_repm_favorite rescue nil)
+        fav_key = ReloadedPauseMenu.favorite_module_key
         if fav_key
           entry = @row_entries.flatten.find { |e| e[:mod][:key] == fav_key }
           entry ||= @all_entries.find { |e| e[:mod][:key] == fav_key }
@@ -743,8 +760,8 @@ module ReloadedPauseMenu
     end
 
     def _toggle_favorite(key)
-      fav = ($PokemonSystem.hr_repm_favorite rescue nil)
-      $PokemonSystem.hr_repm_favorite = (fav == key ? nil : key) rescue nil
+      fav = ReloadedPauseMenu.favorite_module_key
+      ReloadedPauseMenu.favorite_module_key = (fav == key ? nil : key)
       pbPlayDecisionSE
     end
 
@@ -773,7 +790,7 @@ module ReloadedPauseMenu
       @all_mods = ReloadedPauseMenu.instance_variable_get(:@modules) || []
       return if @all_mods.empty?
 
-      saved = ($PokemonSystem.hr_repm_custom_row rescue []) || []
+      saved = ReloadedPauseMenu.custom_row
       @checked_order = saved.select { |k| @all_mods.any? { |m| m[:key] == k } }
       @cursor   = 0
       @top_row  = 0
@@ -796,7 +813,7 @@ module ReloadedPauseMenu
       end
 
       teardown_cust
-      $PokemonSystem.hr_repm_custom_row = @checked_order
+      ReloadedPauseMenu.custom_row = @checked_order
     end
 
     private
@@ -1092,7 +1109,7 @@ ReloadedPauseMenu.register_module(
   :TMVAULT,
   label:     "TM Vault",
   handler:   proc { TMVault.open },
-  condition: proc { ($PokemonSystem.hr_tmvault rescue 0) == 2 },
+  condition: proc { defined?(TMVault) },
   lock_reason: "TM Vault is not available yet."
 )
 

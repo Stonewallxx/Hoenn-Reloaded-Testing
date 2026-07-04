@@ -548,6 +548,121 @@ modules for developer/debug entries or systems that should not be advertised yet
 Current default REPM modules are Pokedex, Pokemon, Bag, PokeNav, Trainer Info,
 Outfit, Save, Options, Debug, Title, Reloaded Mart, and TM Vault. Reloaded Mart
 and TM Vault stay locked unless their systems exist.
+
+REPM layout state uses the Reloaded save bucket under
+`systems/reloaded_pause_menu`. The saved keys are `custom_row` and `favorite`.
+
+## TM Vault
+
+TM Vault is implemented in:
+
+```text
+Reloaded/Modules/002_TMVault.rb
+```
+
+The vault stores its data in the Reloaded save bucket under the `tm_vault`
+system namespace, not on `$Trainer`:
+
+```ruby
+Reloaded::SaveData.system(:tm_vault)
+```
+
+Current saved fields:
+
+- `moves`: registered move IDs.
+- `sources`: source labels per registered move.
+- `sort_mode`: current TM Vault sort mode.
+- `egg_moves`: whether Relearn Moves includes egg moves.
+
+The `[ TM Vault ]` button in the `RELOADED` category opens a submenu:
+
+```text
+TM Vault: Off / PokeNav
+Egg Moves: Off / On
+```
+
+`TM Vault` controls PokeNav visibility. Default value: `PokeNav`.
+
+`Egg Moves` controls whether the vault's Relearn Moves mode includes egg
+moves. Default value: `On`.
+
+The Reloaded Pause Menu entry remains available whenever the TM Vault module is
+loaded, regardless of the PokeNav option. TM/HM and tutor moves are registered
+when the player picks up, receives, buys, or is taught the move, and the vault
+also scans the bag on open to catch existing machines.
+
+The PokeNav icon is loaded from:
+
+```text
+Reloaded/Graphics/Pokegear/icon_TMVAULT.png
+```
+
+### Script Usage
+
+Open the vault:
+
+```ruby
+TMVault.open
+```
+
+Register a move manually:
+
+```ruby
+TMVault.register(:THUNDERBOLT)
+TMVault.register(:ICEBEAM, source: :script)
+TMVault.register(:FLAMETHROWER, notify: true, source: :receive)
+TMVault.egg_moves_enabled = false
+```
+
+Check saved data:
+
+```ruby
+TMVault.vault             # => registered move IDs
+TMVault.source_for(:CUT)  # => source labels for that move
+TMVault.sort_mode          # => 0 Name, 1 Type, 2 Category, 3 Recent
+TMVault.egg_moves_enabled? # => true/false
+```
+
+Supported source labels are normalized to:
+
+- `Machine`
+- `Tutor`
+- `Shop`
+- `Pickup`
+- `Receive`
+- `Bag Scan`
+- `Script`
+
+If a saved move no longer exists, such as when a modded move is removed by a
+disabled mod, TM Vault logs one warning for that move during validation and
+removes it from the active vault list.
+
+### Events
+
+TM Vault emits these Reloaded events:
+
+```ruby
+Reloaded::Events.on(:tm_vault_move_registered, :my_mod) do |ctx|
+  move_id = ctx[:move]
+  source  = ctx[:source]
+end
+
+Reloaded::Events.on(:tm_vault_opened, :my_mod) do |ctx|
+  count = ctx[:move_count]
+end
+
+Reloaded::Events.on(:tm_vault_move_taught, :my_mod) do |ctx|
+  move_id = ctx[:move]
+  pokemon = ctx[:pokemon]
+end
+```
+
+Event payloads include:
+
+- `:tm_vault_move_registered`: `:move`, `:move_data`, `:source`.
+- `:tm_vault_opened`: `:move_count`.
+- `:tm_vault_move_taught`: `:move`, `:move_data`, `:pokemon`.
+
 ## Per-Mod Settings
 
 Mods can define editable settings in:

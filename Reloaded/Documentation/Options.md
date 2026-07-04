@@ -95,6 +95,8 @@ The consolidated Options menu receives:
 - `Logging Mode`
 - `Time Changer`
 - `Pause Menu`, provided by `Reloaded/Modules/001_ReloadedPauseMenu.rb`
+- `[ TM Vault ]`, provided by `Reloaded/Modules/002_TMVault.rb`
+  Opens a submenu containing `TM Vault` Off/PokeNav and `Egg Moves` Off/On.
 
 ## Consolidated Categories
 

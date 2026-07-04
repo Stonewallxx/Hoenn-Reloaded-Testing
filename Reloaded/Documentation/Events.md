@@ -160,6 +160,20 @@ Context:
 - `:game_map` - active `Game_Map` instance for map setup events.
 - `:scene` - active `Scene_Map` instance for transfer events.
 
+TM Vault events:
+
+- `:tm_vault_move_registered`
+- `:tm_vault_opened`
+- `:tm_vault_move_taught`
+
+Context:
+
+- `:move` - registered or taught move ID.
+- `:move_data` - `GameData::Move` entry when applicable.
+- `:source` - normalized source label for `:tm_vault_move_registered`.
+- `:move_count` - current vault move count for `:tm_vault_opened`.
+- `:pokemon` - Pokemon that learned the move for `:tm_vault_move_taught`.
+
 ## Logging
 
 Event registration and emission diagnostics are written through
