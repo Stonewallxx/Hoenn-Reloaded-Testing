@@ -552,6 +552,37 @@ and TM Vault stay locked unless their systems exist.
 REPM layout state uses the Reloaded save bucket under
 `systems/reloaded_pause_menu`. The saved keys are `custom_row` and `favorite`.
 
+## Overworld Menu
+
+The Overworld Menu is implemented in:
+
+```text
+Reloaded/Modules/004_OverworldMenu.rb
+```
+
+It preserves the reference quick-access overlay UI and opens from the overworld
+through `Events.onMapUpdate`.
+
+Mods can register entries:
+
+```ruby
+OverworldMenu.register(:my_feature,
+  label: "My Feature",
+  priority: 50,
+  condition: proc { true },
+  exit_on_select: false,
+  handler: proc { |screen|
+    screen.show_popup("MY FEATURE", ["Hello from my feature."])
+    nil
+  }
+)
+```
+
+The handler receives the active `OverworldMenuScreen`. Return `:exit_menu`, or
+set `exit_on_select: true`, to close the overlay after the entry runs.
+
+See `Reloaded/Documentation/OverworldMenu.md` for the full entry contract.
+
 ## TM Vault
 
 TM Vault is implemented in:
