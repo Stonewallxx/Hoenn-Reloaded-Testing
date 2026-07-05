@@ -596,7 +596,9 @@ module Reloaded
         copy = {}
         item.each { |key, value| copy[key] = value }
         copy["version"] = selected["version"].to_s
+        copy["latest_version"] = selected["version"].to_s
         copy["download_url"] = selected["download_url"].to_s
+        copy["versions"] = [selected]
         copy["dependencies"] = normalize_dependencies(selected["dependencies"])
         copy
       end
@@ -864,7 +866,53 @@ module Reloaded
 
       def parse_json(raw)
         raise "JSON parser is not available" unless defined?(JSON)
-        stringify_json_keys(JSON.parse(raw.to_s.sub("\xEF\xBB\xBF", "")))
+        text = raw.to_s.sub("\xEF\xBB\xBF", "")
+        begin
+          stringify_json_keys(JSON.parse(text))
+        rescue NameError => e
+          raise unless e.message.to_s.include?("`null'")
+          stringify_json_keys(JSON.parse(rewrite_json_null_literals(text)))
+        end
+      end
+
+      def rewrite_json_null_literals(text)
+        output = +""
+        index = 0
+        in_string = false
+        escaped = false
+        while index < text.length
+          char = text[index]
+          if in_string
+            output << char
+            if escaped
+              escaped = false
+            elsif char == "\\"
+              escaped = true
+            elsif char == "\""
+              in_string = false
+            end
+            index += 1
+            next
+          end
+          if char == "\""
+            in_string = true
+            output << char
+            index += 1
+            next
+          end
+          if text[index, 4] == "null" && json_literal_boundary?(text[index - 1]) && json_literal_boundary?(text[index + 4])
+            output << "nil"
+            index += 4
+            next
+          end
+          output << char
+          index += 1
+        end
+        output
+      end
+
+      def json_literal_boundary?(char)
+        char.nil? || char !~ /[A-Za-z0-9_]/
       end
 
       def stringify_json_keys(value)

@@ -682,9 +682,20 @@ module Reloaded
 
       def report_folder_excluded?(root, folder_name)
         mods_root = File.expand_path(File.join(GAME_ROOT, "Mods"))
-        File.expand_path(root.to_s).casecmp(mods_root).zero? && folder_name.to_s.downcase == "reloaded"
+        return false unless File.expand_path(root.to_s).casecmp(mods_root).zero?
+        return true if folder_name.to_s.downcase == "reloaded"
+        return true if folder_name.to_s.downcase == ".reloadedpendingdelete"
+        File.exist?(File.join(root, folder_name, soft_uninstall_marker_name))
       rescue
         false
+      end
+
+      def soft_uninstall_marker_name
+        if defined?(Reloaded::ModManager::UNINSTALLED_MARKER)
+          Reloaded::ModManager::UNINSTALLED_MARKER
+        else
+          ".ReloadedUninstalled"
+        end
       end
 
       def parse_manifest_json(path)

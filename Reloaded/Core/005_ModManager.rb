@@ -27,6 +27,7 @@ module Reloaded
     CORE_ENTRY_ID = "hoenn_reloaded"
     CORE_CHANGELOG_PATH = "Reloaded/Changelog.md"
     GAME_ID = "hoenn"
+    UNINSTALLED_MARKER = ".ReloadedUninstalled"
 
     DEFAULT_MODDEV_ENABLED = false
 
@@ -183,7 +184,7 @@ module Reloaded
           :name => "Hoenn Reloaded",
           :version => reloaded_version,
           :authors => ["Stonewall"],
-          :description => "The core Hoenn Reloaded framework, systems, and built-in features for this fork.",
+          :description => "The core Hoenn Reloaded game.",
           :source => :reloaded_core,
           :folder_path => GAME_ROOT,
           :manifest_path => File.join(ROOT, "Version.md"),
@@ -455,9 +456,16 @@ module Reloaded
       def scan_folder(root, source)
         return unless Dir.exist?(root)
         Dir[File.join(root, "*", "mod.json")].sort.each do |manifest_path|
+          next if soft_uninstalled_folder?(File.dirname(manifest_path))
           candidate = read_manifest(manifest_path, root, source)
           @candidates << candidate if candidate
         end
+      end
+
+      def soft_uninstalled_folder?(folder)
+        File.exist?(File.join(folder, UNINSTALLED_MARKER))
+      rescue
+        false
       end
 
       def read_manifest(manifest_path, root, source)

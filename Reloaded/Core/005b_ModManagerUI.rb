@@ -1864,7 +1864,7 @@ module Reloaded
       def setup
         @running = true
         Reloaded::ModManager.refresh_metadata if defined?(Reloaded::ModManager)
-        Reloaded::ModBrowser.refresh(fetch_remote: false) if defined?(Reloaded::ModBrowser)
+        Reloaded::ModBrowser.refresh(fetch_remote: true) if defined?(Reloaded::ModBrowser)
         @viewport = Viewport.new(0, 0, SCREEN_W, SCREEN_H)
         @viewport.z = 100_020
 
@@ -2509,14 +2509,11 @@ module Reloaded
       def open_action_menu(row)
         return unless row
         if row["kind"] == "profile"
-          choices = ["Import Profile", "Import & Enable Mods"]
-          choices << "View Changelog" unless changelog_url(row).empty?
-          choices << "Back"
+          choices = ["Import Profile", "Import & Enable Mods", "Back"]
           choice = show_message(row["name"], choices)
           case choices[choice]
           when "Import Profile" then import_profile(row, false)
           when "Import & Enable Mods" then import_profile(row, true)
-          when "View Changelog" then view_changelog(row)
           end
         elsif core_entry_row?(row)
           choices = browser_update_available?(row) ? ["Update", "Update Status"] : ["Check Updates"]
@@ -2533,15 +2530,12 @@ module Reloaded
           when "Open Mods Folder" then open_mods_folder
           end
         else
-          choices = ["Download", "Download & Enable", "Versions"]
-          choices << "View Changelog" unless changelog_url(row).empty?
-          choices << "Back"
+          choices = ["Download", "Download & Enable", "Versions", "Back"]
           choice = show_message(row["name"], choices)
           case choices[choice]
           when "Download" then download_mod(row, false)
           when "Download & Enable" then download_mod(row, true)
           when "Versions" then choose_version(row)
-          when "View Changelog" then view_changelog(row)
           end
         end
       end
@@ -2576,7 +2570,6 @@ module Reloaded
         if failed.empty?
           mark_restart_required("downloaded #{row["id"]}") if enable
           Reloaded::ModManager.refresh_metadata if defined?(Reloaded::ModManager)
-          Reloaded::ModBrowser.refresh(fetch_remote: false)
           refresh_rows
           draw_all
           show_message(enable ? "Downloaded and enabled." : "Downloaded.")
@@ -2642,7 +2635,7 @@ module Reloaded
         tags << "Latest" if !latest.empty? && version == latest
         tags << "Installed" if !installed.empty? && version == installed
         if !installed.empty? && !version.empty? && version != installed
-          tags << (compare_versions(version, installed) < 0 ? "Older" : "Newer")
+          tags << "Newer" if compare_versions(version, installed) > 0
         end
         tags.empty? ? version : "#{version} (#{tags.join(", ")})"
       end
@@ -3726,11 +3719,23 @@ module Reloaded
         choice = show_message("Uninstall #{row[:name]}?\nThis removes the mod folder.", ["Uninstall", "Cancel"], 1)
         return unless choice == 0
         Reloaded::Profiles.disable_mod(row[:id]) if defined?(Reloaded::Profiles)
-        delete_tree(path)
-        Reloaded::Log.info("Mod Manager UI uninstalled #{row[:id]} from #{path}", :mods) if defined?(Reloaded::Log)
+        result = remove_mod_folder(path)
+        if result == :soft
+          Reloaded::Log.warning("Mod Manager UI soft-uninstalled #{row[:id]} at #{path}", :mods) if defined?(Reloaded::Log)
+        elsif result == :staged
+          Reloaded::Log.warning("Mod Manager UI staged #{row[:id]} for deletion from #{path}", :mods) if defined?(Reloaded::Log)
+        else
+          Reloaded::Log.info("Mod Manager UI uninstalled #{row[:id]} from #{path}", :mods) if defined?(Reloaded::Log)
+        end
         mark_restart_required("uninstalled #{row[:id]}")
         reload_after_profile_change
-        show_message("Uninstalled #{row[:name]}.")
+        if result == :soft
+          show_message("Uninstalled #{row[:name]}.\nThe old folder is locked and will be ignored until it can be cleaned up.")
+        elsif result == :staged
+          show_message("Uninstalled #{row[:name]}.\nThe old folder will be cleaned up later.")
+        else
+          show_message("Uninstalled #{row[:name]}.")
+        end
       rescue Exception => e
         Reloaded::Log.exception("Failed to uninstall #{row[:id]}", e, channel: :mods) if defined?(Reloaded::Log)
         show_message("Could not uninstall mod:\n#{e.message}")
@@ -3748,11 +3753,82 @@ module Reloaded
         nil
       end
 
-      def delete_tree(path)
-        Dir[File.join(path, "**", "*").gsub("\\", "/")].sort.reverse_each do |entry|
-          File.directory?(entry) ? Dir.rmdir(entry) : File.delete(entry)
+      def remove_mod_folder(path)
+        delete_error = nil
+        stage_error = nil
+        begin
+          delete_tree(path)
+        rescue Exception => e
+          delete_error = e
         end
+        return :deleted unless File.directory?(path)
+        begin
+          result = stage_pending_delete(path)
+        rescue Exception => e
+          stage_error = e
+        end
+        return result || :staged unless File.directory?(path)
+        soft_uninstall_folder(path, delete_error, stage_error)
+      end
+
+      def delete_tree(path)
+        return unless path && File.directory?(path)
+        delete_tree_entries(path)
+        clear_delete_attributes(path)
         Dir.rmdir(path)
+      end
+
+      def delete_tree_entries(path)
+        directory_entries(path).each do |entry|
+          if File.directory?(entry) && !File.symlink?(entry)
+            delete_tree(entry)
+          else
+            clear_delete_attributes(entry)
+            File.delete(entry)
+          end
+        end
+      end
+
+      def directory_entries(path)
+        Dir[File.join(path, "*"), File::FNM_DOTMATCH].reject do |entry|
+          base = File.basename(entry)
+          base == "." || base == ".."
+        end
+      end
+
+      def clear_delete_attributes(path)
+        File.chmod(File.directory?(path) ? 0o777 : 0o666, path) rescue nil
+      end
+
+      def stage_pending_delete(path)
+        pending_root = File.join(File.expand_path("./Mods"), ".ReloadedPendingDelete")
+        Dir.mkdir(pending_root) unless Dir.exist?(pending_root)
+        target = File.join(pending_root, "#{File.basename(path)}_#{Time.now.to_i}_#{rand(100000)}")
+        File.rename(path, target)
+        delete_tree(target) rescue nil
+        File.directory?(target) ? :staged : :deleted
+      end
+
+      def soft_uninstall_folder(path, delete_error = nil, stage_error = nil)
+        marker = File.join(path, soft_uninstall_marker_name)
+        details = []
+        details << "delete failed: #{delete_error.class}: #{delete_error.message}" if delete_error
+        details << "stage failed: #{stage_error.class}: #{stage_error.message}" if stage_error
+        File.open(marker, "w") do |file|
+          file.puts("Soft-uninstalled by Hoenn Reloaded Mod Manager.")
+          file.puts("The folder was locked while the game was running.")
+          file.puts(details.join("\n")) unless details.empty?
+        end
+        clear_delete_attributes(marker)
+        :soft
+      end
+
+      def soft_uninstall_marker_name
+        if defined?(Reloaded::ModManager::UNINSTALLED_MARKER)
+          Reloaded::ModManager::UNINSTALLED_MARKER
+        else
+          ".ReloadedUninstalled"
+        end
       end
 
       def reload_after_profile_change

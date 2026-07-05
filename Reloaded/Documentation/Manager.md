@@ -64,7 +64,6 @@ Mod actions:
 - `Download`
 - `Download & Enable`
 - `Versions`
-- `View Changelog`, when `changelogurl` is configured
 
 The pinned `Hoenn Reloaded` browser entry shows `Update` when a public update is
 available, plus `Check Updates` or `Update Status`, `Patch Notes`, `File A Bug
@@ -80,7 +79,6 @@ Published profile actions:
 
 - `Import Profile`
 - `Import & Enable Mods`
-- `View Changelog`, when `changelogurl` is configured
 
 Developers can add optional extra sources through:
 
@@ -162,8 +160,8 @@ downloaded again. If the dependency cannot be found in the GitHub index, or the
 index has no version new enough, the UI reports that specifically. Entries that
 exist in the index but do not have a `download_url` are also reported separately.
 
-`changelogurl` may point to a raw text file. The Mod Browser exposes it through
-`View Changelog` and displays the text in the right panel with scrolling.
+`changelogurl` may point to a raw text file for installed mod details and
+published metadata.
 
 Installed mods can also provide a local changelog file in their mod folder:
 
