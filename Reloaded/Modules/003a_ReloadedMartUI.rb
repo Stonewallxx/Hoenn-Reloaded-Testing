@@ -129,14 +129,16 @@ end
 class ReloadedMartBuyAdapter
   def initialize
     @price_cache = {}
+    @row_state_cache = {}
   end
 
   def categories(sort_mode = :name)
     catalog_rows = catalog_visible_entries
     daily_rows = daily_featured_rows(catalog_rows)
     rows = dedupe_entries(catalog_rows + daily_rows)
+    prepare_row_states(rows)
     groups = []
-    favorite_rows = rows.select { |entry| ReloadedMart.favorite?(entry.id) }
+    favorite_rows = rows.select { |entry| row_state(entry)[:favorite] }
     groups << { :id => :favorites, :name => ReloadedMart::UI::DEFAULT_CATEGORY_NAMES[:favorites], :entries => sort_entries(favorite_rows, sort_mode) } unless favorite_rows.empty?
     ordered_category_ids(rows, daily_rows).each do |category|
       entries = rows.select { |entry| same_category?(entry, category) }
@@ -164,6 +166,27 @@ class ReloadedMartBuyAdapter
 
   def context
     { :source => :reloaded_mart, :mode => :buy }
+  end
+
+  def clear_price_cache
+    @price_cache = {}
+    clear_row_state_cache
+  end
+
+  def clear_row_state_cache
+    @row_state_cache = {}
+  end
+
+  def row_state(entry)
+    return {} unless entry
+    @row_state_cache ||= {}
+    key = row_state_cache_key(entry)
+    @row_state_cache[key] ||= build_row_state(entry)
+  end
+
+  def prepare_row_states(entries)
+    clear_row_state_cache
+    Array(entries).each { |entry| row_state(entry) }
   end
 
   def ui_title
@@ -216,28 +239,75 @@ class ReloadedMartBuyAdapter
 
   def toggle_favorite(entry)
     return false unless entry
-    ReloadedMart.toggle_favorite(entry.id)
+    result = ReloadedMart.toggle_favorite(entry.id)
+    clear_row_state_cache
+    result
+  end
+
+  def redeem_promo_code(code)
+    result = ReloadedMart.redeem_promo_code(code)
+    clear_price_cache if result.ok?
+    result
+  end
+
+  def service_key(entry)
+    raw = entry && entry.raw.is_a?(Hash) ? entry.raw : {}
+    display = entry && entry.display.is_a?(Hash) ? entry.display : {}
+    value = raw["service_key"] || raw[:service_key] || raw["service"] || raw[:service] ||
+            display["service_key"] || display[:service_key] || display["service"] || display[:service]
+    value.to_s.strip.downcase
+  end
+
+  def closes_mart_for_purchase?(entry)
+    entry && entry.kind == :service && service_key(entry) == "instant_hatch"
+  rescue
+    false
   end
 
   def price(entry)
-    @price_cache[entry.id] ||= ReloadedMart::Pricing.price_for(entry, context)
+    key = "#{entry.id}:#{ReloadedMart.active_coupons.join(",")}"
+    @price_cache[key] ||= ReloadedMart::Pricing.price_for(entry, context)
   end
 
   def buy_price(entry)
+    cached = cached_row_state(entry)
+    return cached[:buy_price] if cached && cached.key?(:buy_price)
     [price(entry).final.to_i, 0].max
   end
 
   def base_price(entry)
+    cached = cached_row_state(entry)
+    return cached[:base_price] if cached && cached.key?(:base_price)
     price(entry).base.to_i
   end
 
   def price_overridden?(entry)
+    cached = cached_row_state(entry)
+    return cached[:price_overridden] if cached && cached.key?(:price_overridden)
     price(entry).overridden?
   rescue
     false
   end
 
+  def promo_applied?(entry)
+    cached = cached_row_state(entry)
+    return cached[:promo_applied] if cached && cached.key?(:promo_applied)
+    price(entry).modifiers.any? { |modifier| promo_modifier?(modifier) }
+  rescue
+    false
+  end
+
+  def promo_modifier?(modifier)
+    return false unless modifier.is_a?(Hash)
+    return true if [modifier[:id], modifier["id"], modifier[:source], modifier["source"]].any? { |value| value.to_s.start_with?("promo:") }
+    [modifier[:promo_code], modifier["promo_code"]].any? { |value| !value.to_s.empty? }
+  rescue
+    false
+  end
+
   def buy_price_str(entry)
+    cached = cached_row_state(entry)
+    return cached[:price_str] if cached && cached[:price_str]
     value = buy_price(entry)
     value <= 0 ? "FREE" : ReloadedMart.format_currency(value, price(entry).currency)
   end
@@ -281,23 +351,33 @@ class ReloadedMartBuyAdapter
   end
 
   def stock_remaining(entry)
+    cached = cached_row_state(entry)
+    return cached[:stock_remaining] if cached && cached.key?(:stock_remaining)
     ReloadedMart::Stock.remaining(entry)
   end
 
   def restock_text(entry)
+    cached = cached_row_state(entry)
+    return cached[:restock_text] if cached && cached.key?(:restock_text)
     seconds = ReloadedMart::Stock.restock_seconds(entry, context)
     seconds ? ReloadedMart::Rules.format_duration(seconds) : nil
   end
 
   def limited_time_text(entry)
+    cached = cached_row_state(entry)
+    return cached[:limited_time_text] if cached && cached.key?(:limited_time_text)
     ReloadedMart::Availability.remaining_time_text(entry, context)
   end
 
   def daily_featured?(entry)
+    cached = cached_row_state(entry)
+    return cached[:daily_featured] if cached && cached.key?(:daily_featured)
     ReloadedMart::Economy.daily_featured?(entry, context)
   end
 
   def new?(entry)
+    cached = cached_row_state(entry)
+    return cached[:new] if cached && cached.key?(:new)
     report = ReloadedMart::Source.active_report
     version = report ? report.catalog_version : ReloadedMart::DEFAULT_CATALOG_VERSION
     ReloadedMart.new_catalog_version?(version)
@@ -306,6 +386,8 @@ class ReloadedMartBuyAdapter
   end
 
   def mystery_box?(entry)
+    cached = cached_row_state(entry)
+    return cached[:mystery_box] if cached && cached.key?(:mystery_box)
     return false unless entry
     display = entry.display.is_a?(Hash) ? entry.display : {}
     value = display["mystery_box"] || display[:mystery_box] || entry.raw["mystery_box"] rescue false
@@ -324,6 +406,11 @@ class ReloadedMartBuyAdapter
     max = [max, 1].min if ReloadedMart::Limits.one_time?(entry)
     max = [max, 0].max
     return max if max <= 0
+    if entry.kind == :service
+      handler = ReloadedMart.entry_handler(entry.kind) || ReloadedMart::EntryHandler.new(entry.kind)
+      line = ReloadedMart::CartLine.new(entry, 1, [], price(entry))
+      return handler.validate(line, context).ok? ? 1 : 0
+    end
     return mystery_box_max_quantity(entry, max) if mystery_box?(entry)
     remaining = item_stack_remaining(entry)
     unless remaining.nil?
@@ -372,7 +459,9 @@ class ReloadedMartBuyAdapter
   end
 
   def complete_purchase(entry, quantity)
-    ReloadedMart::Transactions.complete_cart(build_cart(entry, quantity), context)
+    result = ReloadedMart::Transactions.complete_cart(build_cart(entry, quantity), context)
+    clear_row_state_cache if result && result.ok?
+    result
   end
 
   def banner_text
@@ -493,20 +582,89 @@ class ReloadedMartBuyAdapter
   def sort_entries(entries, sort_mode)
     type_priority = lambda do |entry|
       next 0 if entry.kind == :gift
-      next 1 if mystery_box?(entry)
+      next 1 if row_state(entry)[:mystery_box]
       next 2 if entry.kind == :bundle
       3
     end
     case sort_mode.to_sym
     when :price_low
-      entries.sort_by { |entry| [type_priority.call(entry), buy_price(entry), display_name(entry).downcase] }
+      entries.sort_by { |entry| state = row_state(entry); [type_priority.call(entry), state[:buy_price].to_i, state[:display_name].to_s.downcase] }
     when :price_high
-      entries.sort_by { |entry| [type_priority.call(entry), -buy_price(entry), display_name(entry).downcase] }
+      entries.sort_by { |entry| state = row_state(entry); [type_priority.call(entry), -state[:buy_price].to_i, state[:display_name].to_s.downcase] }
     when :stock
-      entries.sort_by { |entry| [type_priority.call(entry), stock_remaining(entry).nil? ? 1 : 0, stock_remaining(entry).to_i, display_name(entry).downcase] }
+      entries.sort_by do |entry|
+        state = row_state(entry)
+        stock = state[:stock_remaining]
+        [type_priority.call(entry), stock.nil? ? 1 : 0, stock.to_i, state[:display_name].to_s.downcase]
+      end
     else
-      entries.sort_by { |entry| [type_priority.call(entry), display_name(entry).downcase] }
+      entries.sort_by { |entry| state = row_state(entry); [type_priority.call(entry), state[:display_name].to_s.downcase] }
     end
+  end
+
+  def cached_row_state(entry)
+    return nil unless entry && @row_state_cache
+    @row_state_cache[row_state_cache_key(entry)]
+  rescue
+    nil
+  end
+
+  def row_state_cache_key(entry)
+    "#{entry.id}:#{ReloadedMart.active_coupons.join(",")}"
+  rescue
+    entry ? entry.id.to_s : ""
+  end
+
+  def build_row_state(entry)
+    result = price(entry)
+    final = [result.final.to_i, 0].max
+    base = result.base.to_i
+    stock = ReloadedMart::Stock.remaining(entry)
+    remaining_seconds = ReloadedMart::Stock.restock_seconds(entry, context)
+    limited = ReloadedMart::Availability.remaining_time_text(entry, context)
+    favorite = favorite?(entry)
+    locked = ReloadedMart::Availability.locked?(entry, context)
+    maxed = maxed?(entry)
+    display = display_name(entry)
+    promo = Array(result.modifiers).any? { |modifier| promo_modifier?(modifier) }
+    mystery = begin
+      display_data = entry.display.is_a?(Hash) ? entry.display : {}
+      value = display_data["mystery_box"] || display_data[:mystery_box] || entry.raw["mystery_box"] rescue false
+      ReloadedMart::Rules.truthy?(value)
+    rescue
+      false
+    end
+    {
+      :display_name => display,
+      :price_result => result,
+      :buy_price => final,
+      :base_price => base,
+      :price_str => final <= 0 ? "FREE" : ReloadedMart.format_currency(final, result.currency),
+      :price_overridden => (result.overridden? rescue false),
+      :promo_applied => promo,
+      :free => final <= 0,
+      :favorite => favorite,
+      :locked => locked,
+      :maxed => maxed,
+      :stock_remaining => stock,
+      :stock_label => stock.nil? ? nil : (stock == 1 ? "LAST" : "x#{stock}"),
+      :restock_text => remaining_seconds ? ReloadedMart::Rules.format_duration(remaining_seconds) : nil,
+      :limited_time_text => limited,
+      :daily_featured => ReloadedMart::Economy.daily_featured?(entry, context),
+      :new => new_catalog_entry?,
+      :mystery_box => mystery
+    }
+  rescue Exception => e
+    ReloadedMart.log_exception("Mart UI row state failed for #{entry&.id}", e)
+    {}
+  end
+
+  def new_catalog_entry?
+    report = ReloadedMart::Source.active_report
+    version = report ? report.catalog_version : ReloadedMart::DEFAULT_CATALOG_VERSION
+    ReloadedMart.new_catalog_version?(version)
+  rescue
+    false
   end
 end
 
@@ -581,8 +739,13 @@ class ReloadedMartBuyScene
     @qty_duration = 0
     @banner_offset = 0.0
     @cursor_pulse = 0
+    @cursor_redraw_frame = 0
     @bundle_scroll = 0
     @info_scroll = 0
+    @info_lines_cache_key = nil
+    @info_lines_cache = nil
+    @bundle_grants_cache_key = nil
+    @bundle_grants_cache = nil
     @last_mx = nil
     @last_my = nil
   end
@@ -633,7 +796,9 @@ class ReloadedMartBuyScene
       handle_mode_input
       handle_mouse
 
-      if Input.trigger?(Input::BACK)
+      if Input.trigger?(Input::SPECIAL)
+        pbPromptPromoCode
+      elsif Input.trigger?(Input::BACK)
         pbPlayCancelSE rescue nil
         remember_cursor
         return nil
@@ -643,6 +808,99 @@ class ReloadedMartBuyScene
         return entry if entry
       end
     end
+  end
+
+  def pbPromptPromoCode
+    code = promo_code_input_popup(_INTL("Enter promo code."), 32)
+    code = code.to_s.strip
+    return if code.empty?
+    result = @adapter.redeem_promo_code(code)
+    pbDisplayPaused(_INTL(result.message.to_s.empty? ? "Promo code could not be applied." : result.message))
+    if result.ok?
+      rebuild_pockets
+      draw_content
+    end
+  rescue => e
+    ReloadedMart.log_exception("Promo code prompt failed", e)
+    pbDisplayPaused(_INTL("Promo code could not be applied.")) rescue nil
+  end
+
+  def promo_code_input_popup(title, max_length = 32)
+    value = ""
+    accepted = false
+    dim = Sprite.new(@viewport)
+    dim.z = 970
+    dim.bitmap = Bitmap.new(SW, SH)
+    dim.bitmap.fill_rect(0, 0, SW, SH, Color.new(0, 0, 0, 90))
+    box_w = 360
+    box_h = 132
+    box_x = (SW - box_w) / 2
+    box_y = (SH - box_h) / 2
+    box = Sprite.new(@viewport)
+    box.z = 971
+    box.x = box_x
+    box.y = box_y
+    box.bitmap = Bitmap.new(box_w, box_h)
+    Input.text_input = true rescue nil
+    redraw = proc do
+      bitmap = box.bitmap
+      bitmap.clear
+      draw_panel(bitmap, 0, 0, box_w, box_h)
+      pbSetSmallFont(bitmap)
+      shadow_text(bitmap, 14, 10, box_w - 28, 18, title, WHITE)
+      bitmap.fill_rect(14, 38, box_w - 28, 30, ROW_HOVER)
+      bitmap.fill_rect(14, 38, box_w - 28, 1, PANEL_BORDER)
+      bitmap.fill_rect(14, 67, box_w - 28, 1, PANEL_BORDER)
+      bitmap.fill_rect(14, 38, 1, 30, PANEL_BORDER)
+      bitmap.fill_rect(box_w - 15, 38, 1, 30, PANEL_BORDER)
+      cursor = ((Graphics.frame_count rescue 0) / 20) % 2 == 0 ? "|" : ""
+      shown = trim_text(bitmap, value + cursor, box_w - 44)
+      shadow_text(bitmap, 22, 44, box_w - 44, 18, shown, WHITE)
+      bitmap.font.size = 14 rescue nil
+      remaining = ReloadedMart.active_promo_code_remaining_text
+      shadow_text(bitmap, 14, box_h - 42, box_w - 28, 16, "Time Remaining: #{remaining}", GOLD, 1) if remaining
+      shadow_text(bitmap, 14, box_h - 24, box_w - 28, 16, "Confirm (Enter) Back (B/Esc)", GRAY, 1)
+    end
+    redraw.call
+    loop do
+      Graphics.update
+      Input.update
+      redraw.call if ((Graphics.frame_count rescue 0) % 4 == 0)
+      if promo_key_trigger?(:ESCAPE) || Input.trigger?(Input::BACK) || mouse_right_trigger?
+        accepted = false
+        break
+      end
+      if promo_key_trigger?(:RETURN) || Input.trigger?(Input::USE) || mouse_left_trigger?
+        accepted = true
+        break
+      end
+      old_value = value.dup
+      value = value[0...-1] if (promo_key_trigger?(:BACKSPACE) || promo_key_repeat?(:BACKSPACE)) && !value.empty?
+      value = "" if promo_key_trigger?(:DELETE)
+      Input.gets.to_s.each_char do |char|
+        next if char == "\r" || char == "\n"
+        next unless char =~ /[A-Za-z0-9_\-]/
+        value += char.upcase if value.length < max_length
+      end
+      redraw.call if value != old_value
+    end
+    accepted ? value.strip : ""
+  ensure
+    Input.text_input = false rescue nil
+    Input.update rescue nil
+    box.bitmap.dispose rescue nil
+    box.dispose rescue nil
+    dim.bitmap.dispose rescue nil
+    dim.dispose rescue nil
+    draw_content rescue nil
+  end
+
+  def promo_key_trigger?(key)
+    Input.triggerex?(key) rescue false
+  end
+
+  def promo_key_repeat?(key)
+    Input.repeatex?(key) rescue false
   end
 
   def pbChooseBuyNumber(entry, maximum)
@@ -793,7 +1051,7 @@ class ReloadedMartBuyScene
     @qty_target = selected_entry ? @adapter.in_bag_qty(selected_entry) : 0
     @qty_frame = 0
     @qty_duration = (fps * ReloadedMart::UI::QUANTITY_ANIMATION_SECONDS).round
-    draw_all
+    draw_content
   end
 
   def play_purchase_animation
@@ -805,14 +1063,13 @@ class ReloadedMartBuyScene
       tick_money_anim
       tick_qty_anim
       tick_banner
-      @cursor_pulse = (@cursor_pulse + 1) % 60
-      draw_list
+      tick_cursor
     end
     @money_display = @money_target
     @qty_display = @qty_target
     @money_frame = @money_duration
     @qty_frame = @qty_duration
-    draw_all
+    draw_content
   end
 
   def play_mystery_box_reveal(entry, result, adapter)
@@ -854,7 +1111,7 @@ class ReloadedMartBuyScene
     chest_sheet.dispose rescue nil
     overlay.bitmap.dispose rescue nil
     overlay.dispose rescue nil
-    draw_all rescue nil
+    draw_content rescue nil
   end
 
   def play_bundle_reveal(entry, result, adapter)
@@ -905,7 +1162,7 @@ class ReloadedMartBuyScene
     chest_sheet.dispose rescue nil
     overlay.bitmap.dispose rescue nil
     overlay.dispose rescue nil
-    draw_all rescue nil
+    draw_content rescue nil
   end
 
   def play_mystery_box_single_reveal(bitmap, chest, icon, entry, row, index, total_rows, adapter)
@@ -1411,7 +1668,7 @@ class ReloadedMartBuyScene
     icons.each { |sprite| sprite.dispose rescue nil } if icons
     overlay.bitmap.dispose rescue nil
     overlay.dispose rescue nil
-    draw_all rescue nil
+    draw_content rescue nil
   end
 
   def refresh_mystery_box_results(bitmap, rows, page, icons, title, show_rarity)
@@ -1549,10 +1806,27 @@ class ReloadedMartBuyScene
 
   def rebuild_pockets
     mode = ReloadedMart::UI::SORT_MODES[@sort_index] || :name
+    @adapter.clear_row_state_cache if @adapter.respond_to?(:clear_row_state_cache)
+    clear_info_detail_cache
     @pockets = @adapter.categories(mode)
     @pocket_index = @pocket_index.clamp(0, [@pockets.length - 1, 0].max)
     @entry_index = @entry_index.clamp(0, [current_entries.length - 1, 0].max)
     @scroll = @scroll.clamp(0, [current_entries.length - rows_per_page, 0].max)
+  end
+
+  def clear_info_detail_cache
+    @info_lines_cache_key = nil
+    @info_lines_cache = nil
+    @bundle_grants_cache_key = nil
+    @bundle_grants_cache = nil
+  end
+
+  def selected_entry_cache_key(entry)
+    id = entry.respond_to?(:id) ? entry.id : entry
+    kind = entry.respond_to?(:kind) ? entry.kind : entry.class
+    "#{@adapter.object_id}:#{kind}:#{id}"
+  rescue
+    "#{@adapter.object_id}:#{entry}"
   end
 
   def current_entries
@@ -1597,6 +1871,7 @@ class ReloadedMartBuyScene
       @scroll = 0
       @bundle_scroll = 0
       @info_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_pocket_nav
       draw_list
@@ -1608,6 +1883,7 @@ class ReloadedMartBuyScene
       @scroll = 0
       @bundle_scroll = 0
       @info_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_pocket_nav
       draw_list
@@ -1624,6 +1900,7 @@ class ReloadedMartBuyScene
       ensure_visible
       @bundle_scroll = 0
       @info_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_list
       draw_info
@@ -1633,6 +1910,7 @@ class ReloadedMartBuyScene
       ensure_visible
       @bundle_scroll = 0
       @info_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_list
       draw_info
@@ -1648,7 +1926,10 @@ class ReloadedMartBuyScene
       @info_scroll = 0
       @bundle_scroll = 0
       snap_quantity
-      draw_all
+      draw_pocket_nav
+      draw_list
+      draw_info
+      draw_footer
     elsif Input.trigger?(Input::JUMPDOWN)
       pbPlayCursorSE rescue nil
       @quick_buy = !@quick_buy
@@ -1673,9 +1954,12 @@ class ReloadedMartBuyScene
     @entry_index = @entry_index.clamp(0, [current_entries.length - 1, 0].max)
     @info_scroll = 0
     @bundle_scroll = 0
+    clear_info_detail_cache
     ensure_visible
     snap_quantity
-    draw_all
+    draw_pocket_nav
+    draw_list
+    draw_info
   end
 
   def handle_mouse
@@ -1712,6 +1996,7 @@ class ReloadedMartBuyScene
       @scroll = 0
       @info_scroll = 0
       @bundle_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_pocket_nav
       draw_list
@@ -1728,6 +2013,7 @@ class ReloadedMartBuyScene
           ensure_visible
           @bundle_scroll = 0
           @info_scroll = 0
+          clear_info_detail_cache
           snap_quantity
           draw_list
           draw_info
@@ -1773,6 +2059,7 @@ class ReloadedMartBuyScene
     ensure_visible
     @info_scroll = 0
     @bundle_scroll = 0
+    clear_info_detail_cache
     snap_quantity
     draw_list
     draw_info
@@ -1859,6 +2146,10 @@ class ReloadedMartBuyScene
 
   def draw_all
     draw_title
+    draw_content
+  end
+
+  def draw_content
     draw_pocket_nav
     draw_list
     draw_info
@@ -1919,11 +2210,12 @@ class ReloadedMartBuyScene
   end
 
   def draw_entry_row(bitmap, entry, y, selected)
-    locked = @adapter.locked?(entry)
-    maxed = @adapter.maxed?(entry)
-    free = @adapter.buy_price(entry) <= 0
-    favorite = @adapter.favorite?(entry)
-    name = row_label(entry, favorite)
+    state = @adapter.respond_to?(:row_state) ? @adapter.row_state(entry) : {}
+    locked = state.key?(:locked) ? state[:locked] : @adapter.locked?(entry)
+    maxed = state.key?(:maxed) ? state[:maxed] : @adapter.maxed?(entry)
+    free = state.key?(:free) ? state[:free] : @adapter.buy_price(entry) <= 0
+    favorite = state.key?(:favorite) ? state[:favorite] : @adapter.favorite?(entry)
+    name = row_label(entry, favorite, state)
     color = row_color(entry, selected, locked, favorite)
     price_str = if locked
       "Locked"
@@ -1932,34 +2224,40 @@ class ReloadedMartBuyScene
     elsif free
       "FREE"
     else
-      @adapter.buy_price_str(entry)
+      state[:price_str] || @adapter.buy_price_str(entry)
     end
-    price_badge = !locked && !maxed && !free && @adapter.price_overridden?(entry) ? price_change_badge(bitmap, entry) : nil
+    promo_applied = !locked && !maxed && (state.key?(:promo_applied) ? state[:promo_applied] : @adapter.promo_applied?(entry))
+    price_badges = !locked && !maxed ? price_side_badges(bitmap, entry, promo_applied, state) : []
     price_w = bitmap.text_size(price_str).width
-    price_badge_w = price_badge ? price_badge[:width] + 4 : 0
-    price_limit_x = SW - PAD - 10 - price_w - price_badge_w
+    price_badges_w = price_badges.inject(0) { |sum, badge| sum + badge[:width].to_i + 4 }
+    price_limit_x = SW - PAD - 10 - price_w - price_badges_w
     name_w = [bitmap.text_size(name).width, [price_limit_x - PAD - 12, 24].max].min
     shadow_text(bitmap, PAD + 6, y, name_w + 4, ROW_H, trim_text(bitmap, name, name_w), color)
     badge_x = PAD + 10 + name_w
-    badges = row_badges(entry).first(ReloadedMart::UI::ROW_BADGE_LIMIT)
+    badges = row_badges(entry, state).first(ReloadedMart::UI::ROW_BADGE_LIMIT)
     badges.each do |badge|
       next if badge_x >= price_limit_x - 6
       badge_x = draw_badge(bitmap, badge_x + 4, y + 5, badge[:label], badge[:color], price_limit_x)
     end
-    price_color = locked ? DIM : (maxed ? BLUE : (free ? GREEN : (selected ? GOLD : GRAY)))
+    price_color = locked ? DIM : (maxed ? BLUE : (promo_applied || free ? GREEN : (selected ? GOLD : GRAY)))
     right = SW - PAD - 4
     price_x = right - price_w
-    if price_badge
-      badge_x = price_x - price_badge[:width] - 4
-      draw_price_change_badge(bitmap, badge_x, y + 5, price_badge) if badge_x > PAD
-      price_color = price_badge[:color]
+    unless price_badges.empty?
+      badge_right = price_x - 4
+      price_badges.reverse_each do |badge|
+        badge_x = badge_right - badge[:width].to_i
+        draw_price_change_badge(bitmap, badge_x, y + 5, badge) if badge_x > PAD
+        badge_right = badge_x - 4
+      end
+      change_badge = price_badges.find { |badge| badge[:label].to_s != "PROMO" }
+      price_color = promo_applied ? GREEN : (change_badge ? change_badge[:color] : price_color)
     end
     shadow_text(bitmap, 0, y, right, ROW_H, price_str, price_color, 2)
   end
 
-  def row_label(entry, favorite)
+  def row_label(entry, favorite, state = nil)
     prefix = case entry.kind
-             when :bundle then @adapter.mystery_box?(entry) ? "[?] " : "[B] "
+             when :bundle then (state && state.key?(:mystery_box) ? state[:mystery_box] : @adapter.mystery_box?(entry)) ? "[?] " : "[B] "
              when :gift then "[G] "
              when :service then "[S] "
              when :unlock then "[U] "
@@ -1968,15 +2266,19 @@ class ReloadedMartBuyScene
     end
     marks = ""
     marks += "* " if favorite
-    "#{marks}#{prefix}#{@adapter.display_name(entry)}"
+    "#{marks}#{prefix}#{state && state[:display_name] ? state[:display_name] : @adapter.display_name(entry)}"
   end
 
-  def row_badges(entry)
+  def row_badges(entry, state = nil)
     badges = []
-    badges << { :label => "NEW!", :color => BLUE } if @adapter.new?(entry)
-    badges << { :label => "FEATURED", :color => GOLD } if @adapter.daily_featured?(entry)
-    badges << { :label => "LIMITED", :color => RED } if @adapter.limited_time_text(entry) || !@adapter.stock_remaining(entry).nil?
-    badges << { :label => "LAST", :color => RED } if stock_label(entry) == "LAST"
+    is_new = state && state.key?(:new) ? state[:new] : @adapter.new?(entry)
+    is_featured = state && state.key?(:daily_featured) ? state[:daily_featured] : @adapter.daily_featured?(entry)
+    limited = state && state.key?(:limited_time_text) ? state[:limited_time_text] : @adapter.limited_time_text(entry)
+    stock = state && state.key?(:stock_remaining) ? state[:stock_remaining] : @adapter.stock_remaining(entry)
+    badges << { :label => "NEW!", :color => BLUE } if is_new
+    badges << { :label => "FEATURED", :color => GOLD } if is_featured
+    badges << { :label => "LIMITED", :color => RED } if limited || !stock.nil?
+    badges << { :label => "LAST", :color => RED } if stock_label(entry, state) == "LAST"
     badges
   end
 
@@ -2021,9 +2323,9 @@ class ReloadedMartBuyScene
     999
   end
 
-  def price_change_badge(bitmap, entry)
-    base = @adapter.base_price(entry).to_i
-    final = @adapter.buy_price(entry).to_i
+  def price_change_badge(bitmap, entry, state = nil)
+    base = state && state.key?(:base_price) ? state[:base_price].to_i : @adapter.base_price(entry).to_i
+    final = state && state.key?(:buy_price) ? state[:buy_price].to_i : @adapter.buy_price(entry).to_i
     return nil if base <= 0 || final == base
     pct = ((final - base).abs * 100.0 / base).round
     return nil if pct <= 0
@@ -2032,6 +2334,17 @@ class ReloadedMartBuyScene
     { :label => label, :color => color, :width => badge_width(bitmap, label) }
   rescue
     nil
+  end
+
+  def price_side_badges(bitmap, entry, promo_applied, state = nil)
+    badges = []
+    overridden = state && state.key?(:price_overridden) ? state[:price_overridden] : @adapter.price_overridden?(entry)
+    change = price_change_badge(bitmap, entry, state) if overridden
+    badges << change if change
+    badges << { :label => "PROMO", :color => GREEN, :width => badge_width(bitmap, "PROMO") } if promo_applied
+    badges
+  rescue
+    []
   end
 
   def badge_width(bitmap, label)
@@ -2054,7 +2367,8 @@ class ReloadedMartBuyScene
     pbSetSmallFont(bitmap) rescue nil
   end
 
-  def stock_label(entry)
+  def stock_label(entry, state = nil)
+    return state[:stock_label] if state && state.key?(:stock_label)
     remaining = @adapter.stock_remaining(entry)
     return nil if remaining.nil?
     return "LAST" if remaining == 1
@@ -2155,12 +2469,13 @@ class ReloadedMartBuyScene
     else
       pbSetSmallFont(bitmap)
       bitmap.font.size = 16
-      lines = info_panel_lines(entry, bitmap, width)
+      details = info_panel_details(entry, bitmap, width)
+      lines = details[:lines]
       max_scroll = [lines.length - 4, 0].max
       @info_scroll = @info_scroll.to_i.clamp(0, max_scroll)
       draw_info_scroll_arrows(bitmap, x, y, width, @info_scroll, max_scroll)
       lines[@info_scroll, 4].to_a.each do |line|
-        locked = @adapter.respond_to?(:locked?) && @adapter.locked?(entry)
+        locked = details[:locked]
         color = line.start_with?("Stock:") ? GOLD : (locked ? DIM : GRAY)
         shadow_text(bitmap, x, y, width, 18, line, color)
         y += 18
@@ -2172,16 +2487,30 @@ class ReloadedMartBuyScene
   end
 
   def info_panel_lines(entry, bitmap, width)
-    if @adapter.respond_to?(:locked?) && @adapter.locked?(entry)
-      return wrap_text(@adapter.lock_text(entry), width, bitmap)
-    end
-    lines = []
-    stock = @adapter.respond_to?(:stock_remaining) ? @adapter.stock_remaining(entry) : nil
-    lines << "Stock: #{stock}" unless stock.nil?
-    lines.concat(wrap_text(@adapter.description(entry), width, bitmap))
-    lines
+    info_panel_details(entry, bitmap, width)[:lines]
   rescue
     []
+  end
+
+  def info_panel_details(entry, bitmap, width)
+    key = "#{selected_entry_cache_key(entry)}:#{width}"
+    return @info_lines_cache if @info_lines_cache_key == key && @info_lines_cache
+    pbSetSmallFont(bitmap) rescue nil
+    bitmap.font.size = 16 rescue nil
+    locked = @adapter.respond_to?(:locked?) && @adapter.locked?(entry)
+    lines = if locked
+              wrap_text(@adapter.lock_text(entry), width, bitmap)
+            else
+              rows = []
+              stock = @adapter.respond_to?(:stock_remaining) ? @adapter.stock_remaining(entry) : nil
+              rows << "Stock: #{stock}" unless stock.nil?
+              rows.concat(wrap_text(@adapter.description(entry), width, bitmap))
+              rows
+            end
+    @info_lines_cache_key = key
+    @info_lines_cache = { :lines => lines, :locked => locked }
+  rescue
+    { :lines => [], :locked => false }
   end
 
   def draw_bundle_preview(bitmap, entry, x, y, width)
@@ -2234,6 +2563,13 @@ class ReloadedMartBuyScene
   end
 
   def normalized_bundle_grants(entry)
+    key = selected_entry_cache_key(entry)
+    return @bundle_grants_cache if @bundle_grants_cache_key == key && @bundle_grants_cache
+    @bundle_grants_cache_key = key
+    @bundle_grants_cache = build_normalized_bundle_grants(entry)
+  end
+
+  def build_normalized_bundle_grants(entry)
     Array(entry.grants).map do |grant|
       item_id = grant.is_a?(Hash) ? (grant["id"] || grant[:id] || grant["item"] || grant[:item]) : grant
       qty = grant.is_a?(Hash) ? (grant["qty"] || grant[:qty] || grant["quantity"] || grant[:quantity] || 1).to_i : 1
@@ -2260,7 +2596,7 @@ class ReloadedMartBuyScene
     bitmap.font.size = 16
     sort_name = sort_label
     quick = @quick_buy ? "On" : "Off"
-    hint = "Buy (C) Back (B) Favorite (A) Sort: #{sort_name} (L) Quick Buy: #{quick} (R)"
+    hint = "Buy (C) Back (B) Favorite (A) Promo Code (Z) Sort: #{sort_name} (L) Quick Buy: #{quick} (R)"
     shadow_text(bitmap, PAD, 2, SW - PAD * 2, FOOTER_H - 2, trim_text(bitmap, hint, SW - PAD * 2), WHITE)
   end
 
@@ -2310,6 +2646,8 @@ class ReloadedMartBuyScene
 
   def tick_cursor
     @cursor_pulse = (@cursor_pulse + 1) % 60
+    @cursor_redraw_frame = (@cursor_redraw_frame.to_i + 1) % 4
+    return unless @cursor_redraw_frame == 0
     draw_list
   rescue
   end
@@ -2450,7 +2788,7 @@ class ReloadedMartBuyScene
     box.dispose rescue nil
     dim.bitmap.dispose rescue nil
     dim.dispose rescue nil
-    draw_all rescue nil
+    draw_content rescue nil
   end
 end
 
@@ -2458,20 +2796,23 @@ class ReloadedMartBuyScreen
   def initialize(scene, adapter)
     @scene = scene
     @adapter = adapter
+    @scene_closed = false
   end
 
   def pbBuyScreen
     return unless @scene.pbStartBuyScene(@adapter)
-    loop do
-      entry = catch(:reloaded_mart_mouse_pick) { @scene.pbChooseBuyEntry }
-      break unless entry
-      handle_entry(entry)
+    catch(:reloaded_mart_buy_closed) do
+      loop do
+        entry = catch(:reloaded_mart_mouse_pick) { @scene.pbChooseBuyEntry }
+        break unless entry
+        handle_entry(entry)
+      end
     end
-    @scene.pbEndBuyScene
+    @scene.pbEndBuyScene unless @scene_closed
   rescue Exception => e
     raise if e.is_a?(SystemExit)
     ReloadedMart.log_exception("Reloaded Mart buy screen failed", e)
-    @scene.pbEndBuyScene rescue nil
+    @scene.pbEndBuyScene rescue nil unless @scene_closed
     pbMessage(_INTL("The Reloaded Mart is unavailable right now.")) rescue nil
   end
 
@@ -2490,6 +2831,10 @@ class ReloadedMartBuyScreen
     return if quantity <= 0
     total = @adapter.buy_price(entry) * quantity
     return unless @scene.pbConfirmPurchase(entry, quantity, total)
+    if @adapter.closes_mart_for_purchase?(entry)
+      complete_purchase_after_closing(entry, quantity)
+      return
+    end
     result = @adapter.complete_purchase(entry, quantity)
     if result.ok?
       pbSEPlay("Mart buy item") rescue nil
@@ -2503,6 +2848,17 @@ class ReloadedMartBuyScreen
       @scene.pbDisplayPaused(_INTL(result.message.to_s.empty? ? "The transaction could not be completed." : result.message))
       @scene.animate_purchase
     end
+  end
+
+  def complete_purchase_after_closing(entry, quantity)
+    @scene.remember_cursor rescue nil
+    @scene.pbEndBuyScene
+    @scene_closed = true
+    result = @adapter.complete_purchase(entry, quantity)
+    unless result.ok?
+      pbMessage(_INTL(result.message.to_s.empty? ? "The transaction could not be completed." : result.message)) rescue nil
+    end
+    throw :reloaded_mart_buy_closed
   end
 
   def show_mystery_box_result(entry, result)
@@ -2899,7 +3255,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
     @qty_target = selected_entry ? @adapter.quantity(selected_entry) : 0
     @qty_frame = 0
     @qty_duration = (fps * ReloadedMart::UI::QUANTITY_ANIMATION_SECONDS).round
-    draw_all
+    draw_content
     true
   end
 
@@ -2912,14 +3268,13 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
       tick_money_anim
       tick_qty_anim
       tick_banner
-      @cursor_pulse = (@cursor_pulse + 1) % 60
-      draw_list
+      tick_cursor
     end
     @money_display = @money_target
     @qty_display = @qty_target
     @money_frame = @money_duration
     @qty_frame = @qty_duration
-    draw_all
+    draw_content
     true
   end
 
@@ -3011,6 +3366,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
 
   def rebuild_sell_pockets
     mode = ReloadedMartSellAdapter::SORT_MODES[@sort_index] || :name
+    clear_info_detail_cache
     @pockets = @adapter.pockets(mode)
     @pocket_index = @pocket_index.clamp(0, [@pockets.length - 1, 0].max)
     @entry_index = @entry_index.clamp(0, [current_entries.length - 1, 0].max)
@@ -3024,6 +3380,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
       @entry_index = 0
       @scroll = 0
       @info_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_pocket_nav
       draw_list
@@ -3034,6 +3391,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
       @entry_index = 0
       @scroll = 0
       @info_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_pocket_nav
       draw_list
@@ -3049,6 +3407,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
       @entry_index = (@entry_index - 1) % items.length
       ensure_visible
       @info_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_list
       draw_info
@@ -3057,6 +3416,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
       @entry_index = (@entry_index + 1) % items.length
       ensure_visible
       @info_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_list
       draw_info
@@ -3071,7 +3431,10 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
       rebuild_sell_pockets
       @info_scroll = 0
       snap_quantity
-      draw_all
+      draw_pocket_nav
+      draw_list
+      draw_info
+      draw_footer
     elsif Input.trigger?(Input::JUMPDOWN)
       pbPlayCursorSE rescue nil
       @sell_all_mode = !@sell_all_mode
@@ -3104,6 +3467,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
       @entry_index = 0
       @scroll = 0
       @info_scroll = 0
+      clear_info_detail_cache
       snap_quantity
       draw_pocket_nav
       draw_list
@@ -3119,6 +3483,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
           @entry_index = real_index
           ensure_visible
           @info_scroll = 0
+          clear_info_detail_cache
           snap_quantity
           draw_list
           draw_info
@@ -3204,7 +3569,9 @@ class ReloadedMartVanillaBuyAdapter < ReloadedMartBuyAdapter
   end
 
   def categories(sort_mode = :name)
-    rows = sort_entries(visible_entries, sort_mode)
+    entries = visible_entries
+    prepare_row_states(entries)
+    rows = sort_entries(entries, sort_mode)
     rows.empty? ? [] : [{ :id => :stock, :name => "SHOP", :entries => rows }]
   end
 

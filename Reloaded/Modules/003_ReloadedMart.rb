@@ -112,6 +112,7 @@ module ReloadedMart
   ENTRY_KINDS = [:item, :bundle, :gift, :service, :unlock, :coupon].freeze
   STOCK_RESET_RULES = [:never, :daily, :weekly, :monthly, :catalog_version, :stock_epoch].freeze
   DEFAULT_BAG_MAX_PER_SLOT = 9999
+  PROMO_CODE_DURATION_SECONDS = 300
 
   EVENT_PURCHASE_VALIDATED = :reloaded_mart_purchase_validated
   EVENT_PURCHASE_COMPLETED = :reloaded_mart_purchase_completed
@@ -278,6 +279,10 @@ module ReloadedMart
 
     def apply(_line, _context = {})
       TransactionResult.new(true, :ok, "")
+    end
+
+    def defer_charge?(_line, _context = {})
+      false
     end
   end
 
@@ -545,7 +550,8 @@ module ReloadedMart
       register_entry_handler(:item, ItemEntryHandler.new)
       register_entry_handler(:bundle, BundleEntryHandler.new(:bundle))
       register_entry_handler(:gift, BundleEntryHandler.new(:gift))
-      register_entry_handler(:service, EntryHandler.new(:service))
+      service_handler = defined?(ServiceEntryHandler) ? ServiceEntryHandler.new : EntryHandler.new(:service)
+      register_entry_handler(:service, service_handler)
       register_entry_handler(:unlock, EntryHandler.new(:unlock))
       register_entry_handler(:coupon, CouponEntryHandler.new)
     end
@@ -600,6 +606,7 @@ module ReloadedMart
         "cache" => {},
         "seen_catalog_versions" => [],
         "active_coupons" => [],
+        "promo_codes" => { "active" => {}, "used" => [], "last_seen_at" => 0 },
         "daily_featured" => {}
       }
       bucket = data
@@ -658,22 +665,196 @@ module ReloadedMart
     end
 
     def active_coupons
-      list = state(:active_coupons, [])
-      list.is_a?(Array) ? list : []
+      active_promo_codes
     end
 
     def activate_coupon(code)
-      text = code.to_s.strip
-      return false if text.empty?
-      list = active_coupons
-      list << text unless list.include?(text)
-      set_state(:active_coupons, list)
+      result = redeem_promo_code(code)
+      result.ok?
     end
 
     def deactivate_coupon(code)
-      list = active_coupons
-      list.delete(code.to_s.strip)
-      set_state(:active_coupons, list)
+      key = promo_code_key(code)
+      value = promo_codes_state
+      value["active"].delete(key)
+      set_promo_codes_state(value)
+    end
+
+    def promo_codes_state
+      value = state(:promo_codes, {})
+      value = {} unless value.is_a?(Hash)
+      value["active"] = {} unless value["active"].is_a?(Hash)
+      value["used"] = [] unless value["used"].is_a?(Array)
+      value["last_seen_at"] = value["last_seen_at"].to_i
+      cleanup_promo_codes(value)
+    end
+
+    def set_promo_codes_state(value)
+      set_state(:promo_codes, value.is_a?(Hash) ? value : {})
+    end
+
+    def promo_code_key(code)
+      code.to_s.strip.upcase.gsub(/\s+/, "")
+    end
+
+    def active_promo_codes
+      promo_codes_state["active"].keys
+    rescue
+      []
+    end
+
+    def active_promo_code_remaining_seconds
+      value = promo_codes_state
+      key = value["active"].keys.first
+      return nil unless key
+      info = value["active"][key]
+      expires_at = info.is_a?(Hash) ? info["expires_at"].to_i : 0
+      remaining = expires_at - promo_clock_now
+      remaining > 0 ? remaining : nil
+    rescue
+      nil
+    end
+
+    def active_promo_code_remaining_text
+      Rules.format_duration(active_promo_code_remaining_seconds)
+    rescue
+      nil
+    end
+
+    def promo_code_active?(code)
+      promo_codes_state["active"].has_key?(promo_code_key(code))
+    rescue
+      false
+    end
+
+    def catalog_version
+      Source.active_report&.catalog_version || DEFAULT_CATALOG_VERSION
+    rescue
+      DEFAULT_CATALOG_VERSION
+    end
+
+    def redeem_promo_code(code)
+      key = promo_code_key(code)
+      return TransactionResult.new(false, :blank_promo_code, "Enter a promo code.") if key.empty?
+      value = promo_codes_state
+      active_key = value["active"].keys.first
+      if active_key
+        remaining = Rules.format_duration(active_promo_code_remaining_seconds)
+        suffix = remaining ? " #{remaining}." : "."
+        if active_key == key
+          return TransactionResult.new(false, :promo_code_active, "That promo code is already active.#{suffix}")
+        end
+        return TransactionResult.new(false, :promo_code_active, "Only one promo code can be active at a time.#{suffix}")
+      end
+      return TransactionResult.new(false, :promo_code_used, "That promo code has already been used.") if value["used"].include?(key)
+      promo = promo_code_entry(key)
+      return TransactionResult.new(false, :promo_code_not_found, "That promo code is invalid.") unless promo
+      return TransactionResult.new(false, :promo_code_disabled, "That promo code is unavailable.") unless promo_code_enabled?(promo)
+      return TransactionResult.new(false, :promo_code_unavailable, "That promo code is not available right now.") unless promo_code_available?(promo)
+      now = promo_clock_now
+      value["active"][key] = {
+        "activated_at" => now,
+        "expires_at" => now + PROMO_CODE_DURATION_SECONDS,
+        "catalog_version" => catalog_version
+      }
+      value["used"] << key
+      value["used"].uniq!
+      value["last_seen_at"] = now
+      set_promo_codes_state(value)
+      log_info("Mart promo code activated code=#{key} expires_at=#{value["active"][key]["expires_at"]}")
+      TransactionResult.new(true, :ok, "Promo code applied for 5 minutes.", :code => key, :expires_at => value["active"][key]["expires_at"])
+    rescue Exception => e
+      log_exception("Promo code activation failed", e)
+      TransactionResult.new(false, :promo_code_failed, "That promo code could not be applied.")
+    end
+
+    def matching_promo_modifiers(entry, context = {})
+      active_promo_codes.map do |code|
+        promo = promo_code_entry(code)
+        next nil unless promo
+        modifier = promo_code_modifier(promo, code)
+        next nil unless Economy.modifier_applies?(modifier, entry, context)
+        Economy.normalize_modifier(modifier, { "id" => "promo:#{code}", "label" => promo["label"] || code })
+      end.compact
+    rescue Exception => e
+      log_exception("Promo code modifier lookup failed", e)
+      []
+    end
+
+    def promo_code_entry(code)
+      key = promo_code_key(code)
+      Array(Source.active_raw && Source.active_raw["promo_codes"]).find do |entry|
+        next false unless entry.is_a?(Hash)
+        promo_code_key(entry["code"] || entry["id"]) == key
+      end
+    rescue
+      nil
+    end
+
+    def promo_code_enabled?(promo)
+      return false unless promo.is_a?(Hash)
+      return false if promo["enabled"] == false || promo["active"] == false
+      true
+    end
+
+    def promo_code_available?(promo)
+      return false unless promo.is_a?(Hash)
+      return false unless Rules.reached?(promo["available_from"] || promo[:available_from], {})
+      return false if Rules.past?(promo["available_until"] || promo[:available_until], {})
+      true
+    end
+
+    def promo_code_modifier(promo, code = nil)
+      modifier = promo["modifier"].is_a?(Hash) ? promo["modifier"].each_with_object({}) { |(key, val), memo| memo[key.to_s] = val } : {}
+      %w[type value mode entry_id entry_ids item_id item_ids category category_id category_ids tag tags kind].each do |key|
+        modifier[key] = promo[key] if modifier[key].nil? && promo.has_key?(key)
+      end
+      modifier["type"] ||= "percent"
+      modifier["value"] ||= -10
+      modifier["mode"] ||= "buy"
+      %w[entry_id entry_ids item_id item_ids category category_id category_ids tag tags kind].each do |key|
+        value = modifier[key]
+        modifier.delete(key) if value.respond_to?(:empty?) && value.empty?
+      end
+      modifier["promo_code"] = promo_code_key(code || promo["code"] || promo["id"])
+      modifier["label"] ||= promo["label"] || modifier["promo_code"]
+      modifier
+    end
+
+    def cleanup_promo_codes(value)
+      now = promo_clock_now
+      last = value["last_seen_at"].to_i
+      changed = false
+      if last > 0 && now < last
+        value["active"] = {}
+        changed = true
+        log_warning("Mart promo codes expired because system time moved backward")
+      else
+        value["active"].delete_if do |_code, info|
+          expires_at = info.is_a?(Hash) ? info["expires_at"].to_i : 0
+          expired = expires_at <= now
+          changed ||= expired
+          expired
+        end
+      end
+      if value["active"].length > 1
+        keep = value["active"].max_by { |_code, info| info.is_a?(Hash) ? info["activated_at"].to_i : 0 }
+        value["active"] = keep ? { keep[0] => keep[1] } : {}
+        changed = true
+        log_warning("Mart promo codes collapsed to one active code")
+      end
+      if now > last
+        value["last_seen_at"] = now
+        changed = true
+      end
+      set_promo_codes_state(value) if changed
+      value
+    end
+
+    def promo_clock_now
+      Time.now.to_i
+    rescue
+      0
     end
 
     def cache
@@ -1291,11 +1472,15 @@ module ReloadedMart
         mode = modifier["mode"] || modifier[:mode]
         context_mode = (context[:mode] || :buy).to_s
         return false if mode && mode.to_s != context_mode && mode.to_s != "both"
-        return false if modifier["entry_id"] && modifier["entry_id"].to_s != entry.id.to_s
+        entry_targets = modifier_target_values(modifier, "entry_id", "entry_ids")
+        return false if entry_targets.any? && !entry_targets.include?(entry.id.to_s)
+        item_targets = modifier_target_values(modifier, "item", "items", "item_id", "item_ids")
+        return false if item_targets.any? && !item_targets.include?(modifier_entry_item_id(entry))
         return false if modifier["kind"] && modifier["kind"].to_s != entry.kind.to_s
-        if modifier["category"]
-          category = modifier["category"].to_s
-          return false unless entry.in_category?(category) || category == entry.category_name.to_s
+        categories = modifier_target_values(modifier, "category", "categories", "category_id", "category_ids")
+        if categories.any?
+          names = [entry.category_name.to_s]
+          return false unless categories.any? { |category| entry.in_category?(category) || names.include?(category) }
         end
         if modifier["tag"] || modifier[:tag]
           tag = modifier["tag"] || modifier[:tag]
@@ -1306,13 +1491,33 @@ module ReloadedMart
         end
         if modifier["coupon"] || modifier[:coupon]
           coupon = modifier["coupon"] || modifier[:coupon]
-          return false unless ReloadedMart.active_coupons.include?(coupon.to_s)
+          return false unless ReloadedMart.active_coupons.include?(ReloadedMart.promo_code_key(coupon))
+        end
+        if modifier["promo_code"] || modifier[:promo_code]
+          promo_code = modifier["promo_code"] || modifier[:promo_code]
+          return false unless ReloadedMart.promo_code_active?(promo_code)
         end
         if modifier["min_loyalty_spend"] || modifier[:min_loyalty_spend]
           min = (modifier["min_loyalty_spend"] || modifier[:min_loyalty_spend]).to_i
           return false if Stats.total_spent < min
         end
         true
+      end
+
+      def modifier_target_values(modifier, *keys)
+        keys.flat_map do |key|
+          value = modifier[key] || modifier[key.to_sym]
+          value.is_a?(Array) ? value : [value]
+        end.map { |value| value.to_s.strip }.reject(&:empty?).uniq
+      rescue
+        []
+      end
+
+      def modifier_entry_item_id(entry)
+        raw = entry.raw.is_a?(Hash) ? entry.raw : {}
+        (raw["item"] || raw[:item] || entry.id).to_s
+      rescue
+        entry.id.to_s
       end
 
       def normalize_modifier(modifier, event = {})
@@ -1339,6 +1544,10 @@ module ReloadedMart
         unless daily_featured_game_item_pool?(config)
           log_daily_featured_skip(:unsupported_pool, config)
           return []
+        end
+        cache_key = daily_featured_cache_key(config, context)
+        if @daily_featured_entries_cache && @daily_featured_entries_cache[:key] == cache_key
+          return Array(@daily_featured_entries_cache[:entries])
         end
         entries ||= Source.active_catalog || []
         item_ids = daily_featured_item_ids(entries, context)
@@ -1371,6 +1580,7 @@ module ReloadedMart
           )
         end.compact
         log_daily_featured_generation(config, item_ids, generated)
+        @daily_featured_entries_cache = { :key => cache_key, :entries => generated }
         generated
       rescue Exception => e
         ReloadedMart.log_exception("Daily featured entry generation failed", e)
@@ -1396,11 +1606,17 @@ module ReloadedMart
 
       def daily_featured_item_ids(entries = nil, context = {})
         config = daily_featured_config
+        cache_key = daily_featured_cache_key(config, context)
+        if @daily_featured_item_ids_cache && @daily_featured_item_ids_cache[:key] == cache_key
+          return Array(@daily_featured_item_ids_cache[:item_ids])
+        end
         count = [(config["count"] || DEFAULT_DAILY_FEATURED["count"]).to_i, 1].max
         candidates = daily_featured_item_pool(config)
         return [] if candidates.empty?
         seed = "#{Source.active_report&.catalog_version || DEFAULT_CATALOG_VERSION}:#{daily_featured_day_key(context)}:daily_featured"
-        candidates.sort_by { |item_id| deterministic_score("#{seed}:#{item_id}") }.first(count)
+        item_ids = candidates.sort_by { |item_id| deterministic_score("#{seed}:#{item_id}") }.first(count)
+        @daily_featured_item_ids_cache = { :key => cache_key, :item_ids => item_ids }
+        item_ids
       rescue Exception => e
         ReloadedMart.log_exception("Daily featured item selection failed", e)
         []
@@ -1521,11 +1737,16 @@ module ReloadedMart
 
       def daily_featured_item_pool(config)
         blacklist = daily_featured_blacklist(config)
+        cache_key = daily_featured_item_pool_cache_key(config, blacklist)
+        if @daily_featured_item_pool_cache && @daily_featured_item_pool_cache[:key] == cache_key
+          return Array(@daily_featured_item_pool_cache[:items])
+        end
         items = []
         each_game_item do |item|
           items << item.id.to_s if daily_featured_item_allowed?(item, blacklist)
         end
         log_daily_featured_pool(items.length, blacklist.length)
+        @daily_featured_item_pool_cache = { :key => cache_key, :items => items }
         items
       rescue Exception => e
         ReloadedMart.log_exception("Daily featured item pool failed", e)
@@ -1592,6 +1813,37 @@ module ReloadedMart
           ReloadedMart.log_info("Daily featured generated entries=#{generated.length} selected=#{generated.map(&:id).join(",")}")
         end
       rescue
+      end
+
+      def daily_featured_cache_key(config, context = {})
+        [
+          Source.active_report&.catalog_version || DEFAULT_CATALOG_VERSION,
+          daily_featured_day_key(context),
+          daily_featured_config_cache_key(config)
+        ].join("|")
+      rescue
+        "#{DEFAULT_CATALOG_VERSION}|unknown"
+      end
+
+      def daily_featured_config_cache_key(config)
+        keys = %w[
+          enabled count discount_min_percent discount_max_percent category_id
+          category_name pool stock stock_reset
+        ]
+        parts = keys.map { |key| "#{key}=#{config[key].inspect}" }
+        parts << "blacklist=#{daily_featured_blacklist(config).sort.join(",")}"
+        parts.join(";")
+      rescue
+        config.inspect
+      end
+
+      def daily_featured_item_pool_cache_key(config, blacklist)
+        [
+          (config["pool"] || config[:pool] || DEFAULT_DAILY_FEATURED["pool"]).to_s,
+          Array(blacklist).map(&:to_s).sort.join(",")
+        ].join("|")
+      rescue
+        "game_items"
       end
 
       def log_daily_featured_skip(reason, config)
@@ -2361,6 +2613,7 @@ module ReloadedMart
           "catalog_version" => DEFAULT_CATALOG_VERSION,
           "entries" => [],
           "categories" => [],
+          "promo_codes" => [],
           "banner" => {}
         }
       end
@@ -2370,6 +2623,7 @@ module ReloadedMart
         data["schema_version"] ||= SCHEMA_VERSION
         data["catalog_version"] ||= data["version"] || DEFAULT_CATALOG_VERSION
         data["entries"] ||= []
+        data["promo_codes"] ||= []
         data
       end
 
@@ -2390,6 +2644,7 @@ module ReloadedMart
           "categories" => categories_from_reference(source, active),
           "entries" => entries,
           "economy_events" => source["economy_events"] || [],
+          "promo_codes" => source["promo_codes"] || [],
           "stock_epoch" => source["stock_epoch"]
         }
       end
@@ -2623,6 +2878,7 @@ module ReloadedMart
         modifiers = []
         modifiers.concat(entry_modifiers(entry, context))
         modifiers.concat(Economy.matching_price_modifiers(entry, context))
+        modifiers.concat(ReloadedMart.matching_promo_modifiers(entry, context))
         ReloadedMart.price_modifier_handlers.each do |handler|
           result = handler[:block].call(entry, context) rescue nil
           modifiers.concat(Array(result).compact)
@@ -2825,7 +3081,8 @@ module ReloadedMart
         end
         ReloadedMart.emit(EVENT_PURCHASE_VALIDATED, event_context(cart, validation, context))
         amount = cart.total_price
-        charge = Inventory.charge(amount)
+        charge_amount = immediate_charge_amount(cart, context)
+        charge = Inventory.charge(charge_amount)
         unless charge.ok?
           log_purchase_failure(cart, charge, :charge, context)
           ReloadedMart.emit(EVENT_PURCHASE_FAILED, event_context(cart, charge, context))
@@ -2833,7 +3090,7 @@ module ReloadedMart
         end
         grants = Inventory.apply_grants(cart.grant_items)
         unless grants.ok?
-          Inventory.refund(amount)
+          Inventory.refund(charge_amount)
           log_purchase_failure(cart, grants, :grant, context)
           ReloadedMart.emit(EVENT_PURCHASE_FAILED, event_context(cart, grants, context))
           return grants
@@ -2842,12 +3099,13 @@ module ReloadedMart
         unless apply.ok?
           Inventory.rollback_grants(grants.details[:applied])
           rollback_handler_side_effects(context)
-          Inventory.refund(amount)
+          Inventory.refund(charge_amount)
           log_purchase_failure(cart, apply, :handler, context)
           ReloadedMart.emit(EVENT_PURCHASE_FAILED, event_context(cart, apply, context))
           return apply
         end
         record_success(cart, context)
+        clear_handler_side_effect_bookkeeping(context)
         result = TransactionResult.new(true, :ok, "Purchase complete.", :applied => grants.details[:applied], :revealed => cart.grant_items)
         ReloadedMart.emit(EVENT_PURCHASE_COMPLETED, event_context(cart, result, context))
         log_purchase_success(cart, result, amount, context)
@@ -2905,11 +3163,30 @@ module ReloadedMart
         TransactionResult.new(false, :handler_exception, "The transaction could not be completed.")
       end
 
+      def immediate_charge_amount(cart, context = {})
+        Array(cart&.lines).inject(0) do |sum, line|
+          handler = ReloadedMart.entry_handler(line.entry.kind) || EntryHandler.new(line.entry.kind)
+          handler.defer_charge?(line, context) ? sum : sum + line.total_price.to_i
+        end
+      rescue Exception => e
+        ReloadedMart.log_exception("Mart immediate charge calculation failed", e)
+        cart ? cart.total_price.to_i : 0
+      end
+
       def rollback_handler_side_effects(context = {})
         Array(context[:activated_coupons]).each { |code| ReloadedMart.deactivate_coupon(code) }
         context[:activated_coupons] = []
+        Array(context[:deferred_charges]).each { |amount| Inventory.refund(amount.to_i) }
+        context[:deferred_charges] = []
       rescue Exception => e
         ReloadedMart.log_exception("Mart handler rollback failed", e)
+      end
+
+      def clear_handler_side_effect_bookkeeping(context = {})
+        context[:activated_coupons] = []
+        context[:deferred_charges] = []
+      rescue Exception => e
+        ReloadedMart.log_exception("Mart handler bookkeeping cleanup failed", e)
       end
 
       def record_success(cart, context = {})

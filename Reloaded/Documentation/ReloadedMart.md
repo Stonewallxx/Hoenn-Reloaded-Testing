@@ -184,7 +184,6 @@ Supported entry kinds:
 - `gift`
 - `service`
 - `unlock`
-- `coupon`
 
 All entries share these fields where applicable:
 
@@ -214,10 +213,50 @@ All entries share these fields where applicable:
 
 `bundle` and `gift` entries grant every item listed in `grants`.
 
-`coupon` entries activate `coupon_code` or the entry ID as an active coupon.
+`service` and `unlock` are registry-backed entry kinds. `service` currently
+supports `display.service_key: "instant_hatch"`, which opens the party screen,
+lets the player choose one Egg, and hatches that Egg immediately. Unknown
+service keys remain unavailable until a handler is added.
 
-`service` and `unlock` are registry-backed entry kinds. They currently have
-default no-op handlers until a future system registers real behavior.
+## Promo Codes
+
+Promo codes are top-level catalog data, not Mart entries. Players enter a code
+with `Promo Code (Z)` on the Reloaded Mart buy page. A valid code activates its
+discount for 5 minutes and is immediately marked used for that save file, so it
+cannot be reactivated later. Only one promo code can be active at a time.
+
+Example:
+
+```json
+{
+  "promo_codes": [
+    {
+      "id": "healing_20",
+      "code": "HEAL20",
+      "label": "20% Healing Discount",
+      "enabled": true,
+      "available_from": "",
+      "available_until": "",
+      "modifier": {
+        "mode": "buy",
+        "type": "percent",
+        "value": -20,
+        "category_ids": ["medicine"],
+        "entry_ids": [],
+        "item_ids": [],
+        "tags": []
+      }
+    }
+  ]
+}
+```
+
+Promo modifiers use the same targeting fields as other price modifiers, such as
+`entry_id`, `entry_ids`, `item_id`, `item_ids`, `category`, `category_id`,
+`category_ids`, `tag`, and `tags`. Leave entry/item/category/tag targets empty
+to let the promo apply wherever the remaining modifier rules match. If the local
+clock moves backward while a promo code is active, active promo codes are
+cleared and already-used codes stay used.
 
 ## Bundles, Gifts, And Mystery Boxes
 
@@ -334,7 +373,8 @@ The price pipeline is:
 4. active catalog economy event modifiers
 5. profile tuning modifiers
 6. daily featured modifier
-7. runtime registered price modifier handlers
+7. active promo code modifiers
+8. runtime registered price modifier handlers
 
 Supported modifier types:
 
@@ -344,8 +384,8 @@ Supported modifier types:
 - `min`
 - `max`
 
-Matching supports mode, entry ID, kind, category, tag, coupon, and minimum
-loyalty spend.
+Matching supports mode, entry ID(s), item ID(s), kind, category ID(s), tag,
+promo code, and minimum loyalty spend.
 
 `PriceResult` exposes:
 
@@ -363,7 +403,7 @@ Only money is active now, but the model keeps `currency` for future expansion.
 ## Transactions
 
 Purchases use one cart path for items, bundles, gifts, services, unlocks, and
-coupons.
+legacy coupon entries.
 
 The transaction order is:
 
@@ -490,7 +530,7 @@ Important saved keys:
 - `catalog`
 - `cache`
 - `seen_catalog_versions`
-- `active_coupons`
+- `promo_codes`
 - `daily_featured`
 
 Do not store sprites, bitmaps, windows, procs, open files, or scene objects in
