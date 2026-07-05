@@ -32,6 +32,7 @@ module Reloaded
     BACKUP_DIR = File.join(GAME_ROOT, "ModsBackup")
     SEVEN_Z = File.join(GAME_ROOT, "REQUIRED_BY_INSTALLER_UPDATER", "7z.exe")
     PASTE_URL = "https://paste.rs/"
+    NETWORK_TIMEOUT_SECONDS = 8
 
     LOG_ENTRIES = [
       ["Log.txt", File.join(ROOT, "Logging", "Log.txt")],
@@ -222,7 +223,8 @@ module Reloaded
 
       def ensure_log_file(path)
         if File.basename(path).downcase == "latestbugreport.txt" && defined?(Reloaded::Log)
-          Reloaded::Log.export_bug_report if !File.exist?(path)
+          Reloaded::Log.export_bug_report
+          return path
         end
         ensure_directory(File.dirname(path))
         File.open(path, "a") { |_| } unless File.exist?(path)
@@ -268,7 +270,13 @@ module Reloaded
         request = Net::HTTP::Post.new(uri)
         request["Content-Type"] = "text/plain; charset=utf-8"
         request.body = sanitize_text(text)
-        response = Net::HTTP.start(uri.host, uri.port, :use_ssl => uri.scheme == "https") do |http|
+        response = Net::HTTP.start(
+          uri.host,
+          uri.port,
+          :use_ssl => uri.scheme == "https",
+          :open_timeout => NETWORK_TIMEOUT_SECONDS,
+          :read_timeout => NETWORK_TIMEOUT_SECONDS
+        ) do |http|
           http.request(request)
         end
         code = response.code.to_i
@@ -315,6 +323,7 @@ module Reloaded
         result[:errors] << "authors must be a non-empty array" unless data["authors"].is_a?(Array) && !data["authors"].empty?
         result[:errors] << "dependencies must be an array" unless data["dependencies"].is_a?(Array)
         result[:errors] << "tags must be an array" unless data["tags"].is_a?(Array)
+        result[:errors] << wrong_game_message(data["game"]) unless normalize_game_id(data["game"]) == game_id
         result
       rescue Exception => e
         result ||= target.dup
@@ -330,6 +339,7 @@ module Reloaded
         name = File.basename(folder).to_s.strip
         {
           "id" => normalize_mod_id(name),
+          "game" => game_id,
           "name" => name.empty? ? "New Mod" : name,
           "version" => "1.0.0",
           "authors" => ["Unknown"],
@@ -440,8 +450,22 @@ module Reloaded
         if defined?(Reloaded::ModManager::REQUIRED_FIELDS)
           Reloaded::ModManager::REQUIRED_FIELDS
         else
-          ["id", "name", "version", "authors", "description", "minimum_reloaded_version", "dependencies", "tags"]
+          ["id", "game", "name", "version", "authors", "description", "minimum_reloaded_version", "dependencies", "tags"]
         end
+      end
+
+      def game_id
+        defined?(Reloaded::ModManager::GAME_ID) ? Reloaded::ModManager::GAME_ID : "hoenn"
+      end
+
+      def normalize_game_id(value)
+        value.to_s.strip.downcase
+      end
+
+      def wrong_game_message(value)
+        game = value.to_s.strip
+        detail = game.empty? ? "No game field was set." : "game is #{game.inspect}."
+        "THIS MOD ISN'T MADE FOR THIS GAME! #{detail}"
       end
 
       def moddev_enabled?
@@ -478,7 +502,7 @@ module Reloaded
       end
 
       def reloaded_version
-        version = Reloaded::VERSION rescue nil
+        version = Reloaded.version rescue nil
         valid_version?(version) ? version.to_s : "1.0.0"
       end
 

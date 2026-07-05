@@ -17,6 +17,12 @@ begin
 rescue Exception
 end
 
+begin
+  require "net/http"
+  require "uri"
+rescue Exception
+end
+
 module Reloaded
   module ModBrowser
     ROOT = File.expand_path(File.join(File.dirname(__FILE__), ".."))
@@ -24,6 +30,11 @@ module Reloaded
     MODS_DIR = File.join(GAME_ROOT, "Mods")
     TOOL_DIR = File.join(GAME_ROOT, "Modders Tools")
     DEFAULT_GITHUB_INDEX_URL = "https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded-Mods/main/index.json"
+    CORE_ENTRY_ID = "hoenn_reloaded"
+    CORE_VERSION_URL = "https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/main/Reloaded/Version.md"
+    CORE_CHANGELOG_PATH = "Reloaded/Changelog.md"
+    CORE_HOMEPAGE_URL = "https://github.com/Stonewallxx/Hoenn-Reloaded"
+    NETWORK_TIMEOUT_SECONDS = 8
 
     SOURCE_VERSION = 1
     INDEX_VERSION = 1
@@ -57,6 +68,7 @@ module Reloaded
         @last_refresh_at = Time.now rescue nil
         @last_refresh_remote = fetch_remote
         @sources.each { |source| load_source_index(source, fetch_remote: fetch_remote) if truthy?(source["enabled"]) }
+        register_core_entry(fetch_remote: fetch_remote)
         @entries
       rescue Exception => e
         Reloaded::Log.exception("Mod Browser refresh failed", e, channel: :mods) if defined?(Reloaded::Log)
@@ -108,6 +120,10 @@ module Reloaded
 
       def profile_entry(profile_id)
         @profile_entries[normalize_mod_id(profile_id)]
+      end
+
+      def core_entry
+        @entries[CORE_ENTRY_ID] || build_core_entry
       end
 
       def available_mod_ids
@@ -274,6 +290,10 @@ module Reloaded
           delete_tree(staging)
           return false
         end
+        unless validate_install_roots(roots, archive_path)
+          delete_tree(staging)
+          return false
+        end
         roots.each { |root| install_mod_root(root, backups) }
         delete_tree(staging)
         cleanup_install_backups(backups)
@@ -330,6 +350,12 @@ module Reloaded
           visited[key] = true
           return
         end
+        if virtual_entry?(item)
+          plan[:already_installed] << mod_id
+          visiting.delete(key)
+          visited[key] = true
+          return
+        end
         Array(item["dependencies"]).each do |dependency|
           collect_download_entry(dependency["id"], nil, dependency["version"], plan, visiting, visited, false)
         end
@@ -349,12 +375,23 @@ module Reloaded
       end
 
       def installed_version_satisfies?(mod_id, minimum_version)
+        if normalize_mod_id(mod_id) == CORE_ENTRY_ID
+          minimum = minimum_version.to_s
+          return true if minimum.empty?
+          return compare_versions(current_reloaded_version, minimum) >= 0
+        end
         return false unless defined?(Reloaded::ModManager)
         row = Reloaded::ModManager.mod_row(mod_id)
         return false unless row
         minimum = minimum_version.to_s
         return true if minimum.empty?
         compare_versions(row[:version], minimum) >= 0
+      rescue
+        false
+      end
+
+      def virtual_entry?(entry)
+        truthy?(entry["virtual"]) || truthy?(entry["protected"]) || truthy?(entry["core_entry"])
       rescue
         false
       end
@@ -450,6 +487,55 @@ module Reloaded
           next if item["id"].empty?
           @profile_entries[item["id"]] = item
         end
+      end
+
+      def register_core_entry(fetch_remote: false)
+        item = build_core_entry(fetch_remote: fetch_remote)
+        @entries[item["id"]] = item
+        @source_statuses["hoenn_reloaded"] ||= fetch_remote ? "cached" : "local"
+      rescue Exception => e
+        Reloaded::Log.exception("Failed to register Hoenn Reloaded browser entry", e, channel: :mods) if defined?(Reloaded::Log)
+      end
+
+      def build_core_entry(fetch_remote: false)
+        current = current_reloaded_version
+        latest = current
+        if fetch_remote
+          remote = fetch_url(CORE_VERSION_URL, cache_bust: true).to_s.strip
+          version = remote[/\d+\.\d+\.\d+/]
+          if version
+            latest = version
+            @source_statuses["hoenn_reloaded"] = "remote"
+          end
+        end
+        {
+          "id" => CORE_ENTRY_ID,
+          "kind" => "mod",
+          "name" => "Hoenn Reloaded",
+          "version" => current,
+          "latest_version" => latest,
+          "authors" => ["Stonewall"],
+          "description" => "The core Hoenn Reloaded framework, systems, and built-in features for this fork.",
+          "tags" => ["Core"],
+          "dependencies" => [],
+          "download_url" => "",
+          "versions" => [{
+            "version" => latest,
+            "download_url" => "",
+            "reloaded_version" => current,
+            "changelog" => "",
+            "changelogurl" => CORE_CHANGELOG_PATH,
+            "dependencies" => []
+          }],
+          "homepage_url" => CORE_HOMEPAGE_URL,
+          "changelogurl" => CORE_CHANGELOG_PATH,
+          "source_id" => "hoenn_reloaded",
+          "featured" => true,
+          "special_entry" => true,
+          "virtual" => true,
+          "protected" => true,
+          "core_entry" => true
+        }
       end
 
       def normalize_entry(entry, source_id)
@@ -580,6 +666,26 @@ module Reloaded
           data = pbDownloadToString(request_url) rescue ""
           return data.to_s unless data.to_s.empty?
         end
+        return fetch_url_with_net_http(request_url) if defined?(Net::HTTP) && defined?(URI)
+        nil
+      end
+
+      def fetch_url_with_net_http(url)
+        uri = URI.parse(url.to_s)
+        request = Net::HTTP::Get.new(uri)
+        request["Cache-Control"] = "no-cache"
+        request["Pragma"] = "no-cache"
+        request["User-Agent"] = "Hoenn Reloaded Mod Browser"
+        response = Net::HTTP.start(
+          uri.host,
+          uri.port,
+          :use_ssl => uri.scheme == "https",
+          :open_timeout => NETWORK_TIMEOUT_SECONDS,
+          :read_timeout => NETWORK_TIMEOUT_SECONDS
+        ) { |http| http.request(request) }
+        response.code.to_i == 200 ? response.body.to_s : nil
+      rescue Exception => e
+        log("Net::HTTP fetch failed for #{url}: #{e.class}: #{e.message}", :warning)
         nil
       end
 
@@ -634,6 +740,27 @@ module Reloaded
         copy_tree(root, destination)
         log("Installed mod #{id} to #{File.basename(destination)}")
         id
+      end
+
+      def validate_install_roots(roots, archive_path)
+        errors = []
+        Array(roots).each do |root|
+          manifest_path = File.join(root, "mod.json")
+          manifest = parse_json_file(manifest_path)
+          unless manifest.is_a?(Hash)
+            errors << "#{File.basename(root)}: Manifest root must be a JSON object."
+            next
+          end
+          game = normalize_game_id(manifest["game"])
+          next if game == target_game_id
+          detail = game.empty? ? "No game field was set." : "game is #{game.inspect}."
+          errors << "#{File.basename(root)}: THIS MOD ISN'T MADE FOR THIS GAME! #{detail}"
+        rescue Exception => e
+          errors << "#{File.basename(root)}: Manifest could not be parsed: #{e.class}: #{e.message}"
+        end
+        return true if errors.empty?
+        errors.each { |error| log("Install rejected from #{File.basename(archive_path)}: #{error}", :critical) }
+        false
       end
 
       def prepare_install_backup(destination)
@@ -859,6 +986,18 @@ module Reloaded
 
       def normalize_mod_id(value)
         value.to_s.strip.downcase.gsub(/[^a-z0-9_]+/, "_").gsub(/\A_+|_+\z/, "")
+      end
+
+      def normalize_game_id(value)
+        value.to_s.strip.downcase
+      end
+
+      def target_game_id
+        defined?(Reloaded::ModManager::GAME_ID) ? Reloaded::ModManager::GAME_ID : "hoenn"
+      end
+
+      def current_reloaded_version
+        Reloaded.version rescue "0.0.0"
       end
 
       def normalize_string_array(value)

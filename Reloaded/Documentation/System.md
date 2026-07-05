@@ -122,7 +122,6 @@ active_profile=Default
 ```text
 Player
 Developer
-Bug Report
 ```
 
 `moddev` controls whether `Reloaded::ModManager` scans `ModDev/`.
@@ -186,14 +185,12 @@ Set `logging_mode` in `Reloaded/Settings.txt` to one of these values:
 
 - `Player` - shorter, readable logs focused on fixes.
 - `Developer` - detailed technical logging.
-- `Bug Report` - compact report-focused mode for exported diagnostics.
 
 Code can change the mode with:
 
 ```ruby
 Reloaded::Log.set_mode("Player")
 Reloaded::Log.set_mode("Developer")
-Reloaded::Log.set_mode("Bug Report")
 ```
 
 Basic use:
@@ -244,7 +241,15 @@ Reloaded::Log.export_bug_report
 ```
 
 This writes `Reloaded/Logging/LatestBugReport.txt` with version information,
-warning/error counts, and recent report blocks.
+environment details, active mod state, warning/error counts, Error/Critical/Fatal
+log lines, and all structured report blocks when present. The bug report is also
+refreshed automatically whenever an Error, Critical, or Fatal line is logged.
+Repeated identical severe lines are collapsed with repeat counts so runaway
+error loops do not flood the report.
+
+The environment header includes the operating system, Debug mode, and ModDev
+mode. The mod-state section includes enabled and disabled mods with versions and
+load-order context plus compact `Mods/` and `ModDev/` folder summaries.
 
 Reloaded sanitizes log output before writing it. Absolute paths inside the game
 folder are shortened so logs do not expose local machine paths.

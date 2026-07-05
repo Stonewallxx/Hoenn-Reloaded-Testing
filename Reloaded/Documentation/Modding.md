@@ -1133,6 +1133,7 @@ Each mod must include `mod.json`:
 ```json
 {
   "id": "example_mod",
+  "game": "hoenn",
   "name": "Example Mod",
   "version": "1.0.0",
   "authors": ["Stonewall"],
@@ -1150,6 +1151,9 @@ Rules:
 - `id` must use lowercase letters, numbers, and underscores.
 - `id` is the stable identifier Reloaded uses for profiles, dependencies,
   browser entries, and published filenames.
+- `game` must be `hoenn`. Empty values or other games such as
+  `infinitefusion` are blocked so KIF/Infinite Fusion mods do not load in this
+  fork.
 - The mod folder name does not need to match `id`.
 - `version` and `minimum_reloaded_version` use `Major.Minor.Patch`.
 - `authors`, `dependencies`, and `tags` are arrays.

@@ -19,6 +19,12 @@ Manager browser page.
 It is responsible for finding downloadable mods, resolving missing profile
 mods, downloading archives, and installing mod folders into `Mods/`.
 
+The Mod Manager also injects one protected non-mod entry for `Hoenn Reloaded`.
+It is pinned above normal mods in the installed list and browser. This entry is
+read-only: players can check update status and view the Hoenn Reloaded
+Patch Notes, but it cannot be disabled, reordered, downloaded, or uninstalled
+as a normal mod.
+
 ## GitHub Source
 
 The Mod Browser uses the official GitHub index by default:
@@ -47,7 +53,7 @@ Current controls:
 - `Filter (Z)` filters all entries, mods, profiles, installed entries, or
   available entries.
 - `L/R` swaps between the Mod Browser and Profile Browser.
-- `S` or clicking the search field starts browser search.
+- Clicking the search field starts browser search.
 
 Footer buttons use the shared Mod Manager footer system. The browser page
 currently has a right-most `Back` footer button; downloads and imports are
@@ -59,6 +65,16 @@ Mod actions:
 - `Download & Enable`
 - `Versions`
 - `View Changelog`, when `changelogurl` is configured
+
+The pinned `Hoenn Reloaded` browser entry shows `Update` when a public update is
+available, plus `Check Updates` or `Update Status`, `Patch Notes`, `File A Bug
+Report`, and `Open Mods Folder` instead of download actions. `Update` confirms,
+runs `Hoenn Reloaded Installer.bat`, and closes the game immediately. `Patch
+Notes` opens a submenu with `View` and `Open`. `File A Bug Report` exports
+`LatestBugReport.txt` with the same paste upload flow as
+`Tools -> Log Files -> Export`, copies the exported URL as a Discord-ready
+`[Bug Report](url)` link, and opens the Hoenn Reloaded bug-report Discord
+thread.
 
 Published profile actions:
 
@@ -179,6 +195,7 @@ backend treats them as profile imports.
 Profiles can be marked with `featured` or `special_entry` in the GitHub index.
 Those labels are admin-controlled index metadata, not normal mod tags. Featured
 entries sort above special entries, and special entries sort above normal rows.
+The built-in `Hoenn Reloaded` entry is always treated as featured and special.
 
 ## Archive Format
 
@@ -200,6 +217,9 @@ with the same manifest `id` already exists, the existing folder is updated.
 Otherwise the extracted folder name is preserved. The manifest `id`, not the
 folder name, is the stable identifier for profiles, dependencies, and browser
 entries.
+
+Installed archives must include mod manifests with `"game": "hoenn"`. Empty
+values or other game IDs are rejected before scripts can load.
 
 Archive installs are rollback-protected. Before replacing an existing mod
 folder, Reloaded moves the old folder into `Mods/.ReloadedInstallBackups/`.
@@ -391,6 +411,7 @@ Reloaded::ModBrowser.refresh(fetch_remote: true)
 Reloaded::ModBrowser.sources
 Reloaded::ModBrowser.entries
 Reloaded::ModBrowser.profile_entries
+Reloaded::ModBrowser.core_entry
 Reloaded::ModBrowser.entry("example_mod")
 Reloaded::ModBrowser.entry_for("example_mod", "1.0.0")
 Reloaded::ModBrowser.resolve_mod_ids(["example_mod"])

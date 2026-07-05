@@ -111,7 +111,7 @@ module Reloaded
           "format" => FORMAT,
           "version" => CODE_VERSION,
           "preset_name" => preset_name.to_s.empty? ? normalized["name"] : preset_name.to_s,
-          "reloaded_version" => (Reloaded::VERSION rescue "0.0.0"),
+          "reloaded_version" => (Reloaded.version rescue "0.0.0"),
           "profile" => normalized,
           "mods" => mod_metadata_for(normalized)
         }

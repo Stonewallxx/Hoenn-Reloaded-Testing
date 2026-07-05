@@ -24,6 +24,9 @@ module Reloaded
     GAME_ROOT = File.expand_path(File.join(ROOT, ".."))
     MODS_DIR = File.join(GAME_ROOT, "Mods")
     MODDEV_DIR = File.join(GAME_ROOT, "ModDev")
+    CORE_ENTRY_ID = "hoenn_reloaded"
+    CORE_CHANGELOG_PATH = "Reloaded/Changelog.md"
+    GAME_ID = "hoenn"
 
     DEFAULT_MODDEV_ENABLED = false
 
@@ -58,7 +61,8 @@ module Reloaded
       "Conflict",
       "Disabled",
       "ModDev",
-      "Invalid"
+      "Invalid",
+      "Wrong Game"
     ].freeze
 
     RESERVED_ADMIN_TAGS = [
@@ -69,6 +73,7 @@ module Reloaded
 
     REQUIRED_FIELDS = [
       "id",
+      "game",
       "name",
       "version",
       "authors",
@@ -169,6 +174,41 @@ module Reloaded
       def mod_row(mod_id)
         mod = @mods[normalize_mod_id(mod_id)]
         mod ? build_mod_row(mod) : nil
+      end
+
+      def core_row
+        {
+          :id => CORE_ENTRY_ID,
+          :game => GAME_ID,
+          :name => "Hoenn Reloaded",
+          :version => reloaded_version,
+          :authors => ["Stonewall"],
+          :description => "The core Hoenn Reloaded framework, systems, and built-in features for this fork.",
+          :source => :reloaded_core,
+          :folder_path => GAME_ROOT,
+          :manifest_path => File.join(ROOT, "Version.md"),
+          :enabled => true,
+          :profile_enabled => true,
+          :profile_disabled => false,
+          :loaded => true,
+          :status => :ok,
+          :tags => ["Core"],
+          :system_tags => [],
+          :dependencies => [],
+          :incompatibilities => [],
+          :warnings => [],
+          :errors => [],
+          :scripts_loaded => 0,
+          :settings_count => 0,
+          :has_settings => false,
+          :moddev => false,
+          :featured => true,
+          :special_entry => true,
+          :virtual => true,
+          :protected => true,
+          :core_entry => true,
+          :changelogurl => CORE_CHANGELOG_PATH
+        }
       end
 
       def dependency_status(mod_id)
@@ -300,6 +340,7 @@ module Reloaded
         id = mod[:id].to_s
         {
           :id => id,
+          :game => mod[:game].to_s,
           :name => mod[:name].to_s,
           :version => mod[:version].to_s,
           :authors => Array(mod[:authors]).map(&:to_s),
@@ -425,6 +466,7 @@ module Reloaded
         folder_path = File.dirname(manifest_path)
         {
           :id => data["id"].to_s,
+          :game => normalize_game_id(data["game"]),
           :name => data["name"].to_s,
           :version => data["version"].to_s,
           :authors => data["authors"],
@@ -531,6 +573,11 @@ module Reloaded
         REQUIRED_FIELDS.each do |field|
           value = candidate[:manifest][field] rescue nil
           errors << "Missing required field: #{field}" if value.nil?
+        end
+        unless candidate[:game] == GAME_ID
+          candidate[:system_tags] << "wrong_game"
+          candidate[:enabled] = false
+          errors << wrong_game_message(candidate[:game])
         end
         errors << "id must use lowercase letters, numbers, and underscores" unless candidate[:id] =~ /\A[a-z0-9_]+\z/
         errors << "version must use Major.Minor.Patch" unless valid_version?(candidate[:version])
@@ -808,6 +855,16 @@ module Reloaded
         value.to_s.strip.downcase
       end
 
+      def normalize_game_id(value)
+        value.to_s.strip.downcase
+      end
+
+      def wrong_game_message(value)
+        game = value.to_s.strip
+        detail = game.empty? ? "No game field was set." : "game is #{game.inspect}."
+        "THIS MOD ISN'T MADE FOR THIS GAME! #{detail}"
+      end
+
       def valid_version?(version)
         version.to_s =~ /\A\d+\.\d+\.\d+\z/
       end
@@ -823,7 +880,7 @@ module Reloaded
       end
 
       def reloaded_version
-        Reloaded::VERSION rescue "0.0.0"
+        Reloaded.version rescue "0.0.0"
       end
 
       def relative_to_mod(mod, path)

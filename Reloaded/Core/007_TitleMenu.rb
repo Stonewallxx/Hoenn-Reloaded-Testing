@@ -24,6 +24,7 @@ module Reloaded
           pbMessage("Mod Manager is not available.") rescue nil
         end
       rescue Exception => e
+        raise if e.is_a?(SystemExit)
         Reloaded::Log.exception("Failed to open title Mod Manager", e, channel: :mods) if defined?(Reloaded::Log)
         pbMessage("Mod Manager failed to open.") rescue nil
       end

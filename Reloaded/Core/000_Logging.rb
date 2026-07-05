@@ -7,11 +7,16 @@
 # Responsibilities:
 #   - Create and manage Reloaded/Logging log files.
 #   - Write framework, mod, and co-op log messages.
-#   - Support Player, Developer, and Bug Report log modes.
+#   - Support Player and Developer log modes.
 #   - Write structured [REPORT] blocks for failures.
 #   - Keep logging failures from crashing the game.
 #
 #======================================================
+
+begin
+  require "json"
+rescue Exception
+end
 
 module Reloaded
   module Log
@@ -24,7 +29,7 @@ module Reloaded
     COOP_LOG      = File.join(LOG_DIR, "Coop.txt")
     BUG_REPORT    = File.join(LOG_DIR, "LatestBugReport.txt")
 
-    AVAILABLE_MODES = [:player, :developer, :bug_report].freeze
+    AVAILABLE_MODES = [:player, :developer].freeze
 
     CHANNEL_FILES = {
       :main => MAIN_LOG,
@@ -48,9 +53,30 @@ module Reloaded
       :fatal => "FATAL"
     }.freeze
 
+    SEVERE_LOG_MARKERS = ["[ERROR]", "[Critical]", "[FATAL]"].freeze
+    BUG_REPORT_SEVERE_LEVELS = [:error, :critical, :fatal].freeze
+    BUG_REPORT_DUPLICATE_WINDOW_SECONDS = 3.0
+
+    BUG_REPORT_COUNT_MARKERS = {
+      :warning => "[Warning]",
+      :error => "[ERROR]",
+      :critical => "[Critical]",
+      :fatal => "[FATAL]"
+    }.freeze
+
+    BUG_REPORT_LOG_SOURCES = [
+      [MAIN_LOG, "Log.txt"],
+      [MODS_LOG, "Mods.txt"],
+      [COOP_LOG, "Coop.txt"]
+    ].freeze
+
     @counts = Hash.new(0)
     @mode = nil
     @once_keys = {}
+    @bug_report_exporting = false
+    @bug_report_refresh_suppressed = false
+    @last_bug_report_signature = nil
+    @last_bug_report_at = 0.0
 
     class << self
       def mode
@@ -82,7 +108,7 @@ module Reloaded
       end
 
       def bug_report?
-        mode == :bug_report
+        false
       end
 
       def debug(message, channel = :framework)
@@ -127,6 +153,7 @@ module Reloaded
         line = format_line(channel, message, normalized_level)
         append(channel_file(channel), line)
         append(MAIN_LOG, line) if [:mods, :coop].include?(channel.to_sym)
+        refresh_bug_report_for_failure(line, normalized_level)
         line
       rescue
         nil
@@ -165,8 +192,15 @@ module Reloaded
 
       def exception(message, error, channel: :framework, level: :error)
         normalized_level = normalize_level(level)
-        write(channel, "#{message}: #{error.class}: #{error}", level: normalized_level)
-        short_backtrace(error).each { |line| write(channel, "  #{line}", level: normalized_level) }
+        first_line = nil
+        @bug_report_refresh_suppressed = true
+        begin
+          first_line = write(channel, "#{message}: #{error.class}: #{error}", level: normalized_level)
+          short_backtrace(error).each { |line| write(channel, "  #{line}", level: normalized_level) }
+        ensure
+          @bug_report_refresh_suppressed = false
+        end
+        refresh_bug_report_for_failure(first_line, normalized_level) if first_line
       rescue
         nil
       end
@@ -214,8 +248,9 @@ module Reloaded
         nil
       end
 
-      def export_bug_report(extra_fields = {})
+      def export_bug_report(extra_fields = {}, log_export = true)
         ensure_dirs
+        @bug_report_exporting = true
         lines = []
         lines << "[BUG REPORT]"
         lines << "Game Title: #{game_title}"
@@ -223,21 +258,33 @@ module Reloaded
         lines << "Reloaded Version: #{reloaded_version}"
         lines << "Log Mode: #{mode_label}"
         lines << "Timestamp: #{Time.now}"
+        lines << "Operating System: #{operating_system}"
+        lines << "Debug Mode: #{debug_mode_label}"
+        lines << "ModDev: #{moddev_label}"
         extra_fields.each { |key, value| lines << "#{labelize(key)}: #{sanitize_text(value)}" }
         lines << ""
+        lines << "[MOD STATE]"
+        lines.concat(mod_state_lines)
+        lines << ""
         lines << "[COUNTS]"
+        report_counts = bug_report_log_counts
         [:warning, :error, :critical, :fatal].each do |level|
-          lines << "#{LEVEL_LABELS[level]}: #{@counts[level]}"
+          lines << "#{LEVEL_LABELS[level]}: #{report_counts[level]}"
         end
         lines << ""
-        lines << "[RECENT REPORTS]"
-        lines.concat(extract_recent_reports)
+        lines << "[ERRORS / CRITICAL / FATAL]"
+        lines.concat(extract_severe_log_lines)
+        lines << ""
+        lines << "[REPORTS]"
+        lines.concat(extract_report_blocks)
         lines << "[/BUG REPORT]"
         File.open(BUG_REPORT, "w") { |f| f.puts(sanitize_text(lines.join("\n"))) }
-        info("Bug report exported: #{BUG_REPORT}", :framework)
+        info("Bug report exported: #{BUG_REPORT}", :framework) if log_export
         BUG_REPORT
       rescue
         nil
+      ensure
+        @bug_report_exporting = false
       end
 
       def boot_header
@@ -284,7 +331,7 @@ module Reloaded
       def normalize_mode(value)
         case value.to_s.strip.downcase.gsub("-", "_").gsub(" ", "_")
         when "player", "player_mode" then :player
-        when "bug", "bug_report", "bug_report_mode" then :bug_report
+        when "bug", "bug_report", "bug_report_mode" then :developer
         else :developer
         end
       end
@@ -316,6 +363,23 @@ module Reloaded
       def append(path, text)
         File.open(path, "a") { |f| f.puts(sanitize_text(text)) }
       rescue
+      end
+
+      def refresh_bug_report_for_failure(line, level)
+        return unless BUG_REPORT_SEVERE_LEVELS.include?(level)
+        return if @bug_report_exporting
+        return if @bug_report_refresh_suppressed
+        now = Time.now.to_f
+        signature = sanitize_text(line).sub(/\A\[\d{2}:\d{2}:\d{2}\]\s*/, "")
+        if signature == @last_bug_report_signature &&
+           (now - @last_bug_report_at) < BUG_REPORT_DUPLICATE_WINDOW_SECONDS
+          return
+        end
+        @last_bug_report_signature = signature
+        @last_bug_report_at = now
+        export_bug_report({}, false)
+      rescue
+        nil
       end
 
       def short_backtrace(error)
@@ -364,17 +428,325 @@ module Reloaded
       end
 
       def reloaded_version
-        Reloaded::VERSION rescue "unknown"
+        version = (Reloaded.version rescue nil).to_s.strip
+        return version unless version.empty?
+        path = File.join(ROOT, "Version.md")
+        version = File.exist?(path) ? File.read(path).to_s.strip : ""
+        return version unless version.empty?
+        "unknown"
+      rescue
+        "unknown"
       end
 
-      def extract_recent_reports
+      def operating_system
+        os = (ENV["OS"] rescue nil).to_s.strip
+        platform = (RUBY_PLATFORM rescue "").to_s.strip
+        host = (RbConfig::CONFIG["host_os"] rescue "").to_s.strip
+        probe = [os, platform, host, os_release_text].join(" ").downcase
+        return "Steam Deck" if steam_deck_environment?(probe)
+        return "Windows" if probe =~ /windows|mswin|mingw|cygwin/
+        return "Linux" if probe.include?("linux")
+        "Other"
+      rescue
+        "Other"
+      end
+
+      def os_release_text
+        path = "/etc/os-release"
+        File.exist?(path) ? File.read(path).to_s : ""
+      rescue
+        ""
+      end
+
+      def steam_deck_environment?(probe)
+        return true if ["SteamDeck", "STEAM_DECK", "SteamOS"].any? { |key| truthy_setting?(ENV[key]) rescue false }
+        probe.include?("steamos") || probe.include?("steam deck") || probe.include?("valve")
+      rescue
+        false
+      end
+
+      def debug_mode_label
+        (defined?($DEBUG) && $DEBUG) ? "ON" : "OFF"
+      rescue
+        "OFF"
+      end
+
+      def moddev_label
+        enabled = if defined?(Reloaded::ModManager)
+                    Reloaded::ModManager.moddev_enabled?
+                  elsif defined?(Reloaded::Settings)
+                    Reloaded::Settings.bool("moddev", false)
+                  else
+                    truthy_setting?(settings_value("moddev", "Off"))
+                  end
+        enabled ? "ON" : "OFF"
+      rescue
+        "OFF"
+      end
+
+      def mod_state_lines
+        lines = []
+        lines << "Active Profile: #{active_profile_label}"
+        lines << "Enabled Mods:"
+        enabled_mod_lines.each { |line| lines << line }
+        lines << "Disabled Mods:"
+        disabled_mod_lines.each { |line| lines << line }
+        lines << ""
+        lines << "[MODS FOLDER]"
+        lines.concat(folder_manifest_lines(File.join(GAME_ROOT, "Mods")))
+        lines << ""
+        lines << "[MODDEV FOLDER]"
+        lines.concat(folder_manifest_lines(File.join(GAME_ROOT, "ModDev")))
+        lines
+      rescue
+        ["Could not extract mod state."]
+      end
+
+      def active_profile_label
+        return Reloaded::Profiles.active_name if defined?(Reloaded::Profiles)
+        return Reloaded::ModManager.profile_summary[:name] if defined?(Reloaded::ModManager)
+        settings_value("active_profile", "None")
+      rescue
+        "unknown"
+      end
+
+      def enabled_mod_lines
+        rows = if defined?(Reloaded::ModManager)
+                 Reloaded::ModManager.mod_rows
+               else
+                 []
+               end
+        return fallback_enabled_mod_lines if rows.empty?
+        enabled = rows.select { |row| row[:enabled] || row[:profile_enabled] }
+        mod_row_lines(enabled)
+      rescue
+        ["- Could not extract enabled mods."]
+      end
+
+      def disabled_mod_lines
+        rows = if defined?(Reloaded::ModManager)
+                 Reloaded::ModManager.mod_rows
+               else
+                 []
+               end
+        return fallback_disabled_mod_lines if rows.empty?
+        disabled = rows.select { |row| !row[:enabled] || row[:profile_disabled] }
+        mod_row_lines(disabled)
+      rescue
+        ["- Could not extract disabled mods."]
+      end
+
+      def mod_row_lines(rows)
+        return ["- None"] if rows.empty?
+        order = mod_load_order
+        rows.sort_by do |row|
+          id = row[:id].to_s
+          index = order.index(id)
+          [index || 9999, row[:name].to_s.downcase, id]
+        end.map.with_index(1) do |row, index|
+          id = row[:id].to_s
+          name = row[:name].to_s.empty? ? id : row[:name].to_s
+          version = row[:version].to_s.empty? ? "unknown" : row[:version].to_s
+          source = row[:moddev] ? "ModDev" : "Mods"
+          "#{index}. #{name} (#{id}) v#{version} - #{source}"
+        end
+      end
+
+      def mod_load_order
+        return Reloaded::Profiles.load_order if defined?(Reloaded::Profiles)
+        normalize_report_array(active_profile_data["load_order"])
+      rescue
+        []
+      end
+
+      def fallback_enabled_mod_lines
+        profile = active_profile_data
+        fallback_mod_id_lines(normalize_report_array(profile["enabled_mods"]))
+      rescue
+        ["- Could not extract enabled mods."]
+      end
+
+      def fallback_disabled_mod_lines
+        profile = active_profile_data
+        fallback_mod_id_lines(normalize_report_array(profile["disabled_mods"]))
+      rescue
+        ["- Could not extract disabled mods."]
+      end
+
+      def fallback_mod_id_lines(ids)
+        return ["- None"] if ids.empty?
+        order = normalize_report_array(active_profile_data["load_order"])
+        manifests = manifest_index_by_id
+        ids.sort_by do |id|
+          index = order.index(id)
+          [index || 9999, id]
+        end.map.with_index(1) do |id, index|
+          entry = manifests[id] || {}
+          name = entry["name"].to_s.empty? ? id : entry["name"].to_s
+          version = entry["version"].to_s.empty? ? "unknown" : entry["version"].to_s
+          source = entry["source"].to_s.empty? ? "unknown" : entry["source"].to_s
+          "#{index}. #{name} (#{id}) v#{version} - #{source}"
+        end
+      rescue
+        ["- Could not extract mods."]
+      end
+
+      def active_profile_data
+        name = active_profile_label
+        path = File.join(GAME_ROOT, "Mods", "Reloaded", "Profiles", "#{safe_profile_filename(name)}.json")
+        return parse_manifest_json(path) if File.exist?(path)
+        {}
+      rescue
+        {}
+      end
+
+      def safe_profile_filename(name)
+        name.to_s.gsub(/[\\\/:\*\?"<>\|]/, "_")
+      end
+
+      def settings_value(key, fallback = "")
+        path = File.join(ROOT, "Settings.txt")
+        return fallback unless File.exist?(path)
+        prefix = "#{key}="
+        line = File.readlines(path).find { |value| value.to_s.strip.start_with?(prefix) }
+        return fallback unless line
+        line.split("=", 2)[1].to_s.strip
+      rescue
+        fallback
+      end
+
+      def truthy_setting?(value)
+        ["1", "true", "yes", "on", "enabled"].include?(value.to_s.strip.downcase)
+      end
+
+      def normalize_report_array(value)
+        Array(value).map { |item| item.to_s.strip }.reject { |item| item.empty? }.uniq
+      end
+
+      def manifest_index_by_id
+        index = {}
+        [
+          [File.join(GAME_ROOT, "Mods"), "Mods"],
+          [File.join(GAME_ROOT, "ModDev"), "ModDev"]
+        ].each do |root, source|
+          next unless Dir.exist?(root)
+          Dir.entries(root).sort.each do |folder_name|
+            next if folder_name == "." || folder_name == ".."
+            manifest = File.join(root, folder_name, "mod.json")
+            next unless File.exist?(manifest)
+            data = parse_manifest_json(manifest)
+            id = data["id"].to_s
+            next if id.empty?
+            data = data.dup
+            data["source"] = source
+            index[id] = data
+          end
+        end
+        index
+      rescue
+        {}
+      end
+
+      def folder_manifest_lines(folder)
+        path = File.expand_path(folder.to_s)
+        return ["Folder not found: #{sanitize_text(path)}"] unless Dir.exist?(path)
+        folders = Dir.entries(path).sort.select do |name|
+          next false if name == "." || name == ".."
+          next false if report_folder_excluded?(path, name)
+          File.directory?(File.join(path, name))
+        end
+        return ["No folders found."] if folders.empty?
+        folders.map { |name| folder_manifest_line(path, name) }
+      rescue
+        ["Could not list folder: #{sanitize_text(folder)}"]
+      end
+
+      def folder_manifest_line(root, folder_name)
+        folder = File.join(root, folder_name)
+        manifest = File.join(folder, "mod.json")
+        return "- #{folder_name}: no mod.json" unless File.exist?(manifest)
+        data = parse_manifest_json(manifest)
+        id = data["id"].to_s
+        name = data["name"].to_s
+        version = data["version"].to_s
+        game = data["game"].to_s
+        parts = []
+        parts << "id=#{id.empty? ? "missing" : id}"
+        parts << "name=#{name.empty? ? "missing" : name}"
+        parts << "version=#{version.empty? ? "missing" : version}"
+        parts << "game=#{game.empty? ? "missing" : game}"
+        "- #{folder_name}: #{parts.join(", ")}"
+      rescue Exception => e
+        "- #{folder_name}: unreadable mod.json (#{sanitize_text(e.message)})"
+      end
+
+      def report_folder_excluded?(root, folder_name)
+        mods_root = File.expand_path(File.join(GAME_ROOT, "Mods"))
+        File.expand_path(root.to_s).casecmp(mods_root).zero? && folder_name.to_s.downcase == "reloaded"
+      rescue
+        false
+      end
+
+      def parse_manifest_json(path)
+        raise "JSON parser is not available" unless defined?(JSON)
+        data = JSON.parse(File.read(path))
+        data.is_a?(Hash) ? data : {}
+      end
+
+      def extract_report_blocks
         return ["No Log.txt found."] unless File.exist?(MAIN_LOG)
         text = File.read(MAIN_LOG)
-        reports = text.scan(/\[REPORT\].*?\[\/REPORT\]/m).last(3)
-        return ["No reports found."] if reports.empty?
+        reports = text.scan(/\[REPORT\].*?\[\/REPORT\]/m)
+        return ["No structured Reloaded::Log.report blocks found. Errors above were collected from current logs."] if reports.empty?
         reports.flat_map { |report| report.split(/\r?\n/) + [""] }
       rescue
         ["Could not extract reports."]
+      end
+
+      def extract_severe_log_lines
+        found = []
+        index = {}
+        bug_report_log_sources.each do |path, label|
+          File.readlines(path).each do |line|
+            text = sanitize_text(line).strip
+            next if text.empty?
+            next unless SEVERE_LOG_MARKERS.any? { |marker| text.include?(marker) }
+            key = "#{label}|#{text}"
+            if index.has_key?(key)
+              found[index[key]][:count] += 1
+            else
+              index[key] = found.length
+              found << { :label => label, :text => text, :count => 1 }
+            end
+          end
+        end
+        return ["No Error/Critical/Fatal log lines found."] if found.empty?
+        found.map do |row|
+          suffix = row[:count] > 1 ? " (x#{row[:count]})" : ""
+          "#{row[:label]}: #{row[:text]}#{suffix}"
+        end
+      rescue
+        ["Could not extract Error/Critical/Fatal log lines."]
+      end
+
+      def bug_report_log_counts
+        counts = Hash.new(0)
+        bug_report_log_sources.each do |path, _label|
+          File.readlines(path).each do |line|
+            text = sanitize_text(line)
+            BUG_REPORT_COUNT_MARKERS.each do |level, marker|
+              counts[level] += 1 if text.include?(marker)
+            end
+          end
+        end
+        counts
+      rescue
+        @counts
+      end
+
+      def bug_report_log_sources
+        return [[MAIN_LOG, "Log.txt"]] if File.exist?(MAIN_LOG)
+        BUG_REPORT_LOG_SOURCES.select { |path, _label| File.exist?(path) }
       end
     end
   end

@@ -54,8 +54,8 @@ module Reloaded
     DEFAULT_MENU_FRAME = "default_transparent"
     DEFAULT_SPEECH_FOLLOWS_MENU = true
     DEFAULTS_VERSION = 2
-    LOG_MODE_VALUES = [:player, :developer, :bug_report].freeze
-    LOG_MODE_NAMES = ["Player", "Developer", "Bug Report"].freeze
+    LOG_MODE_VALUES = [:player, :developer].freeze
+    LOG_MODE_NAMES = ["Player", "Developer"].freeze
 
     @category_extensions = Hash.new { |hash, key| hash[key] = [] }
 

@@ -17,7 +17,7 @@ module Reloaded
 
     class << self
       def title
-        version = defined?(Reloaded::VERSION) ? Reloaded::VERSION.to_s.strip : ""
+        version = Reloaded.version.to_s.strip rescue ""
         version.empty? ? PREFIX : "#{PREFIX} #{version}"
       end
 

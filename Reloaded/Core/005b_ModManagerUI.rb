@@ -59,11 +59,14 @@ module Reloaded
     SELECTION_BORDER = Color.new(210, 236, 255)
 
     FOOTER_BUTTONS = ["Profiles", "Browser", "Tools"].freeze
+    BUG_REPORT_THREAD_URL = "https://discord.com/channels/1121345297352753243/1518892862429855794".freeze
+    CORE_UPDATE_INSTALLER = "Hoenn Reloaded Installer.bat".freeze
 
     class << self
       def open
         Scene_Installed.new.main
       rescue Exception => e
+        raise if e.is_a?(SystemExit)
         Reloaded::Log.exception("Failed to open Mod Manager UI", e, channel: :mods) if defined?(Reloaded::Log)
         pbMessage("Mod Manager failed to open.") rescue nil
       end
@@ -71,6 +74,7 @@ module Reloaded
       def open_admin_tools
         Scene_Installed.new.open_admin_tools_standalone
       rescue Exception => e
+        raise if e.is_a?(SystemExit)
         Reloaded::Log.exception("Failed to open Admin Tools", e, channel: :mods) if defined?(Reloaded::Log)
         pbMessage("Admin Tools failed to open.") rescue nil
       end
@@ -316,6 +320,11 @@ module Reloaded
         pulse = pulse_value
         fill ||= color_with_alpha(FOOTER_SEL, (110 + (170 - 110) * pulse).to_i)
         draw_rounded_rect(bitmap, x, y, width, height, fill)
+      end
+
+      def popup_selection_fill
+        pulse = pulse_value
+        color_with_alpha(FOOTER_SEL, (135 + (205 - 135) * pulse).to_i)
       end
 
       def draw_selection_fill(bitmap, x, y, width, height, fill = nil)
@@ -591,12 +600,225 @@ module Reloaded
 
       def update_available?(row)
         return false unless row && defined?(Reloaded::ModBrowser)
+        if core_entry_row?(row)
+          entry = Reloaded::ModBrowser.entry(core_entry_id)
+          latest = entry ? entry["latest_version"].to_s : ""
+          return false if latest.empty?
+          return compare_versions(core_installed_version, latest) < 0
+        end
         entry = Reloaded::ModBrowser.entry(row[:id])
         latest = entry ? entry["latest_version"].to_s : ""
         return false if latest.empty?
         compare_versions(row[:version], latest) < 0
       rescue
         false
+      end
+
+      def core_entry_id
+        defined?(Reloaded::ModBrowser::CORE_ENTRY_ID) ? Reloaded::ModBrowser::CORE_ENTRY_ID : "hoenn_reloaded"
+      end
+
+      def core_entry_row?(row)
+        return false unless row
+        id = (row[:id] rescue nil) || (row["id"] rescue nil)
+        return true if id.to_s == core_entry_id
+        !!((row[:core_entry] rescue nil) || (row["core_entry"] rescue nil))
+      end
+
+      def protected_entry_row?(row)
+        return false unless row
+        core_entry_row?(row) || !!((row[:protected] rescue nil) || (row["protected"] rescue nil))
+      end
+
+      def core_installed_version
+        Reloaded.version rescue "0.0.0"
+      end
+
+      def show_core_update_status(row = nil)
+        Reloaded::ModBrowser.refresh(fetch_remote: true) if defined?(Reloaded::ModBrowser)
+        entry = defined?(Reloaded::ModBrowser) ? Reloaded::ModBrowser.entry(core_entry_id) : nil
+        latest = (entry && entry["latest_version"].to_s) || (row && ((row[:latest_version] rescue nil) || (row["latest_version"] rescue nil))).to_s
+        latest = core_installed_version if latest.to_s.empty?
+        current = core_installed_version
+        status = compare_versions(current, latest) < 0 ? "Update available." : "Hoenn Reloaded is up to date."
+        show_message("#{status}\nCurrent: v#{current}\nLatest: v#{latest}")
+      rescue Exception => e
+        Reloaded::Log.exception("Hoenn Reloaded update check failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not check Hoenn Reloaded updates.")
+      end
+
+      def update_core_installation(row = nil)
+        Reloaded::ModBrowser.refresh(fetch_remote: true) if defined?(Reloaded::ModBrowser)
+        entry = defined?(Reloaded::ModBrowser) ? Reloaded::ModBrowser.entry(core_entry_id) : nil
+        latest = (entry && entry["latest_version"].to_s) || (row && ((row[:latest_version] rescue nil) || (row["latest_version"] rescue nil))).to_s
+        current = core_installed_version
+        if latest.to_s.empty? || compare_versions(current, latest) >= 0
+          show_message("Hoenn Reloaded is already up to date.\nCurrent: v#{current}")
+          return
+        end
+        installer = core_update_installer_path
+        unless File.file?(installer)
+          show_message("#{CORE_UPDATE_INSTALLER} was not found in the game folder.")
+          return
+        end
+        choice = show_message(
+          "Update Hoenn Reloaded now?\nCurrent: v#{current}\nLatest: v#{latest}\n\nThis will run #{CORE_UPDATE_INSTALLER} and close the game immediately.",
+          ["Update", "Back"]
+        )
+        return unless choice == 0
+        if launch_core_update_installer(installer)
+          Reloaded::Log.info("Launched Hoenn Reloaded updater: #{relative_game_path(installer)}", :mods) if defined?(Reloaded::Log)
+          close_game_for_core_update
+        else
+          show_message("Could not run #{CORE_UPDATE_INSTALLER}.")
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Hoenn Reloaded update failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not start Hoenn Reloaded update:\n#{e.message}")
+      end
+
+      def core_update_installer_path
+        File.expand_path(File.join(game_root_path, CORE_UPDATE_INSTALLER))
+      end
+
+      def launch_core_update_installer(path)
+        normalized = File.expand_path(path.to_s)
+        return false unless File.file?(normalized)
+        return false unless under_game_root?(normalized)
+        system("cmd", "/c", "start", "", "/D", File.dirname(normalized), normalized)
+      end
+
+      def close_game_for_core_update
+        @running = false if instance_variable_defined?(:@running)
+        $scene = nil
+      rescue Exception
+        exit
+      end
+
+      def core_patch_notes_path
+        resolve_local_changelog_path("Reloaded/Changelog.md")
+      end
+
+      def open_core_patch_notes
+        path = core_patch_notes_path
+        if path.empty?
+          show_message("Patch notes file was not found.")
+          return
+        end
+        open_patch_notes_file(path)
+      end
+
+      def open_mods_folder
+        path = File.expand_path(File.join(game_root_path, "Mods"))
+        ensure_local_directory(path)
+        open_external_path(path, "Mods folder")
+      rescue Exception => e
+        Reloaded::Log.exception("Open Mods folder failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not open Mods folder.")
+      end
+
+      def file_bug_report
+        unless defined?(Reloaded::ModderTools)
+          show_message("Log export tools are not available.")
+          return
+        end
+        url = Reloaded::ModderTools.export_log("LatestBugReport.txt")
+        bug_report_link = "[Bug Report](#{url})"
+        copied = Reloaded::ModManagerUI.clipboard_write(bug_report_link)
+        opened = open_external_url(BUG_REPORT_THREAD_URL, "bug report thread")
+        if copied && opened
+          show_message("LatestBugReport.txt uploaded.\nBug report link copied to clipboard:\n#{bug_report_link}\nDiscord thread opened.")
+        elsif copied
+          show_message("LatestBugReport.txt uploaded.\nBug report link copied to clipboard:\n#{bug_report_link}\nCould not open Discord thread.")
+        elsif opened
+          show_message("LatestBugReport.txt uploaded.\nDiscord thread opened.\nCould not copy formatted bug report link.")
+        else
+          show_message("LatestBugReport.txt uploaded.\nCould not copy formatted bug report link or open Discord thread.\n#{url}")
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("File bug report failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not export bug report:\n#{e.message}")
+      end
+
+      def open_external_path(path, label = "file")
+        normalized = File.expand_path(path.to_s)
+        unless File.exist?(normalized) || File.directory?(normalized)
+          show_message("#{label.capitalize} was not found.")
+          return false
+        end
+        unless under_game_root?(normalized)
+          show_message("Refusing to open a path outside the game folder.")
+          return false
+        end
+        ok = system("cmd", "/c", "start", "", normalized)
+        show_message("Could not open #{label}.") unless ok
+        Reloaded::Log.info("Opened #{label}: #{relative_game_path(normalized)}", :mods) if ok && defined?(Reloaded::Log)
+        ok
+      rescue Exception => e
+        Reloaded::Log.exception("Open #{label} failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not open #{label}.")
+        false
+      end
+
+      def open_external_url(url, label = "link")
+        value = url.to_s.strip
+        unless value =~ /\Ahttps?:\/\/[^\s]+\z/i
+          show_message("Invalid #{label}.")
+          return false
+        end
+        ok = system("cmd", "/c", "start", "", value)
+        show_message("Could not open #{label}.") unless ok
+        Reloaded::Log.info("Opened #{label}: #{value}", :mods) if ok && defined?(Reloaded::Log)
+        ok
+      rescue Exception => e
+        Reloaded::Log.exception("Open #{label} failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not open #{label}.")
+        false
+      end
+
+      def open_patch_notes_file(path)
+        normalized = File.expand_path(path.to_s)
+        unless File.exist?(normalized)
+          show_message("Patch notes file was not found.")
+          return false
+        end
+        unless under_game_root?(normalized)
+          show_message("Refusing to open a path outside the game folder.")
+          return false
+        end
+        win_path = normalized.gsub("/", "\\")
+        ok = system("start \"\" \"#{win_path}\"")
+        show_message("Patch notes file:\n#{relative_game_path(normalized)}") unless ok
+        Reloaded::Log.info("Opened patch notes: #{relative_game_path(normalized)}", :mods) if ok && defined?(Reloaded::Log)
+        ok
+      rescue Exception => e
+        Reloaded::Log.exception("Open patch notes failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Patch notes file:\n#{relative_game_path(normalized || path)}")
+        false
+      end
+
+      def game_root_path
+        File.expand_path(File.join(File.dirname(__FILE__), "..", ".."))
+      end
+
+      def under_game_root?(path)
+        root = normalize_path(game_root_path)
+        value = normalize_path(path)
+        value == root || value.start_with?(root + "/")
+      end
+
+      def relative_game_path(path)
+        normalize_path(path).sub(normalize_path(game_root_path) + "/", "")
+      end
+
+      def ensure_local_directory(path)
+        target = File.expand_path(path.to_s)
+        raise "Refusing to create a folder outside the game folder." unless under_game_root?(target)
+        Dir.mkdir(target) unless Dir.exist?(target)
+      end
+
+      def normalize_path(path)
+        path.to_s.gsub("\\", "/")
       end
 
       def compare_versions(left, right)
@@ -675,7 +897,7 @@ module Reloaded
             y += 4
             choice_lines.each_with_index do |row_lines, index|
               row_h = choice_heights[index]
-              draw_selection_box(bitmap, pad, y, box_w - pad * 2, row_h) if index == selected
+              draw_selection_box(bitmap, pad, y, box_w - pad * 2, row_h, popup_selection_fill) if index == selected
               color = index == selected ? WHITE : GRAY
               row_lines.each_with_index do |line, line_index|
                 pbDrawShadowText(bitmap, pad + 8, y + line_index * line_h - 1, box_w - pad * 2 - 16, line_h, line, color, SHADOW)
@@ -836,7 +1058,7 @@ module Reloaded
             next if index < scroll
             break if index >= scroll + max_visible
             y = title_h + (index - scroll) * line_h
-            draw_selection_box(bitmap, pad, y, box_w - pad * 2, line_h) if index == selected
+            draw_selection_box(bitmap, pad, y, box_w - pad * 2, line_h, popup_selection_fill) if index == selected
             mark = checked[index] ? "[x]" : "[ ]"
             color = index == selected ? WHITE : GRAY
             pbDrawShadowText(bitmap, pad + 6, y - 2, 34, line_h, mark, color, SHADOW)
@@ -1642,7 +1864,7 @@ module Reloaded
       def setup
         @running = true
         Reloaded::ModManager.refresh_metadata if defined?(Reloaded::ModManager)
-        Reloaded::ModBrowser.refresh(fetch_remote: true) if defined?(Reloaded::ModBrowser)
+        Reloaded::ModBrowser.refresh(fetch_remote: false) if defined?(Reloaded::ModBrowser)
         @viewport = Viewport.new(0, 0, SCREEN_W, SCREEN_H)
         @viewport.z = 100_020
 
@@ -1731,7 +1953,9 @@ module Reloaded
       end
 
       def installed_mod_ids
-        defined?(Reloaded::ModManager) ? Reloaded::ModManager.mod_ids.map(&:to_s) : []
+        ids = defined?(Reloaded::ModManager) ? Reloaded::ModManager.mod_ids.map(&:to_s) : []
+        ids << core_entry_id
+        ids.uniq
       rescue
         []
       end
@@ -1791,7 +2015,7 @@ module Reloaded
         search_label = if @search_active
                          @search_text + ((@cursor_frame / 20) % 2 == 0 ? "|" : "")
                        elsif @search_text.empty?
-                         "Search (S or Click)"
+                         "Search (Click)"
                        else
                          @search_text
                        end
@@ -1906,7 +2130,7 @@ module Reloaded
         y = 31
         apply_ui_font(bitmap)
         bitmap.font.size = 16 rescue nil
-        pbDrawTextPositions(bitmap, [["Changelog", x, y, 0, BLUE, Color.new(0, 0, 0, 0)]])
+        pbDrawTextPositions(bitmap, [["Changelog", x, y - 5, 0, BLUE, Color.new(0, 0, 0, 0)]])
         y += 21
         bitmap.fill_rect(x, y - 3, RIGHT_W - 24, 1, PANEL_LINE)
         y += 6
@@ -2064,6 +2288,10 @@ module Reloaded
 
       def browser_update_available?(row)
         return false unless row && row["installed"]
+        if core_entry_row?(row)
+          latest = row["latest_version"].to_s
+          return !latest.empty? && compare_versions(core_installed_version, latest) < 0
+        end
         if row["kind"] == "mod"
           installed = installed_mod_version(row["id"])
           latest = row["latest_version"].to_s
@@ -2094,10 +2322,6 @@ module Reloaded
             return
           end
           request_exit
-          return
-        end
-        if key_trigger?(0x53)
-          activate_search
           return
         end
         if menu_trigger?
@@ -2294,6 +2518,20 @@ module Reloaded
           when "Import & Enable Mods" then import_profile(row, true)
           when "View Changelog" then view_changelog(row)
           end
+        elsif core_entry_row?(row)
+          choices = browser_update_available?(row) ? ["Update", "Update Status"] : ["Check Updates"]
+          choices << "Patch Notes" unless changelog_url(row).empty?
+          choices << "File A Bug Report"
+          choices << "Open Mods Folder"
+          choices << "Back"
+          choice = show_message(row["name"], choices)
+          case choices[choice]
+          when "Update" then update_core_installation(row)
+          when "Update Status", "Check Updates" then show_core_update_status(row)
+          when "Patch Notes" then open_browser_patch_notes_menu(row)
+          when "File A Bug Report" then file_bug_report
+          when "Open Mods Folder" then open_mods_folder
+          end
         else
           choices = ["Download", "Download & Enable", "Versions"]
           choices << "View Changelog" unless changelog_url(row).empty?
@@ -2310,7 +2548,17 @@ module Reloaded
 
       def quick_download(row)
         return unless row
+        return show_core_update_status(row) if core_entry_row?(row)
         row["kind"] == "profile" ? import_profile(row, true) : download_mod(row, false)
+      end
+
+      def open_browser_patch_notes_menu(row)
+        choices = ["View", "Open", "Back"]
+        choice = show_message("Patch Notes", choices)
+        case choices[choice]
+        when "View" then view_changelog(row)
+        when "Open" then open_core_patch_notes
+        end
       end
 
       def download_mod(row, enable, version = nil)
@@ -2364,6 +2612,7 @@ module Reloaded
       end
 
       def installed_mod_version(mod_id)
+        return core_installed_version if mod_id.to_s == core_entry_id
         row = defined?(Reloaded::ModManager) ? Reloaded::ModManager.mod_row(mod_id) : nil
         row ? row[:version].to_s : ""
       rescue
@@ -2633,7 +2882,7 @@ module Reloaded
       end
 
       def refresh_rows
-        rows = Reloaded::ModManager.mod_rows rescue []
+        rows = installed_rows
         if @load_order_mode
           rows = ordered_for_load_mode(rows)
         else
@@ -2656,7 +2905,18 @@ module Reloaded
         ensure_visible
       end
 
+      def installed_rows
+        rows = Reloaded::ModManager.mod_rows rescue []
+        if defined?(Reloaded::ModManager) && Reloaded::ModManager.respond_to?(:core_row)
+          rows = [Reloaded::ModManager.core_row] + rows
+        end
+        rows
+      rescue
+        []
+      end
+
       def ordered_for_load_mode(rows)
+        rows = Array(rows).reject { |row| protected_entry_row?(row) }
         order = defined?(Reloaded::Profiles) ? Reloaded::Profiles.load_order : []
         order = Array(order).map(&:to_s)
         order_index = {}
@@ -2717,7 +2977,7 @@ module Reloaded
         search_label = if @search_active
                          @search_text + ((@cursor_frame / 20) % 2 == 0 ? "|" : "")
                        elsif @search_text.empty?
-                         "Search (S or Click)"
+                         "Search (Click)"
                        else
                          @search_text
                        end
@@ -2908,7 +3168,7 @@ module Reloaded
         y = 31
         apply_ui_font(bitmap)
         bitmap.font.size = 16 rescue nil
-        pbDrawTextPositions(bitmap, [["Changelog", x, y, 0, BLUE, Color.new(0, 0, 0, 0)]])
+        pbDrawTextPositions(bitmap, [["Changelog", x, y - 5, 0, BLUE, Color.new(0, 0, 0, 0)]])
         y += 21
         bitmap.fill_rect(x, y - 3, RIGHT_W - 24, 1, PANEL_LINE)
         y += 6
@@ -2957,10 +3217,6 @@ module Reloaded
             return
           end
           request_exit
-          return
-        end
-        if key_trigger?(0x53)
-          activate_search
           return
         end
         if menu_trigger?
@@ -3258,6 +3514,22 @@ module Reloaded
 
       def open_action_menu(row)
         return unless row
+        if protected_entry_row?(row)
+          choices = update_available?(row) ? ["Update", "Update Status"] : ["Check Updates"]
+          choices << "Patch Notes" unless installed_changelog_url(row).empty?
+          choices << "File A Bug Report"
+          choices << "Open Mods Folder"
+          choices << "Back"
+          choice = show_message(row[:name], choices)
+          case choices[choice]
+          when "Update" then update_core_installation(row)
+          when "Update Status", "Check Updates" then show_core_update_status(row)
+          when "Patch Notes" then open_installed_patch_notes_menu(row)
+          when "File A Bug Report" then file_bug_report
+          when "Open Mods Folder" then open_mods_folder
+          end
+          return
+        end
         enabled = row[:profile_enabled]
         toggle_label = enabled ? "Disable" : "Enable"
         choices = [toggle_label]
@@ -3283,6 +3555,15 @@ module Reloaded
           show_conflict_details(row)
         when "Uninstall"
           uninstall_mod(row)
+        end
+      end
+
+      def open_installed_patch_notes_menu(row)
+        choices = ["View", "Open", "Back"]
+        choice = show_message("Patch Notes", choices)
+        case choices[choice]
+        when "View" then view_installed_changelog(row)
+        when "Open" then open_core_patch_notes
         end
       end
 

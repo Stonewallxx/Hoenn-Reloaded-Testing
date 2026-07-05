@@ -15,6 +15,18 @@
 #======================================================
 
 module Reloaded
+  VERSION_ROOT = File.expand_path(File.dirname(__FILE__)) unless const_defined?(:VERSION_ROOT, false)
+  VERSION_FILE = File.join(VERSION_ROOT, "Version.md") unless const_defined?(:VERSION_FILE, false)
+
+  class << self
+    def version
+      value = File.exist?(VERSION_FILE) ? File.read(VERSION_FILE).to_s.strip : ""
+      value.empty? ? "0.0.0" : value
+    rescue
+      "0.0.0"
+    end
+  end
+
   module Bootstrap
     ROOT     = File.expand_path(File.dirname(__FILE__))
     LOG_DIR  = File.join(ROOT, "Logging")
@@ -77,13 +89,10 @@ module Reloaded
       end
 
       def load_version
-        version = if File.exist?(VERSION_FILE)
-                    File.read(VERSION_FILE).to_s.strip
-                  else
-                    "0.0.0"
-                  end
-        Reloaded.const_set(:VERSION, version) unless Reloaded.const_defined?(:VERSION)
+        Reloaded.send(:remove_const, :VERSION) if Reloaded.const_defined?(:VERSION, false)
+        Reloaded.const_set(:VERSION, Reloaded.version)
       rescue
+        Reloaded.send(:remove_const, :VERSION) if Reloaded.const_defined?(:VERSION, false)
         Reloaded.const_set(:VERSION, "0.0.0") unless Reloaded.const_defined?(:VERSION)
       end
 
@@ -110,7 +119,7 @@ module Reloaded
         if defined?(Reloaded::Events)
           Reloaded::Events.emit(event_name, {
             :event => event_name,
-            :reloaded_version => (Reloaded::VERSION rescue nil),
+            :reloaded_version => Reloaded.version,
             :bootstrap_root => ROOT
           })
         elsif defined?(Reloaded::Hooks)
