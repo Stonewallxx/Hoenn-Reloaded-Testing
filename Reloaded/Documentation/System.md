@@ -45,8 +45,8 @@ Hoenn Reloaded currently has these framework systems in place:
 Current player-facing entry points:
 
 ```text
+Options -> Reloaded -> Reloaded Mart
 Options -> Reloaded -> [ TM Vault ]
-Options -> Reloaded -> Remove Confirm Prompt
 Options -> Mods -> Mod Manager
 Options -> Mods -> Mod Settings
 Options -> Mods -> ModDev
@@ -443,7 +443,8 @@ Reloaded option defaults:
 - `Global Small Text`: `On`
 - `Pause Menu`: `Reloaded`
 - `Options Cursor Color`: `White`
-- `Remove Confirm Prompt`: `Off`
+- `Reloaded Mart -> Remove Confirm Prompt`: `Off`
+- `Reloaded Mart -> Box Animation`: `On`
 
 Themes live in:
 

@@ -47,17 +47,43 @@ preserving vanilla stock, custom mart prices, dialogue, and `cantsell`.
 
 ## Options
 
-Reloaded Mart adds one player option in the `RELOADED` category:
+Reloaded Mart adds one action button in the `RELOADED` category:
+
+```text
+Reloaded Mart
+```
+
+That button opens the Reloaded Mart options submenu:
 
 ```text
 Remove Confirm Prompt: Off / On
+Box Animation: Off / On
 ```
 
-Default: `Off`.
+Defaults:
+
+```text
+Remove Confirm Prompt: Off
+Box Animation: On
+```
 
 When On, purchase and sale confirmation prompts are skipped for Reloaded Mart
 and the REX vanilla mart wrapper. Quantity selection still appears unless the
 Mart UI's Quick Buy toggle is On.
+
+`Box Animation` controls Mystery Box and bundle chest animations. When Off,
+Mystery Boxes and bundles use the simpler text result popup after purchase.
+
+Chest animation assets live in:
+
+```text
+Reloaded/Graphics/Boxes/bundle.png
+Reloaded/Graphics/Boxes/mysterybox.png
+```
+
+Each file is a 6-frame horizontal sprite sheet. The expected frame size is
+48x32 pixels, for a total sheet size of 288x32 pixels. If a sheet is missing,
+the UI falls back to the built-in drawn chest animation.
 
 ## Online Catalog Loading
 

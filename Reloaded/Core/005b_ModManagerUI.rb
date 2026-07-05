@@ -103,6 +103,9 @@ module Reloaded
       @mouse_active = false
       @last_mx = nil
       @last_my = nil
+      @mouse_active_frame = -1
+      @controller_scroll_dir = 0
+      @controller_scroll_frame = -999
 
       class << self
         def mouse_pos
@@ -111,41 +114,168 @@ module Reloaded
           if KEYBOARD_INPUTS.any? { |key| Input.trigger?(key) rescue false }
             @mouse_active = false
           end
-          if mx && my && (mx != @last_mx || my != @last_my)
+          moved = mx && my && (mx != @last_mx || my != @last_my)
+          if moved
             @last_mx = mx
             @last_my = my
             @mouse_active = true
+            @mouse_active_frame = Graphics.frame_count rescue @mouse_active_frame
           end
-          @mouse_active ? [mx, my] : [nil, nil]
+          clicked = mouse_left_raw? || mouse_right_raw?
+          scrolled = mouse_scroll.to_i != 0
+          if mx && my && (moved || clicked || scrolled)
+            @last_mx = mx
+            @last_my = my
+            @mouse_active = true
+            @mouse_active_frame = Graphics.frame_count rescue @mouse_active_frame
+            return [mx, my]
+          end
+          [nil, nil]
         rescue
           [nil, nil]
         end
 
         def mouse_left_trigger?
+          mouse_pos[0] && mouse_left_raw?
+        rescue
+          false
+        end
+
+        def mouse_right_trigger?
+          mouse_pos[0] && mouse_right_raw?
+        rescue
+          false
+        end
+
+        def mouse_left_press?
+          mouse_pos[0] && Input.const_defined?(:MOUSELEFT) && Input.press?(Input::MOUSELEFT)
+        rescue
+          false
+        end
+
+        def mouse_scroll
+          Input.scroll_v.to_i rescue 0
+        rescue
+          0
+        end
+
+        def scroll_delta
+          mouse = mouse_scroll
+          return mouse unless mouse == 0
+          controller_scroll_delta
+        rescue
+          0
+        end
+
+        def scroll_up?
+          scroll_delta.to_i > 0
+        end
+
+        def scroll_down?
+          scroll_delta.to_i < 0
+        end
+
+        def controller_scroll_delta
+          dir = controller_scroll_direction
+          if dir == 0
+            @controller_scroll_dir = 0
+            return 0
+          end
+          frame = Graphics.frame_count rescue 0
+          if @controller_scroll_dir != dir
+            @controller_scroll_dir = dir
+            @controller_scroll_frame = frame
+            return dir
+          end
+          return 0 if frame - (@controller_scroll_frame || 0) < 6
+          @controller_scroll_frame = frame
+          dir
+        rescue
+          0
+        end
+
+        def controller_scroll_direction
+          return 1 if right_stick_button?([
+            :RIGHTSTICKUP, :RIGHT_STICK_UP, :RSTICKUP, :R_STICK_UP,
+            :RUP, :RIGHT_ANALOG_UP, :ANALOG_R_UP
+          ])
+          return 1 if right_stick_axis_button?([:RIGHT_STICK_UP])
+          return -1 if right_stick_button?([
+            :RIGHTSTICKDOWN, :RIGHT_STICK_DOWN, :RSTICKDOWN, :R_STICK_DOWN,
+            :RDOWN, :RIGHT_ANALOG_DOWN, :ANALOG_R_DOWN
+          ])
+          return -1 if right_stick_axis_button?([:RIGHT_STICK_DOWN])
+          axis = right_stick_y_axis
+          return 1 if axis && axis <= -0.45
+          return -1 if axis && axis >= 0.45
+          0
+        rescue
+          0
+        end
+
+        def right_stick_button?(names)
+          names.any? do |name|
+            next false unless Input.const_defined?(name)
+            key = Input.const_get(name)
+            (Input.press?(key) rescue false) || (Input.repeat?(key) rescue false)
+          end
+        rescue
+          false
+        end
+
+        def right_stick_axis_button?(names)
+          return false unless Input.respond_to?(:axis_repeatex?) || Input.respond_to?(:axis_pressex?)
+          names.any? do |name|
+            next false unless Input.const_defined?(name)
+            key = Input.const_get(name)
+            (Input.axis_repeatex?(key) rescue false) || (Input.axis_pressex?(key) rescue false)
+          end
+        rescue
+          false
+        end
+
+        def right_stick_y_axis
+          if Input.const_defined?(:Controller)
+            controller = Input.const_get(:Controller)
+            value = controller.axes_right[1] rescue nil
+            return normalize_axis(value) unless value.nil?
+          end
+          [:right_stick_y, :right_y, :r_y, :rightStickY, :right_axis_y].each do |method_name|
+            next unless Input.respond_to?(method_name)
+            value = Input.send(method_name) rescue nil
+            return normalize_axis(value) unless value.nil?
+          end
+          if Input.respond_to?(:axis)
+            [:right_y, :right_stick_y, :ry, :r_y, 3].each do |axis_id|
+              value = Input.axis(axis_id) rescue nil
+              return normalize_axis(value) unless value.nil?
+            end
+          end
+          nil
+        rescue
+          nil
+        end
+
+        def normalize_axis(value)
+          axis = value.to_f
+          axis = axis / 32767.0 if axis.abs > 1.0
+          axis
+        rescue
+          nil
+        end
+
+        def mouse_left_raw?
           return false unless Input.const_defined?(:MOUSELEFT)
           Input.trigger?(Input::MOUSELEFT)
         rescue
           false
         end
 
-        def mouse_right_trigger?
+        def mouse_right_raw?
           return false unless Input.const_defined?(:MOUSERIGHT)
           Input.trigger?(Input::MOUSERIGHT)
         rescue
           false
-        end
-
-        def mouse_left_press?
-          return false unless Input.const_defined?(:MOUSELEFT)
-          Input.press?(Input::MOUSELEFT)
-        rescue
-          false
-        end
-
-        def mouse_scroll
-          Input.scroll_v rescue 0
-        rescue
-          0
         end
       end
     end
@@ -1986,6 +2116,11 @@ module Reloaded
       end
 
       def handle_mouse
+        controller_scroll = InputSupport.controller_scroll_delta
+        if controller_scroll != 0
+          @description_scroll = [@description_scroll - controller_scroll, 0].max
+          draw_right
+        end
         mx, my = InputSupport.mouse_pos
         return unless mx && my
         clicked = InputSupport.mouse_left_trigger?
@@ -2840,6 +2975,11 @@ module Reloaded
       end
 
       def handle_mouse
+        controller_scroll = InputSupport.controller_scroll_delta
+        if controller_scroll != 0
+          @description_scroll = [@description_scroll - controller_scroll, 0].max
+          draw_right
+        end
         mx, my = InputSupport.mouse_pos
         return unless mx && my
         clicked = InputSupport.mouse_left_trigger?

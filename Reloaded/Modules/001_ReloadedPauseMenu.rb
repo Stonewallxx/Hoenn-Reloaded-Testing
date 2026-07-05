@@ -515,6 +515,9 @@ module ReloadedPauseMenu
 
 
     def _mouse_pos
+      if defined?(Reloaded::ModManagerUI::InputSupport)
+        return Reloaded::ModManagerUI::InputSupport.mouse_pos
+      end
       mx = Input.mouse_x rescue nil
       my = Input.mouse_y rescue nil
       mx && my ? [mx, my] : [nil, nil]
@@ -525,7 +528,11 @@ module ReloadedPauseMenu
     def handle_mouse
       mx, my = _mouse_pos
       return unless mx && my
-      clicked = (Input.trigger?(Input::MOUSELEFT) rescue false)
+      clicked = if defined?(Reloaded::ModManagerUI::InputSupport)
+                  Reloaded::ModManagerUI::InputSupport.mouse_left_trigger?
+                else
+                  (Input.trigger?(Input::MOUSELEFT) rescue false)
+                end
 
 
       if clicked

@@ -229,10 +229,11 @@ class PokemonBag
   end
 
   def pbChangeQuantity(pocket, index, newqty = 1)
-    return false if pocket <= 0 || pocket > self.numPockets
+    return false if pocket <= 0 || pocket > PokemonBag.numPockets
     return false if !@pockets[pocket][index]
-    newqty = [newqty, maxPocketSize(pocket)].min
+    newqty = [[newqty.to_i, 0].max, Settings::BAG_MAX_PER_SLOT].min
     @pockets[pocket][index][1] = newqty
+    ItemStorageHelper.pbNormalizeSingleItemSlot(@pockets[pocket], @pockets[pocket][index][0], Settings::BAG_MAX_PER_SLOT)
     return true
   end
 
@@ -369,6 +370,28 @@ module ItemStorageHelper
     return ret
   end
 
+  def self.pbNormalizeSingleItemSlot(items, item, maxPerSlot)
+    first_slot = nil
+    total = 0
+    changed = false
+    items.each_with_index do |itemslot, i|
+      next if !itemslot || itemslot[0] != item
+      total += itemslot[1].to_i
+      if first_slot.nil?
+        first_slot = itemslot
+      else
+        items[i] = nil
+        changed = true
+      end
+    end
+    return false unless first_slot
+    capped_total = [total, maxPerSlot].min
+    changed = true if first_slot[1] != capped_total
+    first_slot[1] = capped_total
+    items.compact! if changed
+    changed
+  end
+
   # Deletes an item (items array, max. size per slot, item, no. of items to delete)
   def self.pbDeleteItem(items, item, qty)
     raise "Invalid value for qty: #{qty}" if qty < 0
@@ -392,17 +415,16 @@ module ItemStorageHelper
   def self.pbCanStore?(items, maxsize, maxPerSlot, item, qty)
     raise "Invalid value for qty: #{qty}" if qty < 0
     return true if qty == 0
+    pbNormalizeSingleItemSlot(items, item, maxPerSlot)
     for i in 0...maxsize
       itemslot = items[i]
-      if !itemslot
-        qty -= [qty, maxPerSlot].min
-        return true if qty == 0
-      elsif itemslot[0] == item && itemslot[1] < maxPerSlot
-        newamt = itemslot[1]
-        newamt = [newamt + qty, maxPerSlot].min
-        qty -= (newamt - itemslot[1])
-        return true if qty == 0
-      end
+      next if !itemslot || itemslot[0] != item
+      return itemslot[1].to_i + qty.to_i <= maxPerSlot
+    end
+    return false if qty.to_i > maxPerSlot
+    for i in 0...maxsize
+      itemslot = items[i]
+      return true if !itemslot
     end
     return false
   end
@@ -410,23 +432,25 @@ module ItemStorageHelper
   def self.pbStoreItem(items, maxsize, maxPerSlot, item, qty, sorting = false)
     raise "Invalid value for qty: #{qty}" if qty < 0
     return true if qty == 0
+    pbNormalizeSingleItemSlot(items, item, maxPerSlot)
     itm = GameData::Item.try_get(item)
     itemPocket = (itm) ? itm.pocket : 0
     for i in 0...maxsize
       itemslot = items[i]
+      next if !itemslot || itemslot[0] != item
+      return false if itemslot[1].to_i + qty.to_i > maxPerSlot
+      itemslot[1] = itemslot[1].to_i + qty.to_i
+      return true
+    end
+    return false if qty.to_i > maxPerSlot
+    for i in 0...maxsize
+      itemslot = items[i]
       if !itemslot
-        items[i] = [item, [qty, maxPerSlot].min]
-        qty -= items[i][1]
+        items[i] = [item, qty.to_i]
         if itemPocket > 0 && sorting && Settings::BAG_POCKET_AUTO_SORT[itemPocket]
           items.sort! { |a, b| GameData::Item.get(a[0]).id_number <=> GameData::Item.get(b[0]).id_number }
         end
-        return true if qty == 0
-      elsif itemslot[0] == item && itemslot[1] < maxPerSlot
-        newamt = itemslot[1]
-        newamt = [newamt + qty, maxPerSlot].min
-        qty -= (newamt - itemslot[1])
-        itemslot[1] = newamt
-        return true if qty == 0
+        return true
       end
     end
     return false

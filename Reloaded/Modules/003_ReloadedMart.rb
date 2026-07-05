@@ -46,18 +46,24 @@ module Reloaded
           def hr_mart_confirm=(value)
             @hr_mart_confirm = value.to_i
           end
+
+          def hr_mart_box_animation
+            @hr_mart_box_animation.nil? ? 1 : @hr_mart_box_animation.to_i
+          end
+
+          def hr_mart_box_animation=(value)
+            @hr_mart_box_animation = value.to_i
+          end
         end
       end
 
       def register_options
         return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :reloaded_mart_confirm, priority: 35) do |_scene|
-          [EnumOption.new(
-            _INTL("Remove Confirm Prompt"),
-            [_INTL("Off"), _INTL("On")],
-            proc { ($PokemonSystem.hr_mart_confirm rescue 1).to_i == 0 ? 1 : 0 },
-            proc { |value| $PokemonSystem.hr_mart_confirm = value.to_i == 1 ? 0 : 1 if $PokemonSystem },
-            _INTL("On: Skip purchase and sale confirmation prompts.\nOff: Confirm mart transactions before completing them.")
+        Reloaded::Options.register_category_option("RELOADED", :reloaded_mart_options, priority: 4) do |_scene|
+          [ActionButton.new(
+            _INTL("Reloaded Mart"),
+            proc { ReloadedMart.open_options if defined?(ReloadedMart) },
+            _INTL("Open Reloaded Mart options.")
           )]
         end
       rescue Exception => e
@@ -93,9 +99,7 @@ module ReloadedMart
     :SACREDSHARD
   ].freeze
   CURRENCY_SYMBOLS = {
-    :money => "$",
-    :pokedollars => "$",
-    :poke_dollars => "$"
+    :money => "$"
   }.freeze
   DEFAULT_AUTOMATION = {
     "enabled" => true,
@@ -107,6 +111,7 @@ module ReloadedMart
 
   ENTRY_KINDS = [:item, :bundle, :gift, :service, :unlock, :coupon].freeze
   STOCK_RESET_RULES = [:never, :daily, :weekly, :monthly, :catalog_version, :stock_epoch].freeze
+  DEFAULT_BAG_MAX_PER_SLOT = 9999
 
   EVENT_PURCHASE_VALIDATED = :reloaded_mart_purchase_validated
   EVENT_PURCHASE_COMPLETED = :reloaded_mart_purchase_completed
@@ -122,7 +127,7 @@ module ReloadedMart
   @patches_registered = false
 
   class CatalogEntry
-    attr_accessor :id, :kind, :name, :category_id, :category_name, :tags,
+    attr_accessor :id, :kind, :name, :category_id, :category_ids, :category_name, :tags,
                   :price, :sell_price, :currency, :stock, :stock_reset,
                   :availability, :limits, :display, :dependencies, :grants,
                   :raw
@@ -131,12 +136,13 @@ module ReloadedMart
       @id            = attrs[:id].to_s
       @kind          = normalize_kind(attrs[:kind])
       @name          = attrs[:name].to_s
-      @category_id   = attrs[:category_id].to_s
+      @category_ids  = normalize_category_ids(attrs[:category_ids], attrs[:category_id])
+      @category_id   = @category_ids.first.to_s
       @category_name = attrs[:category_name].to_s
       @tags          = Array(attrs[:tags]).map { |tag| tag.to_s }
       @price         = attrs[:price]
       @sell_price    = attrs[:sell_price]
-      @currency      = (attrs[:currency] || :money).to_sym
+      @currency      = normalize_currency(attrs[:currency])
       @stock         = attrs[:stock]
       @stock_reset   = (attrs[:stock_reset] || :never).to_sym
       @availability  = attrs[:availability].is_a?(Hash) ? attrs[:availability] : {}
@@ -155,7 +161,24 @@ module ReloadedMart
       @kind == :bundle || @kind == :gift
     end
 
+    def in_category?(category)
+      @category_ids.map { |id| id.to_s }.include?(category.to_s)
+    end
+
     private
+
+    def normalize_category_ids(values, fallback)
+      ids = Array(values).map { |id| id.to_s.strip }
+      ids << fallback.to_s.strip
+      ids = ids.reject(&:empty?).uniq
+      ids.empty? ? ["items"] : ids
+    end
+
+    def normalize_currency(value)
+      key = value.to_s.strip.downcase
+      return :money if key.empty? || key == "money"
+      key.to_sym
+    end
 
     def normalize_kind(value)
       kind = value.to_s.strip.downcase.to_sym
@@ -285,6 +308,22 @@ module ReloadedMart
       grants
     end
 
+    def validate(line, _context = {})
+      grants = Array(line&.grants)
+      return TransactionResult.new(false, :empty_bundle, "This bundle is unavailable.") if grants.empty?
+      grants.each do |grant|
+        item_id = grant[:item_id] || grant["item_id"] || grant[:id] || grant["id"] || grant[:item] || grant["item"]
+        quantity = (grant[:quantity] || grant["quantity"] || grant[:qty] || grant["qty"] || 1).to_i
+        return TransactionResult.new(false, :invalid_bundle_grant, "This bundle is unavailable.") if item_id.nil? || item_id.to_s.empty? || quantity <= 0
+        data = GameData::Item.try_get(item_id) rescue nil
+        return TransactionResult.new(false, :missing_item, "One of the items is unavailable.", :item_id => item_id) unless data
+      end
+      TransactionResult.new(true, :ok, "")
+    rescue Exception => e
+      ReloadedMart.log_exception("Bundle grant validation failed", e)
+      TransactionResult.new(false, :bundle_validation_failed, "This bundle is unavailable.")
+    end
+
     def mystery_box?(entry)
       return false unless entry
       display = entry.display.is_a?(Hash) ? entry.display : {}
@@ -298,32 +337,57 @@ module ReloadedMart
       pool = Array(entry.grants).select { |grant| mystery_grant_weight(grant) > 0 }
       pool = Array(entry.grants) if pool.empty?
       return [] if pool.empty?
-      totals = {}
-      [quantity.to_i, 1].max.times do
-        grant = weighted_mystery_grant(pool)
+      grants = []
+      count = [quantity.to_i, 1].max
+      count.times do |index|
+        grant, roll_details = weighted_mystery_grant(pool)
         item_id, count = grant_item_and_quantity(grant)
         next if item_id.nil? || item_id.to_s.empty?
-        totals[item_id] = totals[item_id].to_i + [count.to_i, 1].max
+        log_mystery_reward_roll(entry, index + 1, item_id, count, grant, roll_details)
+        grants << {
+          :item_id => item_id,
+          :quantity => [count.to_i, 1].max,
+          :rarity => mystery_grant_rarity(grant)
+        }
       end
-      totals.map { |item_id, count| { :item_id => item_id, :quantity => count } }
+      grants
     end
 
     def weighted_mystery_grant(pool)
       total = pool.inject(0) { |sum, grant| sum + mystery_grant_weight(grant) }
-      return pool[rand(pool.length)] if total <= 0
+      if total <= 0
+        index = rand(pool.length)
+        return [pool[index], { :mode => :uniform, :roll => index + 1, :total => pool.length }]
+      end
       roll = rand(total)
       running = 0
       pool.each do |grant|
         running += mystery_grant_weight(grant)
-        return grant if roll < running
+        return [grant, { :mode => :weighted, :roll => roll + 1, :total => total, :threshold => running }] if roll < running
       end
-      pool.last
+      [pool.last, { :mode => :fallback_last, :roll => roll + 1, :total => total, :threshold => running }]
+    end
+
+    def log_mystery_reward_roll(entry, index, item_id, quantity, grant, details)
+      rarity = mystery_grant_rarity(grant)
+      weight = mystery_grant_weight(grant)
+      ReloadedMart.log_info(
+        "Mystery reward roll entry=#{entry&.id} roll_index=#{index} item=#{item_id} quantity=#{[quantity.to_i, 1].max} rarity=#{rarity || "none"} weight=#{weight} mode=#{details[:mode]} roll=#{details[:roll]}/#{details[:total]} threshold=#{details[:threshold] || "-"}"
+      )
+    rescue Exception => e
+      ReloadedMart.log_exception("Mystery reward roll logging failed", e)
     end
 
     def mystery_grant_weight(grant)
       return 0 unless grant.is_a?(Hash)
       value = grant["probability"] || grant[:probability] || grant["chance"] || grant[:chance] || grant["weight"] || grant[:weight]
       [value.to_i, 0].max
+    end
+
+    def mystery_grant_rarity(grant)
+      return nil unless grant.is_a?(Hash)
+      value = grant["rarity"] || grant[:rarity]
+      value.to_s.empty? ? nil : value.to_s
     end
 
     def grant_item_and_quantity(grant)
@@ -431,6 +495,15 @@ module ReloadedMart
     def ok?
       @ok
     end
+  end
+
+  def self.bag_max_per_slot
+    if defined?(Settings) && Settings.const_defined?(:BAG_MAX_PER_SLOT, false)
+      return Settings::BAG_MAX_PER_SLOT.to_i
+    end
+    DEFAULT_BAG_MAX_PER_SLOT
+  rescue
+    DEFAULT_BAG_MAX_PER_SLOT
   end
 
   class << self
@@ -658,6 +731,22 @@ module ReloadedMart
       Kernel.pbMessage(_INTL("The Reloaded Mart is unavailable right now.")) rescue nil
     end
 
+    def open_options
+      return unless defined?(ReloadedMart::OptionsScene)
+      pbFadeOutIn do
+        scene = ReloadedMart::OptionsScene.new
+        screen = PokemonOptionScreen.new(scene)
+        screen.pbStartScreen
+      end
+    rescue Exception => e
+      log_exception("Reloaded Mart options failed", e)
+      Kernel.pbMessage(_INTL("Reloaded Mart options are unavailable right now.")) rescue nil
+    end
+
+    def box_animation_enabled?
+      ($PokemonSystem.hr_mart_box_animation rescue 1).to_i == 1
+    end
+
     def ui_ready?
       false
     end
@@ -699,6 +788,32 @@ module ReloadedMart
     def log_debug(message)
       Reloaded::Log.debug(message, :modules) if defined?(Reloaded::Log)
     rescue
+    end
+  end
+
+  class OptionsScene < PokemonOption_Scene
+    def initUIElements
+      super
+      @sprites["title"].text = _INTL("Reloaded Mart") rescue nil
+    end
+
+    def pbGetOptions(_inloadscreen = false)
+      [
+        EnumOption.new(
+          _INTL("Remove Confirm Prompt"),
+          [_INTL("Off"), _INTL("On")],
+          proc { ($PokemonSystem.hr_mart_confirm rescue 1).to_i == 0 ? 1 : 0 },
+          proc { |value| $PokemonSystem.hr_mart_confirm = value.to_i == 1 ? 0 : 1 if $PokemonSystem },
+          _INTL("On: Skip purchase and sale confirmation prompts.\nOff: Confirm mart transactions before completing them.")
+        ),
+        EnumOption.new(
+          _INTL("Box Animation"),
+          [_INTL("Off"), _INTL("On")],
+          proc { ReloadedMart.box_animation_enabled? ? 1 : 0 },
+          proc { |value| $PokemonSystem.hr_mart_box_animation = value.to_i if $PokemonSystem },
+          _INTL("Controls whether Mystery Boxes play the reveal animation after purchase.")
+        )
+      ]
     end
   end
 
@@ -841,7 +956,16 @@ module ReloadedMart
           "stock_epoch" => (@active_raw["stock_epoch"] rescue nil),
           "loaded_at" => Time.now.to_i
         })
+        log_daily_featured_probe(result[:entries], source)
         result
+      end
+
+      def log_daily_featured_probe(entries, source)
+        return unless defined?(ReloadedMart::Economy)
+        rows = ReloadedMart::Economy.daily_featured_entries(entries, { :source => :reloaded_mart, :mode => :buy })
+        ReloadedMart.log_info("Daily featured probe source=#{source} generated=#{rows.length} entries=#{rows.map(&:id).join(",")}")
+      rescue Exception => e
+        ReloadedMart.log_exception("Daily featured probe failed", e)
       end
 
       def load_cached_or_fail(reason)
@@ -850,6 +974,7 @@ module ReloadedMart
           ReloadedMart.log_warning("Mart catalog falling back to last-good cache reason=#{reason}")
           return load_raw(cached, source: :last_good_cache)
         end
+        ReloadedMart.log_warning("Mart catalog unavailable reason=#{reason}; no last-good cache available")
         report = ValidationReport.new(source: :none)
         report.error("catalog", reason.to_s)
         @active_catalog = []
@@ -1130,7 +1255,7 @@ module ReloadedMart
           next unless modifier_applies?(modifier, entry, context)
           modifiers << normalize_modifier(modifier, { "id" => "profile_tuning" })
         end
-        modifiers << daily_featured_modifier(entry, context) if automation_enabled?("daily_featured") && daily_featured?(entry, context)
+        modifiers << daily_featured_modifier(entry, context) if daily_featured_automation_enabled? && daily_featured?(entry, context)
         modifiers.compact
       end
 
@@ -1168,7 +1293,10 @@ module ReloadedMart
         return false if mode && mode.to_s != context_mode && mode.to_s != "both"
         return false if modifier["entry_id"] && modifier["entry_id"].to_s != entry.id.to_s
         return false if modifier["kind"] && modifier["kind"].to_s != entry.kind.to_s
-        return false if modifier["category"] && modifier["category"].to_s != entry.category_id.to_s && modifier["category"].to_s != entry.category_name.to_s
+        if modifier["category"]
+          category = modifier["category"].to_s
+          return false unless entry.in_category?(category) || category == entry.category_name.to_s
+        end
         if modifier["tag"] || modifier[:tag]
           tag = modifier["tag"] || modifier[:tag]
           return false unless entry.tags.map { |t| t.to_s }.include?(tag.to_s)
@@ -1200,12 +1328,21 @@ module ReloadedMart
 
       def daily_featured_entries(entries = nil, context = {})
         config = daily_featured_config
-        return [] unless automation_enabled?("daily_featured")
-        return [] unless daily_featured_enabled?(config)
-        return [] unless config["pool"].to_s.empty? || config["pool"].to_s == "game_items"
+        unless daily_featured_automation_enabled?
+          log_daily_featured_skip(:automation_disabled, config)
+          return []
+        end
+        unless daily_featured_enabled?(config)
+          log_daily_featured_skip(:daily_featured_disabled, config)
+          return []
+        end
+        unless daily_featured_game_item_pool?(config)
+          log_daily_featured_skip(:unsupported_pool, config)
+          return []
+        end
         entries ||= Source.active_catalog || []
         item_ids = daily_featured_item_ids(entries, context)
-        item_ids.map do |item_id|
+        generated = item_ids.map do |item_id|
           data = GameData::Item.try_get(item_id) rescue nil
           next nil unless data
           raw = {
@@ -1233,16 +1370,34 @@ module ReloadedMart
             :raw => raw
           )
         end.compact
+        log_daily_featured_generation(config, item_ids, generated)
+        generated
       rescue Exception => e
         ReloadedMart.log_exception("Daily featured entry generation failed", e)
         []
       end
 
+      def daily_featured_automation_enabled?
+        config = automation_config
+        key_enabled = !config.has_key?("daily_featured") || Rules.truthy?(config["daily_featured"])
+        return true if key_enabled
+        false
+      rescue
+        true
+      end
+
+      def daily_featured_game_item_pool?(config)
+        pool = (config["pool"] || config[:pool] || DEFAULT_DAILY_FEATURED["pool"]).to_s
+        key = pool.strip.downcase.gsub(/[\s\-]+/, "_")
+        key.empty? || key == "game_items"
+      rescue
+        true
+      end
+
       def daily_featured_item_ids(entries = nil, context = {})
         config = daily_featured_config
         count = [(config["count"] || DEFAULT_DAILY_FEATURED["count"]).to_i, 1].max
-        existing_items = catalog_item_ids(entries || Source.active_catalog || [])
-        candidates = daily_featured_item_pool(config).reject { |item_id| existing_items.include?(item_id.to_s) }
+        candidates = daily_featured_item_pool(config)
         return [] if candidates.empty?
         seed = "#{Source.active_report&.catalog_version || DEFAULT_CATALOG_VERSION}:#{daily_featured_day_key(context)}:daily_featured"
         candidates.sort_by { |item_id| deterministic_score("#{seed}:#{item_id}") }.first(count)
@@ -1269,7 +1424,7 @@ module ReloadedMart
 
       def daily_featured?(entry, context = {})
         return false unless entry
-        return false unless automation_enabled?("daily_featured")
+        return false unless daily_featured_automation_enabled?
         return false unless daily_featured_enabled?(daily_featured_config)
         return true if entry.raw.is_a?(Hash) && Rules.truthy?(entry.raw["daily_featured_pool"] || entry.raw[:daily_featured_pool])
         daily_featured_entry_ids(nil, context).include?(entry.id.to_s)
@@ -1367,14 +1522,32 @@ module ReloadedMart
       def daily_featured_item_pool(config)
         blacklist = daily_featured_blacklist(config)
         items = []
-        GameData::Item.each do |item|
-          next unless daily_featured_item_allowed?(item, blacklist)
-          items << item.id.to_s
+        each_game_item do |item|
+          items << item.id.to_s if daily_featured_item_allowed?(item, blacklist)
         end
+        log_daily_featured_pool(items.length, blacklist.length)
         items
       rescue Exception => e
         ReloadedMart.log_exception("Daily featured item pool failed", e)
         []
+      end
+
+      def each_game_item
+        if GameData::Item.respond_to?(:each)
+          GameData::Item.each { |item| yield item }
+          return
+        end
+        if GameData::Item.respond_to?(:list_all)
+          seen = {}
+          GameData::Item.list_all.each_value do |item|
+            next unless item && item.respond_to?(:id)
+            next if seen[item.id]
+            seen[item.id] = true
+            yield item
+          end
+        end
+      rescue Exception => e
+        ReloadedMart.log_exception("Daily featured item enumeration failed", e)
       end
 
       def daily_featured_item_allowed?(item, blacklist)
@@ -1395,6 +1568,38 @@ module ReloadedMart
         values = DAILY_FEATURED_ITEM_BLACKLIST.map { |item| item.to_s }
         values += Array(config["blacklist"] || config[:blacklist]).map { |item| item.to_s }
         values.uniq
+      end
+
+      def log_daily_featured_pool(count, blacklist_count)
+        key = "#{Source.active_report&.catalog_version}:#{daily_featured_day_key}:pool:#{count}:#{blacklist_count}"
+        return if @daily_featured_pool_log_key == key
+        @daily_featured_pool_log_key = key
+        if count.to_i <= 0
+          ReloadedMart.log_warning("Daily featured item pool is empty blacklist=#{blacklist_count}")
+        else
+          ReloadedMart.log_debug("Daily featured item pool count=#{count} blacklist=#{blacklist_count}")
+        end
+      rescue
+      end
+
+      def log_daily_featured_generation(config, item_ids, generated)
+        key = "#{Source.active_report&.catalog_version}:#{daily_featured_day_key}:generated:#{Array(item_ids).join(",")}:#{generated.length}"
+        return if @daily_featured_generation_log_key == key
+        @daily_featured_generation_log_key = key
+        if generated.empty?
+          ReloadedMart.log_warning("Daily featured generated no entries pool=#{config["pool"].inspect} selected=#{Array(item_ids).inspect}")
+        else
+          ReloadedMart.log_info("Daily featured generated entries=#{generated.length} selected=#{generated.map(&:id).join(",")}")
+        end
+      rescue
+      end
+
+      def log_daily_featured_skip(reason, config)
+        key = "#{Source.active_report&.catalog_version}:#{daily_featured_day_key}:skip:#{reason}:#{automation_config.inspect}:#{config.inspect}"
+        return if @daily_featured_skip_log_key == key
+        @daily_featured_skip_log_key = key
+        ReloadedMart.log_warning("Daily featured skipped reason=#{reason} automation=#{automation_config.inspect} config=#{config.inspect}")
+      rescue
       end
 
       def catalog_item_ids(entries)
@@ -1635,7 +1840,14 @@ module ReloadedMart
 
       def one_time?(entry)
         return false unless entry && entry.limits
-        value = entry.limits["one_time"] || entry.limits[:one_time]
+        value = if entry.limits.key?("one_time")
+                  entry.limits["one_time"]
+                elsif entry.limits.key?(:one_time)
+                  entry.limits[:one_time]
+                else
+                  nil
+                end
+        return true if entry.kind == :gift && value.nil?
         value == true || value.to_s.downcase == "true" || value.to_s == "1"
       end
 
@@ -1995,6 +2207,7 @@ module ReloadedMart
           :kind => kind,
           :name => raw["name"] || raw[:name] || id,
           :category_id => raw["category_id"] || raw[:category_id] || raw["category"] || raw[:category] || "items",
+          :category_ids => raw["category_ids"] || raw[:category_ids] || raw["categories"] || raw[:categories],
           :category_name => raw["category_name"] || raw[:category_name] || raw["category"] || raw[:category] || "ITEMS",
           :tags => raw["tags"] || raw[:tags],
           :price => raw["price"] || raw[:price],
@@ -2019,6 +2232,13 @@ module ReloadedMart
           report.skip(entry.id, "invalid_stock", :stock => entry.stock)
           return false
         end
+        if entry.bundle_like?
+          grant_result = validate_bundle_grants(entry)
+          unless grant_result[:ok]
+            report.skip(entry.id, grant_result[:reason], grant_result[:details])
+            return false
+          end
+        end
         if entry.stock_reset && !STOCK_RESET_RULES.include?(entry.stock_reset.to_sym)
           report.record(:warning, entry.id, "unknown_stock_reset_rule", :stock_reset => entry.stock_reset)
         end
@@ -2030,6 +2250,24 @@ module ReloadedMart
           report.record(:warning, entry.id, "mystery_probability_total_not_100", :total => total) if total != 100
         end
         true
+      end
+
+      def validate_bundle_grants(entry)
+        grants = Array(entry.grants)
+        return { :ok => false, :reason => "empty_bundle_grants", :details => {} } if grants.empty?
+        grants.each_with_index do |grant, index|
+          item_id, quantity = grant_item_and_quantity(grant)
+          if item_id.nil? || item_id.to_s.empty?
+            return { :ok => false, :reason => "invalid_bundle_grant", :details => { :index => index, :field => "item" } }
+          end
+          if quantity.to_i <= 0
+            return { :ok => false, :reason => "invalid_bundle_grant", :details => { :index => index, :item => item_id.to_s, :field => "quantity" } }
+          end
+        end
+        { :ok => true, :reason => nil, :details => {} }
+      rescue Exception => e
+        ReloadedMart.log_exception("Mart bundle grant validation failed for #{entry&.id}", e)
+        { :ok => false, :reason => "bundle_grant_validation_failed", :details => { :error => e.message } }
       end
 
       def mystery_box_entry?(entry)
@@ -2049,7 +2287,7 @@ module ReloadedMart
         end
         if entry.bundle_like?
           entry.grants.each do |grant|
-            grant_id = grant.is_a?(Hash) ? (grant["id"] || grant[:id] || grant["item"] || grant[:item]) : grant
+            grant_id, = grant_item_and_quantity(grant)
             missing_items << grant_id unless item_exists?(grant_id)
           end
         elsif entry.kind == :item
@@ -2068,6 +2306,17 @@ module ReloadedMart
         GameData::Item.exists?(item_id) rescue !!(GameData::Item.try_get(item_id) rescue nil)
       end
 
+      def grant_item_and_quantity(grant)
+        if grant.is_a?(Hash)
+          item_id = grant["id"] || grant[:id] || grant["item"] || grant[:item] || grant["item_id"] || grant[:item_id]
+          quantity = grant["qty"] || grant[:qty] || grant["quantity"] || grant[:quantity] || 1
+        else
+          item_id = grant
+          quantity = 1
+        end
+        [item_id, quantity]
+      end
+
       def item_data(item_id)
         GameData::Item.try_get(item_id) rescue nil
       end
@@ -2077,6 +2326,9 @@ module ReloadedMart
         ReloadedMart.log_info(
           "Mart catalog #{summary[:catalog_version]} source=#{summary[:source]} accepted=#{summary[:accepted]} skipped=#{summary[:skipped]} issues=#{summary[:issues]}"
         )
+        report.skipped.each do |skip|
+          ReloadedMart.log_warning("Mart catalog skipped entry=#{skip[:entry_id]} reason=#{skip[:reason]} details=#{skip[:details].inspect}")
+        end
         report.issues.each do |issue|
           next unless issue[:level] == :error
           ReloadedMart.log_warning("Mart catalog issue entry=#{issue[:entry_id]} reason=#{issue[:reason]} details=#{issue[:details].inspect}")
@@ -2567,6 +2819,7 @@ module ReloadedMart
       def complete_cart(cart, context = {})
         validation = validate_cart(cart, context)
         unless validation.ok?
+          log_purchase_failure(cart, validation, :validation, context)
           ReloadedMart.emit(EVENT_PURCHASE_FAILED, event_context(cart, validation, context))
           return validation
         end
@@ -2574,12 +2827,14 @@ module ReloadedMart
         amount = cart.total_price
         charge = Inventory.charge(amount)
         unless charge.ok?
+          log_purchase_failure(cart, charge, :charge, context)
           ReloadedMart.emit(EVENT_PURCHASE_FAILED, event_context(cart, charge, context))
           return charge
         end
         grants = Inventory.apply_grants(cart.grant_items)
         unless grants.ok?
           Inventory.refund(amount)
+          log_purchase_failure(cart, grants, :grant, context)
           ReloadedMart.emit(EVENT_PURCHASE_FAILED, event_context(cart, grants, context))
           return grants
         end
@@ -2588,13 +2843,14 @@ module ReloadedMart
           Inventory.rollback_grants(grants.details[:applied])
           rollback_handler_side_effects(context)
           Inventory.refund(amount)
+          log_purchase_failure(cart, apply, :handler, context)
           ReloadedMart.emit(EVENT_PURCHASE_FAILED, event_context(cart, apply, context))
           return apply
         end
         record_success(cart, context)
-        result = TransactionResult.new(true, :ok, "Purchase complete.", :applied => grants.details[:applied])
+        result = TransactionResult.new(true, :ok, "Purchase complete.", :applied => grants.details[:applied], :revealed => cart.grant_items)
         ReloadedMart.emit(EVENT_PURCHASE_COMPLETED, event_context(cart, result, context))
-        ReloadedMart.log_info("Mart purchase complete entries=#{cart.lines.length} total=#{amount} catalog=#{catalog_version}")
+        log_purchase_success(cart, result, amount, context)
         result
       rescue Exception => e
         ReloadedMart.log_exception("Mart purchase failed unexpectedly", e)
@@ -2660,7 +2916,7 @@ module ReloadedMart
         cart.lines.each do |line|
           Stock.record_purchase(line.entry.id, line.quantity)
           Limits.record_purchase(line.entry.id, line.quantity, context)
-          Claims.record(line.entry.id, line.quantity) if Limits.one_time?(line.entry) || line.entry.kind == :gift
+          Claims.record(line.entry.id, line.quantity) if Limits.one_time?(line.entry)
         end
         Stats.record_purchase(cart, context.merge(:currency => cart_currency(cart), :catalog_version => catalog_version))
         true
@@ -2673,6 +2929,50 @@ module ReloadedMart
         :mixed
       rescue
         :money
+      end
+
+      def log_purchase_success(cart, result, amount, context = {})
+        applied = Array(result.details[:applied] || result.details["applied"])
+        ReloadedMart.log_info(
+          "Mart purchase complete source=#{cart.source rescue :unknown} catalog=#{catalog_version} entries=#{entry_log_summary(cart)} total=#{amount.to_i} grants=#{grant_log_summary(applied)}"
+        )
+      rescue Exception => e
+        ReloadedMart.log_exception("Mart purchase success logging failed", e)
+      end
+
+      def log_purchase_failure(cart, result, stage, context = {})
+        ReloadedMart.log_warning(
+          "Mart purchase failed stage=#{stage} code=#{result.code} source=#{cart&.source || context[:source] || :unknown} catalog=#{catalog_version} entries=#{entry_log_summary(cart)} total=#{cart ? cart.total_price : 0} details=#{safe_details(result.details)}"
+        )
+      rescue Exception => e
+        ReloadedMart.log_exception("Mart purchase failure logging failed", e)
+      end
+
+      def entry_log_summary(cart)
+        entries = Array(cart&.lines).map do |line|
+          "#{line.entry_id}:#{line.entry_kind}x#{line.quantity}@#{line.total_price}"
+        end
+        entries.empty? ? "none" : entries.join("|")
+      rescue
+        "unavailable"
+      end
+
+      def grant_log_summary(grants)
+        rows = Array(grants).map do |grant|
+          item_id = grant[:item_id] || grant["item_id"] || grant[:id] || grant["id"] || grant[:item] || grant["item"]
+          qty = grant[:quantity] || grant["quantity"] || grant[:qty] || grant["qty"] || 1
+          "#{item_id}x#{qty}"
+        end
+        rows.empty? ? "none" : rows.join("|")
+      rescue
+        "unavailable"
+      end
+
+      def safe_details(details)
+        return "{}" unless details.is_a?(Hash)
+        details.map { |key, value| "#{key}=#{value.inspect}" }.join(",")
+      rescue
+        "{}"
       end
 
       def catalog_version

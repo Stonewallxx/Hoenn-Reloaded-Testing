@@ -217,7 +217,7 @@ module Settings
   # The amount of money the player starts the game with.
   INITIAL_MONEY = 3000
   # The maximum amount of money the player can have.
-  MAX_MONEY = 999_999
+  MAX_MONEY = 99_999_999
   # The maximum number of Game Corner coins the player can have.
   MAX_COINS = 99_999
   # The maximum number of Battle Points the player can have.
@@ -351,7 +351,7 @@ module Settings
   # the first number (0).
   BAG_MAX_POCKET_SIZE = [0, -1, -1, -1, -1, -1, -1, -1, -1]
   # The maximum number of items each slot in the Bag can hold.
-  BAG_MAX_PER_SLOT = 999
+  BAG_MAX_PER_SLOT = 9999
   # Whether each pocket in turn auto-sorts itself by item ID number. Ignore the
   # first entry (the 0).
   BAG_POCKET_AUTO_SORT = [0, false, false, false, true, true, false, false, false]
@@ -696,4 +696,3 @@ module Essentials
   VERSION = "19.1.dev"
   ERROR_TEXT = ""
 end
-
