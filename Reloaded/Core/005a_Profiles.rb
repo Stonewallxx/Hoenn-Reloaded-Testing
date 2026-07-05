@@ -446,7 +446,8 @@ module Reloaded
           "disabled_mods" => [],
           "load_order" => [],
           "mod_settings" => {},
-          "notes" => "Default Reloaded mod profile."
+          "notes" => "Default Reloaded mod profile.",
+          "changelogurl" => ""
         }
       end
 
@@ -511,7 +512,8 @@ module Reloaded
           "disabled_mods" => normalize_string_array(source["disabled_mods"]),
           "load_order" => normalize_string_array(source["load_order"]),
           "mod_settings" => source["mod_settings"].is_a?(Hash) ? source["mod_settings"] : {},
-          "notes" => source["notes"].to_s
+          "notes" => source["notes"].to_s,
+          "changelogurl" => source["changelogurl"].to_s
         }
       end
 

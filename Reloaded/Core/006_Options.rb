@@ -777,6 +777,7 @@ module Reloaded
       end
 
       def admin_tools_option
+        return nil unless admin_tools_unlocked?
         ActionButton.new(
           _INTL("Admin Tools"),
           proc {
@@ -788,6 +789,16 @@ module Reloaded
           },
           _INTL("Open local admin-only Reloaded editors.")
         )
+      end
+
+      def admin_tools_unlocked?
+        root = File.expand_path("./Admin Tools")
+        key = File.join(root, "Admin.txt")
+        manager = File.join(root, "Manager Editor", "ManagerEditor.rb")
+        mart = File.join(root, "Reloaded Mart Editor", "ReloadedMartEditor.rb")
+        File.exist?(key) && (File.exist?(manager) || File.exist?(mart))
+      rescue
+        false
       end
 
       def mod_manager_option

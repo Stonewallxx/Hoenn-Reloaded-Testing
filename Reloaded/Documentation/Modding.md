@@ -1085,13 +1085,15 @@ Tools menu order:
 The manifest validator scans `Mods/` and enabled `ModDev/` folders and reports
 missing or invalid manifest fields. The fixer only applies safe structural
 defaults, such as missing `id`, `name`, `version`, `authors`, `dependencies`,
-`tags`, and `minimum_reloaded_version`. It does not rewrite mod code.
+`tags`, `game`, `incompatible`, `changelogurl`, and
+`minimum_reloaded_version`. It does not rewrite mod code.
 
 The template generator can create:
 
 - a starter mod folder with `mod.json`, `Scripts/`, assets folders,
   `Settings.json`, `Changelog.txt`, and documentation,
-- a starter profile under `Mods/Reloaded/Profiles/`.
+- a starter profile under `Mods/Reloaded/Profiles/` with blank publish-safe
+  changelog metadata.
 
 The backend API is:
 

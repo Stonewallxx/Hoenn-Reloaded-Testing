@@ -182,8 +182,8 @@ versions are kept in the same entry so the browser can expose them later without
 guessing from GitHub folder names. The archive files may still physically live
 in an `Old Versions` folder on GitHub.
 
-The in-game version picker labels versions as `Latest`, `Installed`, `Older`,
-or `Newer` when that context is known. Installing an older version over a newer
+The in-game version picker labels versions as `Latest`, `Installed`, or
+`Newer` when that context is known. Installing an older version over a newer
 installed version requires an extra confirmation.
 
 Published profiles are listed under `profiles`. These replace traditional

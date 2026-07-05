@@ -498,8 +498,19 @@ end
 
 def map_alt_sprite_letters_for_pokemon(spriteName)
   alt_sprites = {}
+  credits_path = Settings::CREDITS_FILE_PATH
+  unless File.exist?(credits_path)
+    if defined?(Reloaded::Log)
+      Reloaded::Log.warning_once(
+        "Sprite credits file missing; alternate sprite selection disabled: #{credits_path}",
+        :framework,
+        key: "missing_sprite_credits"
+      )
+    end
+    return alt_sprites
+  end
 
-  File.foreach(Settings::CREDITS_FILE_PATH) do |line|
+  File.foreach(credits_path) do |line|
     row = line.strip.split(',')
     sprite_name = row[0]
     next unless sprite_name.start_with?(spriteName)

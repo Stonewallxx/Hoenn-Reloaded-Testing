@@ -115,7 +115,7 @@ module Reloaded
         raise "No valid mod folders were selected." if rel_paths.empty?
         ok = Dir.chdir(GAME_ROOT) { system(SEVEN_Z, "a", "-tzip", archive, *rel_paths) }
         raise "Backup archive could not be created." unless ok && File.exist?(archive)
-        Reloaded::Log.info("Created mod backup: #{archive}", :mods) if defined?(Reloaded::Log)
+        Reloaded::Log.info("Created mod backup: #{relative_game_path(archive)}", :mods) if defined?(Reloaded::Log)
         archive
       end
 
@@ -155,6 +155,7 @@ module Reloaded
         data["dependencies"] = normalize_array(data["dependencies"], [])
         data["tags"] = normalize_array(data["tags"], ["Mod"])
         data["incompatible"] = normalize_array(data["incompatible"], [])
+        data["changelogurl"] = data["changelogurl"].to_s
         data["id"] = normalize_mod_id(data["id"])
         data["version"] = "1.0.0" unless valid_version?(data["version"])
         data["minimum_reloaded_version"] = reloaded_version unless valid_version?(data["minimum_reloaded_version"])
@@ -163,7 +164,7 @@ module Reloaded
           file.write(formatted_json(data))
           file.write("\n")
         end
-        Reloaded::Log.info("Fixed manifest: #{path}", :mods) if defined?(Reloaded::Log)
+        Reloaded::Log.info("Fixed manifest: #{relative_game_path(path)}", :mods) if defined?(Reloaded::Log)
         validate_manifest_target(manifest_target(folder, path, target[:root]))
       end
 
@@ -188,7 +189,7 @@ module Reloaded
         write_text(File.join(folder, "Scripts", "001_Main.rb"), template_script(id))
         write_text(File.join(folder, "Changelog.txt"), "1.0.0\n- Initial template.\n")
         write_text(File.join(folder, "Documentation", "README.md"), "# #{mod_name}\n\nMod documentation goes here.\n")
-        Reloaded::Log.info("Created mod template: #{folder}", :mods) if defined?(Reloaded::Log)
+        Reloaded::Log.info("Created mod template: #{relative_game_path(folder)}", :mods) if defined?(Reloaded::Log)
         folder
       end
 
@@ -198,7 +199,7 @@ module Reloaded
         if defined?(Reloaded::Profiles)
           profile = Reloaded::Profiles.create(profile_name, notes: "Profile template.")
           path = File.join(Reloaded::Profiles::PROFILE_ROOT, "#{safe_filename(profile["name"])}.json")
-          Reloaded::Log.info("Created profile template: #{path}", :mods) if defined?(Reloaded::Log)
+          Reloaded::Log.info("Created profile template: #{relative_game_path(path)}", :mods) if defined?(Reloaded::Log)
           path
         else
           folder = File.join(MODS_DIR, "Reloaded", "Profiles")
@@ -213,7 +214,8 @@ module Reloaded
             "disabled_mods" => [],
             "load_order" => [],
             "mod_settings" => {},
-            "notes" => "Profile template."
+            "notes" => "Profile template.",
+            "changelogurl" => ""
           })
           path
         end
@@ -237,7 +239,7 @@ module Reloaded
         raise "Refusing to open a file outside the game folder." unless under_path?(normalized, GAME_ROOT)
         ok = system("cmd", "/c", "start", "", normalized)
         raise "Windows could not open #{File.basename(normalized)}." unless ok
-        Reloaded::Log.info("Opened file: #{normalized}", :mods) if defined?(Reloaded::Log)
+        Reloaded::Log.info("Opened file: #{relative_game_path(normalized)}", :mods) if defined?(Reloaded::Log)
         true
       end
 
@@ -347,7 +349,8 @@ module Reloaded
           "minimum_reloaded_version" => reloaded_version,
           "dependencies" => [],
           "tags" => ["Mod"],
-          "incompatible" => []
+          "incompatible" => [],
+          "changelogurl" => ""
         }
       end
 
