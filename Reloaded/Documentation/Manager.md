@@ -1,8 +1,9 @@
 #======================================================
-# Reloaded Browser Documentation
+# Reloaded Manager Documentation
 # Author: Stonewall
 #======================================================
-# Documents the Mod Browser source registry, download backend, and UI.
+# Documents the Mod Manager, Mod Browser, profiles, source registry, download
+# backend, and UI.
 #
 # Responsibilities:
 #   - Explain the GitHub browser source.
@@ -100,13 +101,13 @@ Recommended format:
         {
           "version": "1.1.0",
           "download_url": "https://example.com/example_mod_1.1.0.zip",
-          "reloaded_version": "0.1.0",
+          "reloaded_version": "0.5.0",
           "changelogurl": "https://example.com/example_mod_1.1.0_changelog.txt"
         },
         {
           "version": "1.0.0",
           "download_url": "https://example.com/Old%20Versions/example_mod_1.0.0.zip",
-          "reloaded_version": "0.1.0",
+          "reloaded_version": "0.5.0",
           "changelogurl": "https://example.com/Old%20Versions/example_mod_1.0.0_changelog.txt"
         }
       ],
@@ -121,7 +122,7 @@ Recommended format:
       "authors": ["Profile Author"],
       "description": "A curated set of difficulty mods.",
       "tags": ["difficulty", "gameplay"],
-      "reloaded_version": "0.1.0",
+      "reloaded_version": "0.5.0",
       "profile_code": "RLD-code-...",
       "changelogurl": "https://example.com/challenge_profile_changelog.txt",
       "mods": [
@@ -222,6 +223,167 @@ dependencies are also planned and installed. Profile mod versions are treated as
 exact requests when the index has that version; dependency versions are treated
 as minimum required versions.
 
+## Local Profiles
+
+Reloaded profiles are named mod load setups.
+
+Profiles are stored in:
+
+```text
+Mods/Reloaded/Profiles/
+```
+
+The active profile is stored globally in:
+
+```text
+Reloaded/Settings.txt
+active_profile=Default
+```
+
+`ModDev` is not controlled by profiles. It remains a global developer toggle in
+`Reloaded/Settings.txt`.
+
+If no profile exists, Reloaded creates:
+
+```text
+Mods/Reloaded/Profiles/Default.json
+```
+
+Profile format:
+
+```json
+{
+  "id": "default",
+  "name": "Default",
+  "version": 1,
+  "enabled_mods": [],
+  "disabled_mods": [],
+  "load_order": [],
+  "mod_settings": {},
+  "notes": "Default Reloaded mod profile."
+}
+```
+
+Loading rules:
+
+- Mods are enabled only when their `id` is listed in `enabled_mods`.
+- Mods listed in `disabled_mods` are always disabled.
+- `load_order` controls player-preferred ordering.
+- Dependencies still load before dependents.
+- Missing mod references are logged.
+- Enabled mods with disabled, missing, or too-old dependencies are skipped.
+
+Profile management API:
+
+```ruby
+Reloaded::Profiles.names
+Reloaded::Profiles.list
+Reloaded::Profiles.create("Testing")
+Reloaded::Profiles.duplicate("Default", "Modded")
+Reloaded::Profiles.rename("Testing", "Testing 2")
+Reloaded::Profiles.delete("Testing 2")
+Reloaded::Profiles.activate("Default")
+Reloaded::Profiles.export_profile("Default", "Mods/Reloaded/DefaultExport.json")
+Reloaded::Profiles.import_profile("Mods/Reloaded/DefaultExport.json")
+Reloaded::Profiles.import_data(profile_hash)
+```
+
+Mod state API:
+
+```ruby
+Reloaded::Profiles.enable_mod("example_mod")
+Reloaded::Profiles.disable_mod("example_mod")
+Reloaded::Profiles.set_mod_enabled("example_mod", true)
+Reloaded::Profiles.set_enabled_mods(["example_mod"])
+Reloaded::Profiles.set_disabled_mods(["old_mod"])
+```
+
+Load order API:
+
+```ruby
+Reloaded::Profiles.set_load_order(["library_mod", "example_mod"])
+Reloaded::Profiles.move_mod("example_mod", -1)
+Reloaded::Profiles.ordered_mod_ids(["example_mod", "library_mod"])
+```
+
+Profile-scoped mod settings API:
+
+```ruby
+Reloaded::Profiles.set_mod_setting("example_mod", "difficulty", "Hard")
+Reloaded::Profiles.mod_setting("example_mod", "difficulty", "Normal")
+Reloaded::Profiles.delete_mod_setting("example_mod", "difficulty")
+Reloaded::Profiles.delete_mod_settings("example_mod")
+Reloaded::Profiles.delete_mod_settings
+```
+
+Mods should usually use `Reloaded::ModSettings` instead of calling profile
+settings directly, because `Reloaded::ModSettings` validates values against the
+mod's `Settings.json` schema.
+
+Utility methods:
+
+```ruby
+Reloaded::Profiles.active_name
+Reloaded::Profiles.active
+Reloaded::Profiles.exists?("Default")
+Reloaded::Profiles.summary
+Reloaded::Profiles.missing_mod_ids(["example_mod"])
+Reloaded::Profiles.remove_mod("example_mod")
+```
+
+## RLD Profile Codes
+
+Profiles can be exported as share codes:
+
+```ruby
+code = Reloaded::ProfileCodes.export_profile("Default")
+Reloaded::ProfileCodes.import_code(code)
+```
+
+Profile codes start with:
+
+```text
+RLD-code-
+```
+
+The decoded payload format is named `RLD-code` and includes:
+
+- `preset_name`
+- `reloaded_version`
+- profile load data
+- profile-scoped `mod_settings`
+- referenced mod metadata when available
+
+Importing an RLD profile code always creates a new profile with a unique name.
+It does not overwrite or edit an existing profile.
+
+If an imported code references mods the player does not have installed, the UI
+can download missing mods through `Reloaded::ModBrowser`.
+
+## In-Game Profile Page
+
+The Mod Manager includes a Profiles page from its footer buttons.
+
+Current in-game profile actions:
+
+- Use `Confirm (C)` on a profile to open that profile's actions.
+- Use `Menu (A)` on the Profiles page for page-level actions.
+- Enable/disable a profile.
+- Create a profile from the page menu.
+- Duplicate a profile.
+- Rename a profile.
+- Delete an inactive non-default profile.
+- Export a profile code to the clipboard.
+- Import a pasted profile code as a new profile.
+- View profile counts and resolved enabled/disabled mod names.
+
+Creating a profile from the in-game UI seeds it from the current installed mod
+list.
+
+Enabling, disabling, creating, or duplicating a profile from the in-game UI marks
+the full Mod Manager as restart-required because the active loaded mod set may
+change.
+
 ## API
 
 ```ruby
@@ -260,20 +422,11 @@ folders.
 
 ## Admin Index Editing
 
-Admin-only index editing lives outside the shipped player files:
+Manager Editor documentation lives beside the local tool at:
 
 ```text
-Admin Tools/
-Admin Tools/Admin.txt
-Admin Tools/Manager Editor/ManagerEditor.rb
+Admin Tools/Manager Editor/ManagerEditor.md
 ```
-
-When `Admin.txt` and the Manager Editor are present, the in-game Mod Manager
-shows `Tools -> Admin Tools -> Manager Editor`.
-
-The Manager Editor edits the sparse GitHub index checkout used by the publisher.
-It can save the local index, pull the latest index, push index changes, edit
-entry fields, and toggle admin-only `Featured` / `Special` placement.
 
 ## Current Limits
 

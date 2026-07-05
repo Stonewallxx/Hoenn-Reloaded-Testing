@@ -77,7 +77,7 @@ Reloaded::Events.remove(:bootstrap_loaded, :my_feature)
 - `:reloaded_save_saving` - Reloaded's central save bucket is about to save.
 
 More events should be added only when a real base-game integration point is
-needed. Any new base-file edit must also be documented in
+needed. Any new base-file edit must also be documented in the local ignored
 `Reloaded/Documentation/VanillaChanges.md`.
 
 ## Gameplay Bridge Events
@@ -173,6 +173,35 @@ Context:
 - `:source` - normalized source label for `:tm_vault_move_registered`.
 - `:move_count` - current vault move count for `:tm_vault_opened`.
 - `:pokemon` - Pokemon that learned the move for `:tm_vault_move_taught`.
+
+Reloaded Mart events:
+
+- `:reloaded_mart_catalog_loaded`
+- `:reloaded_mart_catalog_failed`
+- `:reloaded_mart_purchase_validated`
+- `:reloaded_mart_purchase_completed`
+- `:reloaded_mart_purchase_failed`
+- `:reloaded_mart_sale_completed`
+- `:reloaded_mart_sale_failed`
+- `:reloaded_mart_stock_changed`
+
+Catalog payloads include source, catalog version, entry count, and failure
+reason when applicable.
+
+Purchase and sale payloads include:
+
+- `:source` - `:reloaded_mart` or `:vanilla_mart`.
+- `:catalog_version` - active online catalog version or `none`.
+- `:currency` - currently `:money`.
+- `:entries` - purchased entry IDs/kinds/quantities/prices.
+- `:grants` - concrete item grants where applicable.
+- `:total_price` - total money spent or earned.
+- `:result` - result code.
+- `:message` - player-safe message.
+- `:details` - structured details.
+- `:context` - source context from the caller.
+
+`Reloaded/Documentation/ReloadedMart.md` documents the full Mart contract.
 
 ## Logging
 

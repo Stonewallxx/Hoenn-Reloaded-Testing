@@ -68,6 +68,13 @@ module Reloaded
         pbMessage("Mod Manager failed to open.") rescue nil
       end
 
+      def open_admin_tools
+        Scene_Installed.new.open_admin_tools_standalone
+      rescue Exception => e
+        Reloaded::Log.exception("Failed to open Admin Tools", e, channel: :mods) if defined?(Reloaded::Log)
+        pbMessage("Admin Tools failed to open.") rescue nil
+      end
+
       def clipboard_write(text)
         Input.clipboard = text
         true
@@ -427,6 +434,18 @@ module Reloaded
           end
           current = ""
           words.each do |word|
+            while bitmap.text_size(word).width > max_width && word.length > 1
+              chunk = ""
+              word.each_char do |char|
+                break if !chunk.empty? && bitmap.text_size(chunk + char).width > max_width
+                chunk += char
+              end
+              break if chunk.empty?
+              lines << current unless current.empty?
+              current = ""
+              lines << chunk
+              word = word[chunk.length..-1].to_s
+            end
             test = current.empty? ? word : "#{current} #{word}"
             if bitmap.text_size(test).width > max_width && !current.empty?
               lines << current
@@ -465,18 +484,38 @@ module Reloaded
 
       def show_message(text, choices = nil, start_index = 0, center_text = false)
         text = Reloaded::Log.sanitize(text) if defined?(Reloaded::Log)
+        choice_count = choices ? choices.length : 0
+        pad = 14
+        hint_h = choices ? 18 : 0
+        box_w = 420
+        font_size = 15
+        line_h = 18
+        lines = []
+        choice_lines = []
+        choice_heights = []
+        box_h = 0
+        measure = Bitmap.new(1, 1)
+        begin
+          loop do
+            apply_ui_font(measure)
+            measure.font.size = font_size rescue nil
+            line_h = [font_size + 3, 14].max
+            lines = wrapped_lines(measure, text.to_s, box_w - pad * 2)
+            choice_lines = choices ? choices.map { |choice| wrapped_lines(measure, choice.to_s, box_w - pad * 2 - 16) } : []
+            choice_heights = choice_lines.map { |row_lines| [row_lines.length, 1].max * line_h }
+            box_h = pad * 2 + lines.length * line_h
+            box_h += choices ? choice_heights.inject(0) { |sum, height| sum + height } + hint_h + 14 : line_h + 4
+            break if box_h <= SCREEN_H - 16 || font_size <= 11
+            font_size -= 1
+          end
+        ensure
+          measure.dispose rescue nil
+        end
         dim = Sprite.new(@viewport)
         dim.bitmap = Bitmap.new(SCREEN_W, SCREEN_H)
         dim.bitmap.fill_rect(0, 0, SCREEN_W, SCREEN_H, Color.new(0, 0, 0, 130))
         dim.z = 900
 
-        lines = text.to_s.split("\n")
-        choice_count = choices ? choices.length : 0
-        line_h = 18
-        pad = 14
-        hint_h = choices ? 18 : 0
-        box_w = 420
-        box_h = pad * 2 + lines.length * line_h + (choices ? choice_count * line_h + hint_h + 10 : line_h + 4)
         box_x = (SCREEN_W - box_w) / 2
         box_y = (SCREEN_H - box_h) / 2
 
@@ -486,7 +525,7 @@ module Reloaded
         box.y = box_y
         box.z = 901
 
-        selected = start_index.to_i
+        selected = choices ? 0 : start_index.to_i
         selected = [[selected, 0].max, [choice_count - 1, 0].max].min
 
         redraw = proc do
@@ -495,6 +534,7 @@ module Reloaded
           draw_rounded_rect(bitmap, 0, 0, box_w, box_h, PANEL_BG)
           draw_border(bitmap, 0, 0, box_w, box_h, PANEL_BORDER)
           apply_ui_font(bitmap)
+          bitmap.font.size = font_size rescue nil
           y = pad
           lines.each do |line|
             align = center_text ? 1 : 0
@@ -503,11 +543,14 @@ module Reloaded
           end
           if choices
             y += 4
-            choices.each_with_index do |choice, index|
-              row_y = y + index * line_h
-              draw_selection_box(bitmap, pad, row_y, box_w - pad * 2, line_h) if index == selected
+            choice_lines.each_with_index do |row_lines, index|
+              row_h = choice_heights[index]
+              draw_selection_box(bitmap, pad, y, box_w - pad * 2, row_h) if index == selected
               color = index == selected ? WHITE : GRAY
-              pbDrawShadowText(bitmap, pad + 8, row_y - 3, box_w - pad * 2, line_h, choice.to_s, color, SHADOW)
+              row_lines.each_with_index do |line, line_index|
+                pbDrawShadowText(bitmap, pad + 8, y + line_index * line_h - 1, box_w - pad * 2 - 16, line_h, line, color, SHADOW)
+              end
+              y += row_h
             end
             draw_hint_text(bitmap, "Confirm (C) Back (B)", 0, box_h - 20, box_w)
           else
@@ -522,14 +565,16 @@ module Reloaded
           redraw.call if choices && ((Graphics.frame_count rescue 0) % 4 == 0)
           old_selected = selected
           if choices
-            selected = (selected - 1 + choices.length) % choices.length if Input.trigger?(Input::UP)
-            selected = (selected + 1) % choices.length if Input.trigger?(Input::DOWN)
+            selected = (selected - 1 + choices.length) % choices.length if Input.repeat?(Input::UP)
+            selected = (selected + 1) % choices.length if Input.repeat?(Input::DOWN)
+            selected = (selected - 4 + choices.length) % choices.length if Input.repeat?(Input::LEFT)
+            selected = (selected + 4) % choices.length if Input.repeat?(Input::RIGHT)
             mx, my = InputSupport.mouse_pos
             if mx && my && mx >= box_x + pad && mx < box_x + box_w - pad
-              choice_y = box_y + pad + lines.length * line_h + 4
-              choices.each_with_index do |_, index|
-                y = choice_y + index * line_h
-                selected = index if my >= y && my < y + line_h
+              y = box_y + pad + lines.length * line_h + 4
+              choice_heights.each_with_index do |height, index|
+                selected = index if my >= y && my < y + height
+                y += height
               end
             end
             redraw.call if selected != old_selected
@@ -1154,6 +1199,14 @@ module Reloaded
           changed = true
         elsif Input.repeat?(Input::DOWN) && !@profiles.empty?
           @selected_index = (@selected_index + 1) % @profiles.length
+          ensure_visible
+          changed = true
+        elsif Input.repeat?(Input::LEFT) && !@profiles.empty?
+          @selected_index = (@selected_index - 4 + @profiles.length) % @profiles.length
+          ensure_visible
+          changed = true
+        elsif Input.repeat?(Input::RIGHT) && !@profiles.empty?
+          @selected_index = (@selected_index + 4) % @profiles.length
           ensure_visible
           changed = true
         end
@@ -2005,6 +2058,18 @@ module Reloaded
           @showing_changelog = false
           ensure_visible
           changed = true
+        elsif Input.repeat?(Input::LEFT) && !@rows.empty?
+          @selected_index = (@selected_index - 4 + @rows.length) % @rows.length
+          @description_scroll = 0
+          @showing_changelog = false
+          ensure_visible
+          changed = true
+        elsif Input.repeat?(Input::RIGHT) && !@rows.empty?
+          @selected_index = (@selected_index + 4) % @rows.length
+          @description_scroll = 0
+          @showing_changelog = false
+          ensure_visible
+          changed = true
         end
         open_action_menu(selected_row) if Input.trigger?(Input::C) && selected_row
         if changed
@@ -2848,6 +2913,18 @@ module Reloaded
           @showing_changelog = false
           ensure_visible
           changed = true
+        elsif Input.repeat?(Input::LEFT) && !@rows.empty?
+          @selected_index = (@selected_index - 4 + @rows.length) % @rows.length
+          @description_scroll = 0
+          @showing_changelog = false
+          ensure_visible
+          changed = true
+        elsif Input.repeat?(Input::RIGHT) && !@rows.empty?
+          @selected_index = (@selected_index + 4) % @rows.length
+          @description_scroll = 0
+          @showing_changelog = false
+          ensure_visible
+          changed = true
         end
         open_action_menu(selected_row) if Input.trigger?(Input::C) && selected_row
         if changed
@@ -3259,6 +3336,7 @@ module Reloaded
 
       def reload_after_profile_change
         Reloaded::ModManager.refresh_metadata if defined?(Reloaded::ModManager)
+        return unless @left_sprite && @right_sprite && @title_sprite && @footer_sprite
         refresh_rows
         draw_all
       end
@@ -3378,6 +3456,25 @@ module Reloaded
           when "Admin Tools" then open_admin_tools_menu
           end
         end
+      end
+
+      def open_admin_tools_standalone
+        @viewport = Viewport.new(0, 0, SCREEN_W, SCREEN_H)
+        @viewport.z = 100_020
+        @background = Sprite.new(@viewport)
+        @background.bitmap = Bitmap.new(SCREEN_W, SCREEN_H)
+        @background.bitmap.fill_rect(0, 0, SCREEN_W, SCREEN_H, BG)
+        if admin_tools_enabled?
+          open_admin_tools_menu
+        else
+          show_message("Admin Tools are not enabled.")
+        end
+      ensure
+        @background.bitmap.dispose rescue nil
+        @background.dispose rescue nil
+        @background = nil
+        @viewport.dispose rescue nil
+        @viewport = nil
       end
 
       def modder_tools_available?
@@ -3569,16 +3666,20 @@ module Reloaded
       end
 
       def admin_tools_enabled?
-        File.exist?(admin_key_file) && File.exist?(manager_editor_file)
+        File.exist?(admin_key_file) && (File.exist?(manager_editor_file) || File.exist?(mart_editor_file))
       rescue
         false
       end
 
       def open_admin_tools_menu
-        choices = ["Manager Editor", "Back"]
+        choices = []
+        choices << "Manager Editor" if File.exist?(manager_editor_file)
+        choices << "Reloaded Mart Editor" if File.exist?(mart_editor_file)
+        choices << "Back"
         choice = show_message("Admin Tools", choices)
         case choices[choice]
         when "Manager Editor" then open_manager_editor
+        when "Reloaded Mart Editor" then open_mart_editor
         end
       end
 
@@ -3604,6 +3705,24 @@ module Reloaded
         show_message("Could not open Manager Editor:\n#{e.message}")
       end
 
+      def open_mart_editor
+        unless File.exist?(admin_key_file)
+          show_message("Admin Tools are not enabled.")
+          return
+        end
+        unless File.exist?(mart_editor_file)
+          show_message("Reloaded Mart Editor is not available.")
+          return
+        end
+        load mart_editor_file
+        Reloaded::MartEditor::Tool.open
+        ReloadedMart::Source.load_for_open(blocking: false) if defined?(ReloadedMart::Source)
+        reload_after_profile_change
+      rescue Exception => e
+        Reloaded::Log.exception("Failed to open Reloaded Mart Editor", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not open Reloaded Mart Editor:\n#{e.message}")
+      end
+
       def admin_tools_dir
         File.expand_path("./Admin Tools")
       end
@@ -3614,6 +3733,10 @@ module Reloaded
 
       def manager_editor_file
         File.join(admin_tools_dir, "Manager Editor", "ManagerEditor.rb")
+      end
+
+      def mart_editor_file
+        File.join(admin_tools_dir, "Reloaded Mart Editor", "ReloadedMartEditor.rb")
       end
 
       def manager_editor_index_file

@@ -40,7 +40,7 @@ module Reloaded
 
       def register_option
         return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :tm_vault, priority: 20) do |_scene|
+        Reloaded::Options.register_category_option("RELOADED", :tm_vault, priority: 5) do |_scene|
           [ActionButton.new(
             _INTL("TM Vault"),
             proc { TMVault.open_options if defined?(TMVault) },
@@ -723,10 +723,11 @@ module TMVault
         box_y = iy - 1
         box_w = PARTY_ICO_W + 20
         box_h = PARTY_ICO_H + 40
+        relearn_selected = @move_mode == :relearn && @relearn_mon == i
         if (@focus == :party || @focus == :filter) && @party_sel == i
-          fill_col = @focus == :filter ? Color.new(240, 200, 60, 70) : Color.new(255, 255, 255, 55)
+          fill_col = (@focus == :filter || @move_mode == :relearn) ? Color.new(240, 200, 60, 70) : Color.new(255, 255, 255, 55)
           b.fill_rect(box_x, box_y, box_w, box_h, fill_col)
-        elsif @filter_mon == i
+        elsif @filter_mon == i || relearn_selected
           b.fill_rect(box_x, box_y, box_w, box_h, Color.new(240, 220, 80, 45))
         end
 

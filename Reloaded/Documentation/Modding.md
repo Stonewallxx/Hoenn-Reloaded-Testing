@@ -18,7 +18,7 @@ It should be updated whenever a Reloaded system gains a public API that modders
 are expected to use.
 
 For a high-level status summary of the current fork foundation, see
-`Reloaded/Documentation/Foundation.md`.
+`Reloaded/Documentation/System.md`.
 
 ## Current Status
 
@@ -79,7 +79,7 @@ Reloaded::Log.report(
 )
 ```
 
-See `Reloaded/Documentation/Logging.md` for the full logging reference.
+See `Reloaded/Documentation/System.md` for the full logging reference.
 
 ## Events
 
@@ -120,7 +120,7 @@ Reloaded::Patches.register(
 This does not automatically patch the game. It records what is being changed so
 Reloaded can detect conflicts and explain them in logs.
 
-See `Reloaded/Documentation/Patches.md` for the full patches reference.
+See `Reloaded/Documentation/System.md` for the full patches reference.
 
 ## Save Data
 
@@ -141,7 +141,7 @@ save["quest_stage"] = 2
 Do not add random fields to vanilla save objects for mod data unless there is no
 Reloaded API that can handle the use case.
 
-See `Reloaded/Documentation/SaveData.md` for the full save data reference.
+See `Reloaded/Documentation/System.md` for the full save data reference.
 
 ## Data Patches
 
@@ -444,7 +444,7 @@ Current reusable types include:
 - `HiddenOption`
 - `Spacer`
 
-See `Reloaded/Documentation/Options.md` for the full options reference.
+See `Reloaded/Documentation/System.md` for the full options reference.
 
 Mods can add rows to supported Reloaded categories:
 
@@ -663,6 +663,85 @@ Event payloads include:
 - `:tm_vault_opened`: `:move_count`.
 - `:tm_vault_move_taught`: `:move`, `:move_data`, `:pokemon`.
 
+## Reloaded Mart
+
+Reloaded Mart is implemented in:
+
+```text
+Reloaded/Modules/003_ReloadedMart.rb
+Reloaded/Modules/003a_ReloadedMartUI.rb
+```
+
+Standalone Reloaded Mart fetches the online catalog every time it opens,
+validates it, and stores a last-good fallback cache in:
+
+```ruby
+Reloaded::SaveData.system(:reloaded_mart)
+```
+
+Catalog entries can reference mod-added items. If the item is missing, that
+entry is skipped. If a bundle/gift grant is missing, the whole bundle/gift is
+skipped. This lets a shared catalog include optional mod content without
+breaking players who do not have that mod.
+
+Example item entry:
+
+```json
+{
+  "id": "my_mod:rare_seed",
+  "kind": "item",
+  "item": "MY_MOD_RARE_SEED",
+  "name": "Rare Seed",
+  "category_id": "event",
+  "category_name": "EVENT",
+  "tags": ["event", "my_mod"],
+  "price": 2400,
+  "requires": {
+    "mods": ["my_mod"]
+  }
+}
+```
+
+Example bundle:
+
+```json
+{
+  "id": "my_mod:seed_bundle",
+  "kind": "bundle",
+  "name": "Seed Bundle",
+  "category_id": "bundles",
+  "category_name": "BUNDLES",
+  "price": 5000,
+  "grants": [
+    { "id": "MY_MOD_RARE_SEED", "qty": 2 },
+    { "id": "POTION", "qty": 5 }
+  ]
+}
+```
+
+Register a runtime price modifier:
+
+```ruby
+ReloadedMart.register_price_modifier(:my_mod_sale, priority: 50) do |entry, ctx|
+  next [] unless ctx[:mode] == :buy
+  next [] unless entry.tags.include?("my_mod")
+  [{ :id => "my_mod_sale", :label => "Mod Sale", :type => "percent", :value => -20 }]
+end
+```
+
+Listen for purchases:
+
+```ruby
+Reloaded::Events.on(:reloaded_mart_purchase_completed, :my_mod) do |ctx|
+  ctx[:entries].each do |entry|
+    # entry[:id], entry[:kind], entry[:quantity], entry[:price]
+  end
+end
+```
+
+See `Reloaded/Documentation/ReloadedMart.md` for the complete schema, events,
+transaction behavior, and vanilla mart wrapper notes.
+
 ## Per-Mod Settings
 
 Mods can define editable settings in:
@@ -685,7 +764,7 @@ Reloaded::ModSettings.set("example_mod", "difficulty", "Hard")
 Supported setting types are `toggle`, `enum`, `slider`, `number`,
 `category_header`, and `spacer`.
 
-See `Reloaded/Documentation/Settings.md` for the full mod settings reference.
+See `Reloaded/Documentation/System.md` for the full mod settings reference.
 
 ## Browser Sources
 
@@ -700,7 +779,7 @@ Mods and published profiles listed in browser indexes can be downloaded by
 profile imports and the in-game Browser page. Reloaded does not require local
 Browser or Publish folders for public source data.
 
-See `Reloaded/Documentation/Browser.md` for the source and index formats.
+See `Reloaded/Documentation/Manager.md` for the source and index formats.
 
 ## Publishing
 
@@ -850,7 +929,7 @@ Reloaded::Profiles.set_mod_setting("example_mod", "difficulty", "Hard")
 Reloaded::Profiles.export_profile("Testing", "Mods/Reloaded/Testing.json")
 ```
 
-See `Reloaded/Documentation/Profiles.md` for the full profile reference.
+See `Reloaded/Documentation/Manager.md` for the full profile reference.
 
 ## Core And Modules
 

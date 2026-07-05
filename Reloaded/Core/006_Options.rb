@@ -558,7 +558,7 @@ module Reloaded
           mod_settings_option,
           moddev_option
         ] + category_extension_options("MODS", scene))
-        append_collapsible(master, "DEVELOPER", [logging_mode_option] + category_extension_options("DEVELOPER", scene))
+        append_collapsible(master, "DEVELOPER", [admin_tools_option, logging_mode_option] + category_extension_options("DEVELOPER", scene))
         leftovers = system + gameplay + visuals + challenge
         append_collapsible(master, "OTHER", leftovers) unless leftovers.empty?
         master
@@ -773,6 +773,20 @@ module Reloaded
             Reloaded::ModManager.set_moddev_enabled(value.to_i == 1) if defined?(Reloaded::ModManager)
           },
           _INTL("When On, Reloaded scans ModDev/ and lets it override matching Mods/ entries.\nChanges apply on the next mod scan or restart.")
+        )
+      end
+
+      def admin_tools_option
+        ActionButton.new(
+          _INTL("Admin Tools"),
+          proc {
+            if defined?(Reloaded::ModManagerUI) && Reloaded::ModManagerUI.respond_to?(:open_admin_tools)
+              Reloaded::ModManagerUI.open_admin_tools
+            else
+              pbMessage(_INTL("Admin Tools are not loaded.")) rescue nil
+            end
+          },
+          _INTL("Open local admin-only Reloaded editors.")
         )
       end
 

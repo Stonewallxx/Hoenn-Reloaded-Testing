@@ -49,6 +49,9 @@ Developer Tools/Base Game Updater/LastUpdateReport.txt
 Reloaded/Settings.txt
 Reloaded/Logging/*.txt
 Reloaded/Logging/Reports/*
+Reloaded/Documentation/VanillaChanges.md
+Reloaded/Documentation/To-Do.md
+Reloaded/Documentation/ReloadedMart-To-Do.md
 
 #THE REST
 Data/VERSION

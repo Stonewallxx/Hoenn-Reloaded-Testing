@@ -1116,11 +1116,9 @@ ReloadedPauseMenu.register_module(
 ReloadedPauseMenu.register_module(
   :RELOADEDMART,
   label:     "Reloaded Mart",
-  handler:   proc { pbOpenReloadedMart rescue nil },
+  handler:   proc { ReloadedMart.open if defined?(ReloadedMart) },
   condition: proc {
-    defined?(ReloadedMartConfig) &&
-    !(ReloadedMartConfig::ONLINE_PRESET_URL.to_s.strip rescue "").empty? &&
-    ($PokemonSystem.reloaded_online_mart rescue 1) != 0
+    defined?(ReloadedMart) && ReloadedMart.available?
   },
   lock_reason: "Reloaded Mart is not available yet."
 )

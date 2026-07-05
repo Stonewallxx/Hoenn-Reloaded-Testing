@@ -19,6 +19,33 @@ This runtime layer is intentionally conservative. It collects, validates, logs,
 and applies JSON-style data in memory only. It does not permanently rewrite base
 game `.dat`, `.rxdata`, `.json`, or PBS files.
 
+## Quick Summary
+
+Data patches are mod-provided JSON files that safely add or change game data at
+runtime. They are useful for adding modded items, changing move/species data,
+adding trainers, editing encounters, or extending outfit data without replacing
+vanilla data files.
+
+Supported data patch targets:
+
+- `items` - add or edit item data, including name, pocket, price, description, use flags, type, and move link.
+- `moves` - add or edit move data, including type, category, power, accuracy, PP, effects, flags, and descriptions.
+- `abilities` - add or edit ability names, descriptions, and related metadata.
+- `species.core` - edit core species data such as names, stats, types, gender ratio, growth, egg groups, moves metadata, and flags.
+- `species.learnsets` - add, replace, or edit species level-up learnsets.
+- `species.evolutions` - add, replace, or edit species evolution data.
+- `species.abilities` - edit regular, hidden, and special ability lists for species.
+- `trainer_types` - add or edit trainer type data such as display names, battle BGM, gender, base money, skill, and sprites.
+- `trainers.classic` - add or edit trainers in Classic mode.
+- `trainers.remix` - add or edit trainers in Remix mode.
+- `trainers.expert` - add or edit trainers in Expert mode.
+- `encounters.classic` - add or edit wild encounter data in Classic mode.
+- `encounters.remix` - add or edit wild encounter data in Remix mode.
+- `encounters.randomized` - add or edit wild encounter data in Randomized mode.
+- `outfits.clothes` - add or edit clothing outfit definitions.
+- `outfits.hats` - add or edit hat outfit definitions.
+- `outfits.hairstyles` - add or edit hairstyle outfit definitions.
+
 ## Folder Layout
 
 Mods can include data patches here:
