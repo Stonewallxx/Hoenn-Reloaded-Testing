@@ -15,8 +15,8 @@
 #======================================================
 
 module ReloadedPauseMenu
-  FIXED_ROW_ORDER = [:RELOADEDMART, :TMVAULT]
-  CAROUSEL_ORDER  = [:POKEDEX, :POKEMON, :BAG, :POKENAV, :TRAINERINFO, :OUTFIT, :SAVE, :OPTIONS, :DEBUG, :TITLE, :RELOADEDMART, :TMVAULT]
+  FIXED_ROW_ORDER = [:RELOADEDMART, :TMVAULT, :POKEVIAL, :PC]
+  CAROUSEL_ORDER  = [:POKEDEX, :POKEMON, :PC, :BAG, :POKENAV, :TRAINERINFO, :OUTFIT, :SAVE, :OPTIONS, :DEBUG, :TITLE, :RELOADEDMART, :TMVAULT, :POKEVIAL]
 end
 # Option/save-state adapter for the REPM scene.
 module Reloaded
@@ -116,11 +116,11 @@ module ReloadedPauseMenu
   @last_car_sel = 0
 
 
-  def self.register_module(key, label:, handler:, icon: nil, condition: nil, hidden: false, lock_reason: nil)
+  def self.register_module(key, label:, handler:, icon: nil, condition: nil, hidden: false, lock_reason: nil, status: nil, status_color: nil)
     return if @modules.any? { |m| m[:key] == key }
     @modules << {
       key: key, label: label, handler: handler, icon: icon,
-      condition: condition, hidden: hidden, lock_reason: lock_reason
+      condition: condition, hidden: hidden, lock_reason: lock_reason, status: status, status_color: status_color
     }
   end
 
@@ -178,6 +178,26 @@ module ReloadedPauseMenu
     end
   end
 
+  def self.last_cursor_state
+    if defined?(Reloaded::SaveData)
+      Reloaded::SaveData.get(SAVE_SYSTEM, :last_cursor_state, {}, section: :systems)
+    else
+      @fallback_last_cursor_state ||= {}
+    end
+  rescue
+    {}
+  end
+
+  def self.last_cursor_state=(value)
+    state = value.is_a?(Hash) ? value : {}
+    if defined?(Reloaded::SaveData)
+      Reloaded::SaveData.set(SAVE_SYSTEM, :last_cursor_state, state, section: :systems)
+    else
+      @fallback_last_cursor_state = state
+    end
+  rescue
+  end
+
   def self.lock_reason_for(mod)
     reason = mod[:lock_reason]
     reason = reason.call if reason.respond_to?(:call)
@@ -185,6 +205,30 @@ module ReloadedPauseMenu
     reason.empty? ? "This module is currently locked." : reason
   rescue Exception
     "This module is currently locked."
+  end
+
+  def self.status_for(mod)
+    status = mod[:status]
+    status = status.call if status.respond_to?(:call)
+    status.to_s.strip
+  rescue Exception
+    ""
+  end
+
+  def self.status_color_for(mod)
+    color = mod[:status_color]
+    color = color.call if color.respond_to?(:call)
+    color || Color.new(120, 230, 150)
+  rescue Exception
+    Color.new(120, 230, 150)
+  end
+
+  def self.status_color_cache_key(mod)
+    color = status_color_for(mod)
+    return [color.red, color.green, color.blue, color.alpha] if color.respond_to?(:red)
+    color.to_s
+  rescue Exception
+    "default"
   end
 
 
@@ -239,6 +283,7 @@ module ReloadedPauseMenu
       @car_sel     = ReloadedPauseMenu.instance_variable_get(:@last_car_sel).clamp(0, [@all_mods.length - 1, 0].max)
       @focus     = :carousel
       @row_state = [{ offset: 0, slot: 0 }, { offset: 0, slot: 0 }]
+      restore_cursor_state
       @cursor_tick = 0
       @running   = true
       @pending   = nil
@@ -257,6 +302,9 @@ module ReloadedPauseMenu
 
       @loc_spr     = BitmapSprite.new(110, 49, @vp)
       @loc_spr.z   = 20
+
+      @economy_spr   = BitmapSprite.new(110, 49, @vp)
+      @economy_spr.z = 20
 
       @grid_spr    = BitmapSprite.new(SCREEN_W, @grid_h + 4, @vp)
       @grid_spr.x  = 0; @grid_spr.y = ROW_Y_START; @grid_spr.z = 10
@@ -290,6 +338,7 @@ module ReloadedPauseMenu
       teardown
 
       ReloadedPauseMenu.instance_variable_set(:@last_car_sel, @car_sel)
+      save_cursor_state
 
       @pending.call if @pending
       Input.update rescue nil
@@ -297,10 +346,81 @@ module ReloadedPauseMenu
 
     private
 
+    def restore_cursor_state
+      state = ReloadedPauseMenu.last_cursor_state
+      state = {} unless state.is_a?(Hash)
+      carousel_key = cursor_state_value(state, :carousel_key)
+      if carousel_key
+        index = @all_entries.index { |entry| entry[:mod][:key].to_s == carousel_key.to_s }
+        @car_sel = index if index
+      end
+      rows = cursor_state_value(state, :rows)
+      rows = {} unless rows.is_a?(Hash)
+      restore_row_cursor(0, cursor_state_value(rows, 0) || cursor_state_value(rows, :row0))
+      restore_row_cursor(1, cursor_state_value(rows, 1) || cursor_state_value(rows, :row1))
+      focus = cursor_state_value(state, :focus).to_s
+      @focus = valid_focus?(focus) ? focus.to_sym : :carousel
+      @focus = :carousel if @focus == :row0 && @row_mods[0].empty?
+      @focus = :carousel if @focus == :row1 && @row_mods[1].empty?
+    rescue
+      @focus = :carousel
+    end
+
+    def restore_row_cursor(row, row_state)
+      entries = @row_entries[row] || []
+      @row_state[row] = { offset: 0, slot: 0 } if entries.empty?
+      return if entries.empty? || !row_state.is_a?(Hash)
+      key = cursor_state_value(row_state, :key)
+      index = entries.index { |entry| entry[:mod][:key].to_s == key.to_s } if key
+      index ||= cursor_state_value(row_state, :index).to_i
+      index = [[index, 0].max, entries.length - 1].min
+      desired_slot = [[cursor_state_value(row_state, :slot).to_i, 0].max, GRID_COLS - 1].min
+      max_offset = [entries.length - GRID_COLS, 0].max
+      offset = [[index - desired_slot, 0].max, max_offset].min
+      @row_state[row] = { offset: offset, slot: index - offset }
+      clamp_slot(row)
+    rescue
+      @row_state[row] = { offset: 0, slot: 0 }
+    end
+
+    def save_cursor_state
+      ReloadedPauseMenu.last_cursor_state = {
+        "focus" => @focus.to_s,
+        "carousel_key" => (@all_entries[@car_sel] && @all_entries[@car_sel][:mod][:key].to_s),
+        "rows" => {
+          "0" => row_cursor_state(0),
+          "1" => row_cursor_state(1)
+        }
+      }
+    rescue
+    end
+
+    def row_cursor_state(row)
+      state = @row_state[row] || { offset: 0, slot: 0 }
+      entries = @row_entries[row] || []
+      index = state[:offset].to_i + state[:slot].to_i
+      entry = entries[index]
+      {
+        "key" => (entry && entry[:mod][:key].to_s),
+        "index" => index,
+        "offset" => state[:offset].to_i,
+        "slot" => state[:slot].to_i
+      }
+    end
+
+    def cursor_state_value(hash, key)
+      return nil unless hash.is_a?(Hash)
+      hash[key] || hash[key.to_s]
+    end
+
+    def valid_focus?(value)
+      ["carousel", "row0", "row1"].include?(value.to_s)
+    end
+
 
     def teardown
       @module_box_cache.each_value { |b| b.dispose rescue nil } if @module_box_cache
-      [@title_spr, @grid_spr, @car_spr, @loc_spr, @hint_spr].compact.each do |s|
+      [@title_spr, @grid_spr, @car_spr, @loc_spr, @economy_spr, @hint_spr].compact.each do |s|
         s.bitmap.dispose rescue nil
         s.dispose rescue nil
       end
@@ -310,6 +430,7 @@ module ReloadedPauseMenu
 
     def draw_all
       draw_title
+      draw_economy_box
       draw_location_box
       draw_hint
       draw_grid
@@ -350,6 +471,28 @@ module ReloadedPauseMenu
       rescue; end
       @loc_spr.x = SCREEN_W - bw - 4
       @loc_spr.y = 4
+    end
+
+    def draw_economy_box
+      bw = 110; bh = 49
+      b  = @economy_spr.bitmap; b.clear
+      b.fill_rect(0, 0, bw, bh, Color.new(16, 20, 38, 220))
+      b.fill_rect(0, 0, bw, 1,  Color.new(55, 75, 160, 255))
+      b.fill_rect(0, bh-1, bw, 1, Color.new(55, 75, 160, 255))
+      b.fill_rect(0, 0, 1, bh, Color.new(55, 75, 160, 255))
+      b.fill_rect(bw-1, 0, 1, bh, Color.new(55, 75, 160, 255))
+      pbSetSmallFont(b)
+      begin
+        money = ($Trainer.money rescue 0).to_i
+        money_text = money.to_s_formatted rescue money.to_s
+        amount = "$#{money_text}"
+        b.font.size = 13; b.font.bold = true
+        pbDrawShadowText(b, 4, 3, bw - 8, 14, "ECONOMY", WHITE, MM_SHADOW, 1)
+        b.font.size = 12; b.font.bold = false
+        pbDrawShadowText(b, 4, 23, bw - 8, 18, amount, Color.new(120, 230, 150), Color.new(0, 0, 0, 0), 1)
+      rescue; end
+      @economy_spr.x = 4
+      @economy_spr.y = 4
     end
 
     def draw_grid
@@ -417,7 +560,9 @@ module ReloadedPauseMenu
 
     def cached_module_box(mod, w, h, show_label, locked)
       fav_key = ReloadedPauseMenu.favorite_module_key
-      key = [mod[:key], w, h, show_label ? 1 : 0, locked ? 1 : 0, fav_key == mod[:key] ? 1 : 0]
+      status = ReloadedPauseMenu.status_for(mod)
+      status_color_key = ReloadedPauseMenu.status_color_cache_key(mod)
+      key = [mod[:key], w, h, show_label ? 1 : 0, locked ? 1 : 0, fav_key == mod[:key] ? 1 : 0, status, status_color_key]
       return @module_box_cache[key] if @module_box_cache[key]
       bitmap = Bitmap.new(w, h)
       draw_module_box_uncached(bitmap, mod, 0, 0, w, h, false, show_label, locked)
@@ -488,9 +633,14 @@ module ReloadedPauseMenu
         sub_y = ib_y + ib_h
         fs_sub = w >= 70 ? 11 : 9
         pbSetSmallFont(b); b.font.size = fs_sub
+        status_text = ReloadedPauseMenu.status_for(mod)
         if locked
           pbDrawShadowText(b, x, sub_y, w, sub_h, "LOCKED",
                            Color.new(160, 160, 160), MM_SHADOW, 1)
+        elsif !status_text.empty?
+          status_color = ReloadedPauseMenu.status_color_for(mod)
+          pbDrawShadowText(b, x, sub_y, w, sub_h, status_text,
+                           status_color, Color.new(0, 0, 0, 0), 1)
         elsif is_fav
           pbDrawShadowText(b, x, sub_y, w, sub_h, "FAVORITE",
                            Color.new(228, 188, 58), MM_SHADOW, 1)

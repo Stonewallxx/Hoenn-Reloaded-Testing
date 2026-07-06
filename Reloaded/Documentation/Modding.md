@@ -42,6 +42,7 @@ are:
 - `Reloaded::Options`
 - `Reloaded::Settings`
 - `ReloadedPauseMenu`
+- `ReloadedPokeVial`
 
 ## Recommended Modding Rules
 
@@ -582,6 +583,127 @@ The handler receives the active `OverworldMenuScreen`. Return `:exit_menu`, or
 set `exit_on_select: true`, to close the overlay after the entry runs.
 
 See `Reloaded/Documentation/OverworldMenu.md` for the full entry contract.
+
+## PokeVial
+
+PokeVial is implemented in:
+
+```text
+Reloaded/Modules/006_PokeVial.rb
+```
+
+Mods and Reloaded systems can grant charges, refill the vial, or unlock higher
+charge limits through the public script API:
+
+```ruby
+ReloadedPokeVial.add_uses(1, source: :my_mod)
+ReloadedPokeVial.grant_uses(2, source: :my_mod)
+ReloadedPokeVial.grant_full_refill(source: :my_mod)
+ReloadedPokeVial.unlock_max_uses(4, source: :my_mod)
+ReloadedPokeVial.increase_max_uses(1, source: :my_mod)
+```
+
+Use `source:` for logging and compatibility hooks. Good source values are short
+symbols such as `:my_mod`, `:reloaded_mart`, `:mystery_gift`, or `:event`.
+
+`grant_full_refill` restores current charges to the current maximum. It returns
+false if the vial is already full or unavailable.
+
+`unlock_max_uses(amount)` records a save-specific progression unlock while
+Progressive Uses is enabled. It does not lower an existing unlock. The current
+maximum also respects the built-in badge progression and any configured
+switch/variable progression rules in `006_PokeVial.rb`.
+
+Useful checks:
+
+```ruby
+ReloadedPokeVial.enabled?
+ReloadedPokeVial.uses
+ReloadedPokeVial.configured_max_uses
+ReloadedPokeVial.can_add_uses?(1)
+ReloadedPokeVial.can_refill?
+ReloadedPokeVial.status_text
+ReloadedPokeVial.item_id?(:POKEVIAL_CHARGE)
+```
+
+`status_text` returns the same short labels used by Reloaded menus:
+`Charges: #`, `EMPTY`, or `Cooldown: 04:12`.
+
+Mods can register callbacks for use and refill flow:
+
+```ruby
+ReloadedPokeVial.on(:before_use, :my_mod_vial_check) do |ctx|
+  # Return false to cancel use. Optional: set ctx[:message].
+  true
+end
+
+ReloadedPokeVial.on(:after_use, :my_mod_vial_after) do |ctx|
+  # ctx includes :source, :uses_before, :uses_after, :max_uses, and :heal_mode.
+end
+
+ReloadedPokeVial.on(:before_refill, :my_mod_refill_check) do |ctx|
+  # Return false to cancel refill before money is deducted.
+  true
+end
+
+ReloadedPokeVial.on(:after_refill, :my_mod_refill_after) do |ctx|
+  # ctx includes :source, :uses_before, :uses_after, :max_uses, :restored, and :cost.
+end
+```
+
+Supported callback names are `:before_use`, `:after_use`, `:before_refill`,
+and `:after_refill`.
+
+Remove a callback by ID:
+
+```ruby
+ReloadedPokeVial.unregister_callback(:before_use, :my_mod_vial_check)
+```
+
+Optional progression config lives in `006_PokeVial.rb`:
+
+```ruby
+PROGRESSION_SWITCH_UNLOCKS = {
+  42 => 4
+}
+
+PROGRESSION_VARIABLE_UNLOCKS = {
+  12 => {
+    3 => 4,
+    5 => 5
+  }
+}
+```
+
+Optional per-map denial text also lives in `006_PokeVial.rb`:
+
+```ruby
+BLOCKED_MAP_IDS = [123]
+BLOCKED_MAP_REASONS = {
+  123 => _INTL("The PokeVial signal is blocked here.")
+}
+```
+
+Reloaded Mart bundles/gifts/mystery boxes and Mystery Gift payloads can use the
+same reward markers:
+
+```json
+{ "type": "pokevial", "quantity": 1 }
+{ "type": "pokevial_charge", "quantity": 1 }
+{ "type": "pokevial_refill" }
+{ "type": "pokevial_max_uses", "max_uses": 4 }
+```
+
+Supported aliases include `poke_vial`, `pokevial_uses`, `POKEVIAL_USES`,
+`POKEVIAL_CHARGE`, `POKEVIAL_REFILL`, `refill_pokevial`,
+`pokevial_unlock`, and `POKEVIAL_MAX_USES`.
+
+Reloaded also registers two hidden internal item datapatches in the Medicine
+pocket. These can be sold, granted, or placed in Overworld Menu Quick Items like
+normal Bag-usable items:
+
+- `POKEVIAL_CHARGE` - restores one PokeVial charge.
+- `POKEVIAL_REFILL` - restores all missing PokeVial charges.
 
 ## TM Vault
 

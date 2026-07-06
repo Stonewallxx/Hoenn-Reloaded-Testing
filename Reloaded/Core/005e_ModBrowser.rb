@@ -609,12 +609,20 @@ module Reloaded
       def build_core_entry(fetch_remote: false)
         current = current_reloaded_version
         latest = current
+        update_check_status = fetch_remote ? "failed" : "local"
+        update_check_failed = false
         if fetch_remote
           remote = fetch_url(CORE_VERSION_URL, cache_bust: true).to_s.strip
           version = remote[/\d+\.\d+\.\d+/]
           if version
             latest = version
+            update_check_status = "remote"
             @source_statuses["hoenn_reloaded"] = "remote"
+            log("Hoenn Reloaded update check: current=v#{current} latest=v#{latest} source=remote")
+          else
+            update_check_failed = true
+            @source_statuses["hoenn_reloaded"] = "failed"
+            log("Hoenn Reloaded update check failed: current=v#{current} source=public Version.md", :warning)
           end
         end
         {
@@ -643,7 +651,9 @@ module Reloaded
           "special_entry" => true,
           "virtual" => true,
           "protected" => true,
-          "core_entry" => true
+          "core_entry" => true,
+          "update_check_status" => update_check_status,
+          "update_check_failed" => update_check_failed
         }
       end
 

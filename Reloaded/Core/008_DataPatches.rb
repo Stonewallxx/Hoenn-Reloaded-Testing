@@ -26,6 +26,7 @@ module Reloaded
     @targets = {}
     @data = {}
     @patches = []
+    @internal_patches = []
     @applied = []
     @errors = []
     @warnings = []
@@ -112,30 +113,74 @@ module Reloaded
 
       def patches(target = nil)
         list = target.nil? ? @patches : @patches.select { |patch| patch[:target] == normalize_target(target) }
+        list = list.reject { |patch| hidden_patch?(patch) }
+        list.map { |patch| patch.dup }
+      end
+
+      def patches_all(target = nil)
+        list = target.nil? ? @patches : @patches.select { |patch| patch[:target] == normalize_target(target) }
         list.map { |patch| patch.dup }
       end
 
       def applied(target = nil)
         list = target.nil? ? @applied : @applied.select { |patch| patch[:target] == normalize_target(target) }
+        list = list.reject { |patch| hidden_patch?(patch) }
+        list.map { |patch| patch.dup }
+      end
+
+      def applied_all(target = nil)
+        list = target.nil? ? @applied : @applied.select { |patch| patch[:target] == normalize_target(target) }
         list.map { |patch| patch.dup }
       end
 
       def errors
-        @errors.dup
+        @errors.reject { |entry| entry[:hidden] }.map(&:dup)
       end
 
       def warnings
-        @warnings.dup
+        @warnings.reject { |entry| entry[:hidden] }.map(&:dup)
       end
 
       def summary
+        visible_patches = @patches.reject { |patch| hidden_patch?(patch) }
+        visible_applied = @applied.reject { |patch| hidden_patch?(patch) }
+        visible_errors = @errors.reject { |entry| entry[:hidden] }
+        visible_warnings = @warnings.reject { |entry| entry[:hidden] }
         {
           :targets => @data.keys.length,
-          :patches => @patches.length,
-          :applied => @applied.length,
-          :errors => @errors.length,
-          :warnings => @warnings.length
+          :patches => visible_patches.length,
+          :applied => visible_applied.length,
+          :errors => visible_errors.length,
+          :warnings => visible_warnings.length
         }
+      end
+
+      def register_internal_patch(target, id, data, operation: "add", owner: :reloaded, source: nil, hidden: true)
+        entry = {
+          "target" => target,
+          "operation" => operation,
+          "id" => id,
+          "data" => data
+        }
+        owner_id = normalize_id(owner)
+        owner_id = "reloaded" if owner_id.empty?
+        source_path = source.to_s.empty? ? "Reloaded/internal/#{owner_id}" : source.to_s
+        mod = { :id => owner_id, :name => "Hoenn Reloaded" }
+        patch = build_patch(mod, source_path, entry, 0)
+        patch[:key] = "internal:#{owner_id}:#{patch[:target]}:#{patch[:id]}"
+        patch[:internal] = true
+        patch[:hidden] = !!hidden
+        @internal_patches.reject! { |existing| existing[:key] == patch[:key] }
+        if patch[:errors].empty?
+          @internal_patches << patch
+          true
+        else
+          patch[:errors].each { |error| add_error(nil, patch[:file], patch[:index], error, patch) }
+          false
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Internal data patch registration failed for #{target}/#{id}", e, channel: :mods) if defined?(Reloaded::Log)
+        false
       end
 
       private
@@ -145,7 +190,7 @@ module Reloaded
         @targets.each do |target, config|
           @data[target] = deep_dup(config[:initial_data])
         end
-        @patches = []
+        @patches = @internal_patches.map { |patch| deep_dup(patch) }
         @applied = []
         @errors = []
         @warnings = []
@@ -171,7 +216,7 @@ module Reloaded
           patch = build_patch(mod, path, entry, index)
           if patch[:errors].empty?
             @patches << patch
-            register_patch_point(patch)
+            register_patch_point(patch) unless hidden_patch?(patch)
           else
             patch[:errors].each { |error| add_error(mod, path, index, error) }
           end
@@ -386,7 +431,8 @@ module Reloaded
           :mod_id => patch ? patch[:mod_id] : normalize_id(mod && mod[:id]),
           :file => path.to_s.gsub("\\", "/"),
           :index => index,
-          :message => message.to_s
+          :message => message.to_s,
+          :hidden => patch ? hidden_patch?(patch) : false
         }
         @errors << entry
         return unless defined?(Reloaded::Log)
@@ -403,7 +449,8 @@ module Reloaded
           :mod_id => patch[:mod_id],
           :file => patch[:file],
           :index => patch[:index],
-          :message => message.to_s
+          :message => message.to_s,
+          :hidden => hidden_patch?(patch)
         }
         @warnings << entry
         return unless defined?(Reloaded::Log)
@@ -434,10 +481,13 @@ module Reloaded
       end
 
       def summary_signature
+        visible_patches = @patches.reject { |patch| hidden_patch?(patch) }
+        visible_errors = @errors.reject { |entry| entry[:hidden] }
+        visible_warnings = @warnings.reject { |entry| entry[:hidden] }
         [
-          @patches.map { |patch| "#{patch[:key]}:#{patch[:operation]}:#{patch[:target]}:#{patch[:id]}:#{patch[:applied]}" }.sort.join("|"),
-          @errors.map { |entry| "#{entry[:file]}:#{entry[:index]}:#{entry[:message]}" }.sort.join("|"),
-          @warnings.map { |entry| "#{entry[:file]}:#{entry[:index]}:#{entry[:message]}" }.sort.join("|")
+          visible_patches.map { |patch| "#{patch[:key]}:#{patch[:operation]}:#{patch[:target]}:#{patch[:id]}:#{patch[:applied]}" }.sort.join("|"),
+          visible_errors.map { |entry| "#{entry[:file]}:#{entry[:index]}:#{entry[:message]}" }.sort.join("|"),
+          visible_warnings.map { |entry| "#{entry[:file]}:#{entry[:index]}:#{entry[:message]}" }.sort.join("|")
         ].join("||")
       end
 
@@ -478,6 +528,10 @@ module Reloaded
       def hash_key?(hash, key)
         return false unless hash.is_a?(Hash)
         hash.key?(key) || hash.key?(key.to_s.to_sym)
+      end
+
+      def hidden_patch?(patch)
+        !!(patch && patch[:hidden])
       end
 
       def deep_dup(value)

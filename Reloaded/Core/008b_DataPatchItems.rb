@@ -64,11 +64,14 @@ module Reloaded
         return false unless defined?(GameData::Item)
         return true unless game_data_ready?
         restore_managed_entries
-        touched_ids = patched_item_ids
+        patches = patched_item_patches
+        visible_ids = patches.reject { |patch| hidden_patch?(patch) }.map { |patch| patch[:id] }.uniq
+        touched_ids = patches.map { |patch| patch[:id] }.uniq
         applied = 0
         touched_ids.each do |id|
           raw_data = Reloaded::DataPatches.entry(TARGET, id)
-          applied += 1 if apply_entry(id, raw_data)
+          next unless apply_entry(id, raw_data)
+          applied += 1 if visible_ids.include?(id)
         end
         log_applied(applied) if applied > 0
         true
@@ -201,11 +204,18 @@ module Reloaded
         value
       end
 
-      def patched_item_ids
+      def patched_item_patches
         return [] unless defined?(Reloaded::DataPatches)
-        Reloaded::DataPatches.applied(TARGET).map { |patch| patch[:id] }.uniq
+        if Reloaded::DataPatches.respond_to?(:applied_all)
+          return Reloaded::DataPatches.applied_all(TARGET)
+        end
+        Reloaded::DataPatches.applied(TARGET)
       rescue
         []
+      end
+
+      def hidden_patch?(patch)
+        !!(patch && patch[:hidden])
       end
 
       def managed_number?(key)

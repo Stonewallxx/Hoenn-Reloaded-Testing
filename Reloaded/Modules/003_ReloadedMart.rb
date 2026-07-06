@@ -306,6 +306,18 @@ module ReloadedMart
       return mystery_grants_for(entry, quantity) if mystery_box?(entry)
       grants = []
       Array(entry.grants).each do |grant|
+        if pokevial_grant?(grant)
+          kind = pokevial_grant_kind(grant)
+          amount = pokevial_quantity(grant).to_i
+          if kind == :pokevial_refill
+            quantity.to_i.times { grants << { :type => :pokevial_refill } }
+          elsif kind == :pokevial_max_uses
+            grants << { :type => :pokevial_max_uses, :amount => amount }
+          else
+            grants << { :type => :pokevial, :quantity => amount * quantity.to_i }
+          end
+          next
+        end
         item_id, count = grant_item_and_quantity(grant)
         next if item_id.nil? || item_id.to_s.empty?
         grants << { :item_id => item_id, :quantity => count.to_i * quantity.to_i }
@@ -317,6 +329,11 @@ module ReloadedMart
       grants = Array(line&.grants)
       return TransactionResult.new(false, :empty_bundle, "This bundle is unavailable.") if grants.empty?
       grants.each do |grant|
+        if pokevial_grant?(grant)
+          quantity = pokevial_quantity(grant).to_i
+          return TransactionResult.new(false, :invalid_bundle_grant, "This bundle is unavailable.") if quantity <= 0
+          next
+        end
         item_id = grant[:item_id] || grant["item_id"] || grant[:id] || grant["id"] || grant[:item] || grant["item"]
         quantity = (grant[:quantity] || grant["quantity"] || grant[:qty] || grant["qty"] || 1).to_i
         return TransactionResult.new(false, :invalid_bundle_grant, "This bundle is unavailable.") if item_id.nil? || item_id.to_s.empty? || quantity <= 0
@@ -346,6 +363,18 @@ module ReloadedMart
       count = [quantity.to_i, 1].max
       count.times do |index|
         grant, roll_details = weighted_mystery_grant(pool)
+        if pokevial_grant?(grant)
+          kind = pokevial_grant_kind(grant)
+          amount = [pokevial_quantity(grant).to_i, 1].max
+          ReloadedMart.log_info(
+            "Mystery reward roll entry=#{entry&.id} roll_index=#{index + 1} type=#{kind} quantity=#{amount} rarity=#{mystery_grant_rarity(grant) || "none"} weight=#{mystery_grant_weight(grant)} mode=#{roll_details[:mode]} roll=#{roll_details[:roll]}/#{roll_details[:total]} threshold=#{roll_details[:threshold] || "-"}"
+          )
+          reward = { :type => kind, :rarity => mystery_grant_rarity(grant) }
+          reward[:quantity] = amount if kind == :pokevial
+          reward[:amount] = amount if kind == :pokevial_max_uses
+          grants << reward
+          next
+        end
         item_id, count = grant_item_and_quantity(grant)
         next if item_id.nil? || item_id.to_s.empty?
         log_mystery_reward_roll(entry, index + 1, item_id, count, grant, roll_details)
@@ -404,6 +433,41 @@ module ReloadedMart
         count = 1
       end
       [item_id, count]
+    end
+
+    def pokevial_grant?(grant)
+      return false unless grant.is_a?(Hash)
+      marker = grant["type"] || grant[:type] || grant["kind"] || grant[:kind] || grant["grant_type"] || grant[:grant_type]
+      marker ||= grant["id"] || grant[:id] || grant["item"] || grant[:item] || grant["item_id"] || grant[:item_id]
+      pokevial_grant_markers.include?(marker.to_s)
+    rescue
+      false
+    end
+
+    def pokevial_grant_kind(grant)
+      marker = grant["type"] || grant[:type] || grant["kind"] || grant[:kind] || grant["grant_type"] || grant[:grant_type]
+      marker ||= grant["id"] || grant[:id] || grant["item"] || grant[:item] || grant["item_id"] || grant[:item_id]
+      text = marker.to_s
+      return :pokevial_refill if ["pokevial_refill", "poke_vial_refill", "POKEVIAL_REFILL", "refill_pokevial"].include?(text)
+      return :pokevial_max_uses if ["pokevial_max", "pokevial_max_uses", "POKEVIAL_MAX_USES", "pokevial_unlock", "poke_vial_unlock"].include?(text)
+      :pokevial
+    rescue
+      :pokevial
+    end
+
+    def pokevial_grant_markers
+      ["pokevial", "poke_vial", "pokevial_charge", "POKEVIAL_CHARGE", "pokevial_uses", "POKEVIAL_USES", "pokevial_refill", "poke_vial_refill",
+       "POKEVIAL_REFILL", "refill_pokevial", "pokevial_max", "pokevial_max_uses", "POKEVIAL_MAX_USES",
+       "pokevial_unlock", "poke_vial_unlock"]
+    end
+
+    def pokevial_quantity(grant)
+      return 0 unless grant.is_a?(Hash)
+      value = grant["max_uses"] || grant[:max_uses] || grant["max"] || grant[:max]
+      value ||= grant["pokevial_uses"] || grant[:pokevial_uses] || grant["uses"] || grant[:uses] || grant["qty"] || grant[:qty] || grant["quantity"] || grant[:quantity] || 1
+      value
+    rescue
+      0
     end
   end
 
@@ -2282,15 +2346,32 @@ module ReloadedMart
 
       def normalize_grants(grants)
         totals = {}
+        pokevial_total = 0
+        special = []
         Array(grants).each do |grant|
           next unless grant.is_a?(Hash)
+          if pokevial_grant?(grant)
+            kind = pokevial_grant_kind(grant)
+            qty = pokevial_quantity(grant).to_i
+            if kind == :pokevial_refill
+              special << { :type => :pokevial_refill }
+            elsif kind == :pokevial_max_uses
+              next if qty <= 0
+              special << { :type => :pokevial_max_uses, :amount => qty }
+            else
+              next if qty <= 0
+              pokevial_total += qty
+            end
+            next
+          end
           data = resolve_item(grant[:item_id] || grant["item_id"] || grant[:id] || grant["id"] || grant[:item] || grant["item"])
           return { :ok => false, :code => :missing_item, :message => "One of the items is unavailable.", :item_id => grant.inspect } unless data
           qty = (grant[:quantity] || grant["quantity"] || grant[:qty] || grant["qty"] || 1).to_i
           next if qty <= 0
           totals[data.id] = totals[data.id].to_i + qty
         end
-        { :ok => true, :grants => totals.map { |item_id, quantity| { :item_id => item_id, :quantity => quantity } } }
+        special << { :type => :pokevial, :quantity => pokevial_total } if pokevial_total > 0
+        { :ok => true, :grants => totals.map { |item_id, quantity| { :item_id => item_id, :quantity => quantity } }, :special_grants => special }
       rescue Exception => e
         ReloadedMart.log_exception("Failed to normalize Mart item grants", e)
         { :ok => false, :code => :grant_error, :message => "The transaction could not be completed." }
@@ -2299,7 +2380,35 @@ module ReloadedMart
       def can_store_grants?(grants)
         normalized = normalize_grants(grants)
         return TransactionResult.new(false, normalized[:code], normalized[:message], :item_id => normalized[:item_id]) unless normalized[:ok]
-        return TransactionResult.new(true, :ok, "", :grants => []) if normalized[:grants].empty?
+        if Array(normalized[:special_grants]).any? { |grant| [:pokevial, :pokevial_refill, :pokevial_max_uses].include?(grant[:type]) }
+          unless defined?(ReloadedPokeVial)
+            return TransactionResult.new(false, :pokevial_unavailable, "The PokeVial is unavailable.")
+          end
+          effective_max = ReloadedPokeVial.respond_to?(:configured_max_uses) ? ReloadedPokeVial.configured_max_uses : 0
+          effective_uses = ReloadedPokeVial.respond_to?(:uses) ? ReloadedPokeVial.uses : 0
+          Array(normalized[:special_grants]).sort_by { |grant| grant[:type] == :pokevial_max_uses ? 0 : grant[:type] == :pokevial_refill ? 1 : 2 }.each do |grant|
+            if grant[:type] == :pokevial
+              amount = grant[:quantity].to_i
+              unless amount > 0 && effective_uses + amount <= effective_max
+                return TransactionResult.new(false, :pokevial_full, "The PokeVial does not have enough empty charge slots.")
+              end
+              effective_uses += amount
+            elsif grant[:type] == :pokevial_refill
+              unless effective_uses < effective_max
+                return TransactionResult.new(false, :pokevial_full, "The PokeVial is already full.")
+              end
+              effective_uses = effective_max
+            elsif grant[:type] == :pokevial_max_uses
+              unless grant[:amount].to_i > effective_max
+                return TransactionResult.new(false, :pokevial_maxed, "The PokeVial is already upgraded enough.")
+              end
+              effective_max = grant[:amount].to_i
+            end
+          end
+        end
+        if normalized[:grants].empty?
+          return TransactionResult.new(true, :ok, "", :grants => [], :special_grants => normalized[:special_grants])
+        end
         return TransactionResult.new(false, :bag_unavailable, "The Bag is unavailable.") unless defined?($PokemonBag) && $PokemonBag
         pockets = duplicate_pockets
         normalized[:grants].each do |grant|
@@ -2310,7 +2419,7 @@ module ReloadedMart
             return TransactionResult.new(false, :bag_full, "There isn't enough room in the Bag.", :item_id => data.id, :quantity => grant[:quantity])
           end
         end
-        TransactionResult.new(true, :ok, "", :grants => normalized[:grants])
+        TransactionResult.new(true, :ok, "", :grants => normalized[:grants], :special_grants => normalized[:special_grants])
       rescue Exception => e
         ReloadedMart.log_exception("Mart bag preflight failed", e)
         TransactionResult.new(false, :bag_preflight_failed, "There isn't enough room in the Bag.")
@@ -2327,6 +2436,28 @@ module ReloadedMart
             return TransactionResult.new(false, :grant_failed, "The transaction could not be completed.", :item_id => grant[:item_id], :applied => applied)
           end
           applied << { :item_id => data.id, :quantity => grant[:quantity].to_i }
+        end
+        Array(normalized[:special_grants]).sort_by { |grant| grant[:type] == :pokevial_max_uses ? 0 : grant[:type] == :pokevial_refill ? 1 : 2 }.each do |grant|
+          if grant[:type] == :pokevial_max_uses
+            unless defined?(ReloadedPokeVial) && ReloadedPokeVial.unlock_max_uses(grant[:amount].to_i, source: :reloaded_mart, refill: false, notify: false)
+              rollback_grants(applied)
+              return TransactionResult.new(false, :pokevial_grant_failed, "The transaction could not be completed.", :applied => applied)
+            end
+            applied << { :type => :pokevial_max_uses, :amount => grant[:amount].to_i }
+          elsif grant[:type] == :pokevial_refill
+            unless defined?(ReloadedPokeVial) && ReloadedPokeVial.grant_full_refill(source: :reloaded_mart, notify: false)
+              rollback_grants(applied)
+              return TransactionResult.new(false, :pokevial_grant_failed, "The transaction could not be completed.", :applied => applied)
+            end
+            applied << { :type => :pokevial_refill }
+          elsif grant[:type] == :pokevial
+            added = ReloadedPokeVial.add_uses(grant[:quantity].to_i, source: :reloaded_mart, notify: false) if defined?(ReloadedPokeVial)
+            if added.to_i <= 0
+              rollback_grants(applied)
+              return TransactionResult.new(false, :pokevial_grant_failed, "The transaction could not be completed.", :applied => applied)
+            end
+            applied << { :type => :pokevial, :quantity => added.to_i }
+          end
         end
         register_tm_vault_grants(applied)
         TransactionResult.new(true, :ok, "", :applied => applied)
@@ -2351,6 +2482,7 @@ module ReloadedMart
       def register_tm_vault_grants(grants)
         return false unless defined?(TMVault)
         Array(grants).each do |grant|
+          next if grant[:type] || grant["type"]
           data = resolve_item(grant[:item_id] || grant["item_id"])
           next unless data && data.respond_to?(:is_machine?) && data.is_machine? && data.move
           TMVault.register(data.move, notify: false, source: :reloaded_mart)
@@ -2359,6 +2491,40 @@ module ReloadedMart
       rescue Exception => e
         ReloadedMart.log_exception("Mart TM Vault grant registration failed", e)
         false
+      end
+
+      def pokevial_grant?(grant)
+        return false unless grant.is_a?(Hash)
+        marker = grant[:type] || grant["type"] || grant[:kind] || grant["kind"] || grant[:grant_type] || grant["grant_type"]
+        marker ||= grant[:id] || grant["id"] || grant[:item] || grant["item"] || grant[:item_id] || grant["item_id"]
+        pokevial_grant_markers.include?(marker.to_s)
+      rescue
+        false
+      end
+
+      def pokevial_grant_kind(grant)
+        marker = grant[:type] || grant["type"] || grant[:kind] || grant["kind"] || grant[:grant_type] || grant["grant_type"]
+        marker ||= grant[:id] || grant["id"] || grant[:item] || grant["item"] || grant[:item_id] || grant["item_id"]
+        text = marker.to_s
+        return :pokevial_refill if ["pokevial_refill", "poke_vial_refill", "POKEVIAL_REFILL", "refill_pokevial"].include?(text)
+        return :pokevial_max_uses if ["pokevial_max", "pokevial_max_uses", "POKEVIAL_MAX_USES", "pokevial_unlock", "poke_vial_unlock"].include?(text)
+        :pokevial
+      rescue
+        :pokevial
+      end
+
+      def pokevial_grant_markers
+        ["pokevial", "poke_vial", "pokevial_charge", "POKEVIAL_CHARGE", "pokevial_uses", "POKEVIAL_USES", "pokevial_refill", "poke_vial_refill",
+         "POKEVIAL_REFILL", "refill_pokevial", "pokevial_max", "pokevial_max_uses", "POKEVIAL_MAX_USES",
+         "pokevial_unlock", "poke_vial_unlock"]
+      end
+
+      def pokevial_quantity(grant)
+        value = grant[:max_uses] || grant["max_uses"] || grant[:max] || grant["max"]
+        value ||= grant[:pokevial_uses] || grant["pokevial_uses"] || grant[:uses] || grant["uses"] || grant[:qty] || grant["qty"] || grant[:quantity] || grant["quantity"] || 1
+        value
+      rescue
+        0
       end
 
       def duplicate_pockets
@@ -2508,6 +2674,13 @@ module ReloadedMart
         grants = Array(entry.grants)
         return { :ok => false, :reason => "empty_bundle_grants", :details => {} } if grants.empty?
         grants.each_with_index do |grant, index|
+          if pokevial_grant?(grant)
+            quantity = pokevial_grant_kind(grant) == :pokevial_refill ? 1 : pokevial_quantity(grant).to_i
+            if quantity <= 0
+              return { :ok => false, :reason => "invalid_bundle_grant", :details => { :index => index, :item => "pokevial", :field => "quantity" } }
+            end
+            next
+          end
           item_id, quantity = grant_item_and_quantity(grant)
           if item_id.nil? || item_id.to_s.empty?
             return { :ok => false, :reason => "invalid_bundle_grant", :details => { :index => index, :field => "item" } }
@@ -2539,6 +2712,7 @@ module ReloadedMart
         end
         if entry.bundle_like?
           entry.grants.each do |grant|
+            next if pokevial_grant?(grant)
             grant_id, = grant_item_and_quantity(grant)
             missing_items << grant_id unless item_exists?(grant_id)
           end
@@ -2556,6 +2730,41 @@ module ReloadedMart
       def item_exists?(item_id)
         return false if item_id.nil? || item_id.to_s.empty?
         GameData::Item.exists?(item_id) rescue !!(GameData::Item.try_get(item_id) rescue nil)
+      end
+
+      def pokevial_grant?(grant)
+        return false unless grant.is_a?(Hash)
+        marker = grant["type"] || grant[:type] || grant["kind"] || grant[:kind] || grant["grant_type"] || grant[:grant_type]
+        marker ||= grant["id"] || grant[:id] || grant["item"] || grant[:item] || grant["item_id"] || grant[:item_id]
+        pokevial_grant_markers.include?(marker.to_s)
+      rescue
+        false
+      end
+
+      def pokevial_grant_kind(grant)
+        marker = grant["type"] || grant[:type] || grant["kind"] || grant[:kind] || grant["grant_type"] || grant[:grant_type]
+        marker ||= grant["id"] || grant[:id] || grant["item"] || grant[:item] || grant["item_id"] || grant[:item_id]
+        text = marker.to_s
+        return :pokevial_refill if ["pokevial_refill", "poke_vial_refill", "POKEVIAL_REFILL", "refill_pokevial"].include?(text)
+        return :pokevial_max_uses if ["pokevial_max", "pokevial_max_uses", "POKEVIAL_MAX_USES", "pokevial_unlock", "poke_vial_unlock"].include?(text)
+        :pokevial
+      rescue
+        :pokevial
+      end
+
+      def pokevial_grant_markers
+        ["pokevial", "poke_vial", "pokevial_charge", "POKEVIAL_CHARGE", "pokevial_uses", "POKEVIAL_USES", "pokevial_refill", "poke_vial_refill",
+         "POKEVIAL_REFILL", "refill_pokevial", "pokevial_max", "pokevial_max_uses", "POKEVIAL_MAX_USES",
+         "pokevial_unlock", "poke_vial_unlock"]
+      end
+
+      def pokevial_quantity(grant)
+        return 0 unless grant.is_a?(Hash)
+        value = grant["max_uses"] || grant[:max_uses] || grant["max"] || grant[:max]
+        value ||= grant["pokevial_uses"] || grant[:pokevial_uses] || grant["uses"] || grant[:uses] || grant["qty"] || grant[:qty] || grant["quantity"] || grant[:quantity] || 1
+        value
+      rescue
+        0
       end
 
       def grant_item_and_quantity(grant)

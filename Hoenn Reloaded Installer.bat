@@ -63,9 +63,14 @@ if exist "%VER_FILE%" (
 ::  Fetch remote version for preview
 :: ============================================================
 set "REMOTE_VER=unknown"
+set "REMOTE_VER_STATUS=OK"
 for /f "usebackq tokens=*" %%A in (
-    `powershell -NoProfile -Command "try{(Invoke-WebRequest -Uri '%REPO_RAW%/Reloaded/Version.md' -UseBasicParsing -TimeoutSec 5).Content.Trim()}catch{'unknown'}"`
+    `powershell -NoProfile -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try{(Invoke-WebRequest -Uri ('%REPO_RAW%/Reloaded/Version.md?r=' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) -UseBasicParsing -TimeoutSec 8).Content.Trim()}catch{'__ERROR__'}"`
 ) do set "REMOTE_VER=%%A"
+if /I "!REMOTE_VER!"=="__ERROR__" (
+    set "REMOTE_VER=unknown"
+    set "REMOTE_VER_STATUS=Could not read online Version.md"
+)
 
 :: ============================================================
 ::  Header
@@ -76,6 +81,7 @@ echo   Hoenn Reloaded  ^|  Full Update
 echo  ============================================================
 echo   Installed Version  : !LOCAL_VER!
 echo   Available Version  : !REMOTE_VER!
+if /I not "!REMOTE_VER_STATUS!"=="OK" echo   Online Check       : !REMOTE_VER_STATUS!
 echo   Target Folder      : %GAME_ROOT%
 echo  ------------------------------------------------------------
 echo.

@@ -298,6 +298,45 @@ Mystery Box example:
 Mystery Box contents are hidden in the UI, but transactions still preflight the
 real hidden grants before money is charged.
 
+### PokeVial Grants
+
+Bundles, gifts, and Mystery Boxes can grant PokeVial rewards instead of normal
+bag items. Mystery Gift payloads can use the same reward markers.
+
+Single-use charge:
+
+```json
+{ "type": "pokevial", "quantity": 1 }
+{ "type": "pokevial_charge", "quantity": 1 }
+```
+
+Full refill:
+
+```json
+{ "type": "pokevial_refill" }
+```
+
+Max-charge unlock:
+
+```json
+{ "type": "pokevial_max_uses", "max_uses": 4 }
+```
+
+Supported aliases include `poke_vial`, `pokevial_charge`, `POKEVIAL_CHARGE`,
+`pokevial_uses`, `POKEVIAL_USES`, `pokevial_refill`, `POKEVIAL_REFILL`,
+`refill_pokevial`, `pokevial_unlock`, and `POKEVIAL_MAX_USES`.
+
+PokeVial rewards are preflighted before money is charged. A single-use charge
+requires an empty charge slot, a full refill requires the vial to be below max,
+and a max-charge unlock must increase the player's current max.
+
+Reloaded also registers two hidden internal Medicine-pocket item datapatches for
+normal item rewards or shops. They can also be placed in Overworld Menu Quick
+Items:
+
+- `POKEVIAL_CHARGE` - restores one PokeVial charge when used from the Bag.
+- `POKEVIAL_REFILL` - restores all missing PokeVial charges when used from the Bag.
+
 ## Mod-Added Items
 
 Catalog entries may reference mod-added item IDs.

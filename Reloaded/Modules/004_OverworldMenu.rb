@@ -52,7 +52,7 @@ module Reloaded
 
       def register_options
         return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :overworld_menu, priority: 6) do |_scene|
+        Reloaded::Options.register_category_option("RELOADED", :overworld_menu, priority: 7) do |_scene|
           [EnumOption.new(
             _INTL("Overworld Menu"),
             [_INTL("Off"), _INTL("On")],
@@ -100,7 +100,7 @@ module OverworldMenu
   @fallback_page_index = 0
 
   class << self
-    def register(key, label:, handler:, priority: 99, condition: nil, exit_on_select: false)
+    def register(key, label:, handler:, priority: 99, condition: nil, exit_on_select: false, status: nil, status_color: nil)
       key = key.to_sym rescue nil
       unless key
         log_warning("Overworld Menu registration rejected: key must be Symbol-like")
@@ -124,7 +124,9 @@ module OverworldMenu
         :handler => handler,
         :priority => OverworldMenuConfig.get_priority(key, priority).to_i,
         :condition => condition || proc { true },
-        :exit_on_select => !!exit_on_select
+        :exit_on_select => !!exit_on_select,
+        :status => status,
+        :status_color => status_color
       }
       @registry.sort_by! { |entry| [entry[:priority], entry[:label].to_s] }
       log_debug("Registered Overworld Menu entry #{key} priority=#{priority}")
@@ -230,9 +232,19 @@ module OverworldMenu
       return false unless item
       data = GameData::Item.get(item) rescue nil
       return false unless data
+      return true if pokevial_quick_item?(item)
       return true if ItemHandlers.hasOutHandler(item)
       return true if data.is_machine? && $Trainer && $Trainer.party.length > 0
       false
+    rescue
+      false
+    end
+
+    def pokevial_quick_item?(item)
+      return false unless defined?(ReloadedPokeVial) && ReloadedPokeVial.respond_to?(:item_id?)
+      return false unless defined?(ItemHandlers)
+      return false unless ItemHandlers.const_defined?(:UseFromBag)
+      ReloadedPokeVial.item_id?(item) && !!ItemHandlers::UseFromBag[item]
     rescue
       false
     end
@@ -498,7 +510,14 @@ class OverworldMenuScene
         pbSetSmallFont(b)
         b.font.size = 15
         color = selected ? C_WHITE : C_GRAY
-        pbDrawShadowText(b, PAD + 2, y, PANEL_W - PAD * 2, ROW_H - 2, entries[idx][:label].to_s, color, C_SHADOW)
+        status = entry_status_text(entries[idx])
+        if status.empty?
+          pbDrawShadowText(b, PAD + 2, y, PANEL_W - PAD * 2, ROW_H - 2, entries[idx][:label].to_s, color, C_SHADOW)
+        else
+          status_w = 82
+          pbDrawShadowText(b, PAD + 2, y, PANEL_W - PAD * 2 - status_w, ROW_H - 2, entries[idx][:label].to_s, color, C_SHADOW)
+          pbDrawShadowText(b, PANEL_W - PAD - status_w, y, status_w, ROW_H - 2, status, entry_status_color(entries[idx]), C_SHADOW, 2)
+        end
       end
     end
     if page_count > 1
@@ -520,6 +539,22 @@ class OverworldMenuScene
     @menu_spr.x = PANEL_X
     @menu_spr.y = PANEL_Y
     draw_party_panel if @party_view
+  end
+
+  def entry_status_text(entry)
+    status = entry[:status]
+    status = status.call if status.respond_to?(:call)
+    status.to_s.strip
+  rescue
+    ""
+  end
+
+  def entry_status_color(entry)
+    color = entry[:status_color]
+    color = color.call if color.respond_to?(:call)
+    color || C_GREEN
+  rescue
+    C_GREEN
   end
 
   def party_panel_h
@@ -1530,6 +1565,10 @@ class OverworldMenuScreen
 
   def show_popup(title, lines)
     @scene.show_popup(title, lines)
+  end
+
+  def show_popup_menu(title, labels)
+    @scene.show_popup_menu(title, labels)
   end
 
   def show_time_changer

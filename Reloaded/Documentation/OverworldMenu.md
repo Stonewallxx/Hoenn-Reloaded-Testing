@@ -57,6 +57,8 @@ items.
 The Quick Items popup shows usable selected items and a `Manage Slots` command.
 Slot setup uses the normal Bag picker, filtered to items with usable field,
 party, machine, or bag handlers. Quick Item slots are saved per save file.
+PokeVial Charge and PokeVial Refill are eligible when those items are in the
+Bag.
 
 Common field actions such as Bike, Town Map, Repel, Fishing Rod, Escape Rope,
 and Honey should be managed by the player through Quick Item slots instead of
@@ -81,6 +83,8 @@ OverworldMenu.register(:my_feature,
   label: "My Feature",
   priority: 50,
   condition: proc { true },
+  status: proc { "READY" },
+  status_color: proc { Color.new(120, 230, 150) },
   exit_on_select: false,
   handler: proc { |screen|
     screen.show_popup("MY FEATURE", ["Hello from my feature."])
@@ -96,6 +100,8 @@ Registration fields:
 - `handler`: callable object. Receives the `OverworldMenuScreen`.
 - `priority`: lower values appear earlier.
 - `condition`: optional visibility gate.
+- `status`: optional right-side status text.
+- `status_color`: optional right-side status text color.
 - `exit_on_select`: closes the menu after the handler when true.
 
 Handlers can return `:exit_menu` to close the menu after custom logic.

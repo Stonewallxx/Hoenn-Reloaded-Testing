@@ -768,12 +768,24 @@ module Reloaded
         Reloaded.version rescue "0.0.0"
       end
 
+      def core_update_check_failed?(entry)
+        return false unless entry
+        !!((entry["update_check_failed"] rescue nil) || (entry[:update_check_failed] rescue nil))
+      end
+
       def show_core_update_status(row = nil)
         Reloaded::ModBrowser.refresh(fetch_remote: true) if defined?(Reloaded::ModBrowser)
         entry = defined?(Reloaded::ModBrowser) ? Reloaded::ModBrowser.entry(core_entry_id) : nil
-        latest = (entry && entry["latest_version"].to_s) || (row && ((row[:latest_version] rescue nil) || (row["latest_version"] rescue nil))).to_s
-        latest = core_installed_version if latest.to_s.empty?
         current = core_installed_version
+        if core_update_check_failed?(entry)
+          show_message("Could not check Hoenn Reloaded updates.\nCurrent: v#{current}")
+          return
+        end
+        latest = (entry && entry["latest_version"].to_s) || (row && ((row[:latest_version] rescue nil) || (row["latest_version"] rescue nil))).to_s
+        if latest.to_s.empty?
+          show_message("Could not check Hoenn Reloaded updates.\nCurrent: v#{current}")
+          return
+        end
         status = compare_versions(current, latest) < 0 ? "Update available." : "Hoenn Reloaded is up to date."
         show_message("#{status}\nCurrent: v#{current}\nLatest: v#{latest}")
       rescue Exception => e
@@ -784,9 +796,17 @@ module Reloaded
       def update_core_installation(row = nil)
         Reloaded::ModBrowser.refresh(fetch_remote: true) if defined?(Reloaded::ModBrowser)
         entry = defined?(Reloaded::ModBrowser) ? Reloaded::ModBrowser.entry(core_entry_id) : nil
-        latest = (entry && entry["latest_version"].to_s) || (row && ((row[:latest_version] rescue nil) || (row["latest_version"] rescue nil))).to_s
         current = core_installed_version
-        if latest.to_s.empty? || compare_versions(current, latest) >= 0
+        if core_update_check_failed?(entry)
+          show_message("Could not verify the latest Hoenn Reloaded version.\nCurrent: v#{current}")
+          return
+        end
+        latest = (entry && entry["latest_version"].to_s) || (row && ((row[:latest_version] rescue nil) || (row["latest_version"] rescue nil))).to_s
+        if latest.to_s.empty?
+          show_message("Could not verify the latest Hoenn Reloaded version.\nCurrent: v#{current}")
+          return
+        end
+        if compare_versions(current, latest) >= 0
           show_message("Hoenn Reloaded is already up to date.\nCurrent: v#{current}")
           return
         end
