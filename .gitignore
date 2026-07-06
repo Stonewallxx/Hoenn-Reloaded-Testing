@@ -13,8 +13,15 @@ Graphics/CustomBattlers/spritesheets/spritesheets_custom/*
 Graphics/CustomBattlers/local_sprites/BaseSprites/*
 Graphics/CustomBattlers/local_sprites/indexed/*
 Graphics/CustomBattlers/Sprites to import/*
+Graphics/CustomBattlers/custom_sprites
+Graphics/CustomBattlers/desktop.ini
+Graphics/Other/
+Graphics/Sprite_Credits.csv
 Graphics/Pokemon/FusionIcons/*
 Graphics/Battlers/Shiny/*
+/CustomBattlers/
+/Other/
+/Sprite_Credits.csv
 
 # 3. Explicitly allow the .gitkeep files back in
 !Graphics/CustomBattlers/spritesheets/spritesheets_base/.gitkeep
@@ -38,6 +45,7 @@ Mods/*
 !Mods/Reloaded/Profiles/
 Mods/Reloaded/Profiles/*
 !Mods/Reloaded/Profiles/.gitkeep
+Mods/Reloaded/SpritepacksInstalled.json
 ModDev/*
 !Modders Tools/
 Modders Tools/_repo_cache/
@@ -64,6 +72,8 @@ Data/sprites/sprites_rate_limit.log
 
 .DS_Store
 **/.DS_Store
+desktop.ini
+**/desktop.ini
 
 Game.rxproj
 Game.exe

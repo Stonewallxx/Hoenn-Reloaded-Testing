@@ -324,11 +324,20 @@ module Reloaded
 
       def popup_selection_fill
         pulse = pulse_value
-        color_with_alpha(FOOTER_SEL, (135 + (205 - 135) * pulse).to_i)
+        color_with_alpha(FOOTER_SEL, (165 + (225 - 165) * pulse).to_i)
       end
 
       def draw_selection_fill(bitmap, x, y, width, height, fill = nil)
         draw_selection_box(bitmap, x, y, width, height, fill)
+      end
+
+      def draw_plain_text(bitmap, x, y, width, height, text, color, align = 0)
+        draw_x = case align
+                 when 1 then x + width / 2
+                 when 2 then x + width
+                 else x
+                 end
+        pbDrawTextPositions(bitmap, [[text.to_s, draw_x, y, align, color, Color.new(0, 0, 0, 0)]])
       end
 
       def draw_hint_text(bitmap, text, x, y, width, height = 16, x_offset = 30, align = 1)
@@ -365,6 +374,119 @@ module Reloaded
         lines << "Failed install/download: #{failed.join(", ")}" unless failed.empty?
         lines << "No details returned." if lines.length == 1
         lines.join("\n")
+      end
+
+      def open_spritepack_menu
+        unless defined?(Reloaded::ModBrowser)
+          show_message("Spritepack downloads are not available.")
+          return
+        end
+        choice = show_message("Spritepacks", ["Latest", "All Files", "Back"])
+        case choice
+        when 0 then open_spritepack_file_menu("Latest", Reloaded::ModBrowser.spritepack_latest_files)
+        when 1 then open_spritepack_file_menu("All Files", Reloaded::ModBrowser.spritepack_all_files)
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Spritepack menu failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Spritepack menu failed:\n#{e.message}")
+      end
+
+      def open_spritepack_file_menu(title, files)
+        rows = Array(files).compact
+        if rows.empty?
+          show_message("No spritepacks are configured.")
+          return
+        end
+        labels = rows.map { |file| file["name"].to_s }
+        labels << "Back"
+        choice = show_message(title, labels)
+        file = rows[choice]
+        return unless file
+        open_spritepack_action_menu(file)
+      end
+
+      def open_spritepack_action_menu(file)
+        name = file["name"].to_s
+        choices = ["Download", "Mark as Installed", "Back"]
+        choice = show_message(name, choices)
+        case choice
+        when 0 then confirm_spritepack_download(file)
+        when 1 then confirm_spritepack_mark_installed(file)
+        end
+      end
+
+      def confirm_spritepack_download(file)
+        name = file["name"].to_s
+        url = file["url"].to_s.strip
+        if url.empty?
+          show_message("No download URL is configured for:\n#{name}\n\nEdit Reloaded/Spritepacks.json.")
+          return
+        end
+        choice = show_message(
+          "Download and extract #{name}?\n\nThis can take a while and will write sprite files into the game folder.",
+          ["Download", "Back"],
+          1
+        )
+        return unless choice == 0
+        result = Reloaded::ModBrowser.download_spritepack(file)
+        if result[:success]
+          show_message(spritepack_success_message(result))
+          refresh_rows if respond_to?(:refresh_rows)
+          draw_all if respond_to?(:draw_all)
+        else
+          show_message(spritepack_failure_message(result))
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Spritepack download failed:\n#{e.message}")
+      end
+
+      def confirm_spritepack_mark_installed(file)
+        name = file["name"].to_s
+        choice = show_message(
+          "Mark #{name} as installed?\n\nUse this only if the spritepack was installed manually.",
+          ["Mark Installed", "Back"],
+          1
+        )
+        return unless choice == 0
+        result = Reloaded::ModBrowser.mark_spritepack_installed(file)
+        if result[:success]
+          show_message("Spritepack marked as installed:\n#{result[:name]}")
+          refresh_rows if respond_to?(:refresh_rows)
+          draw_all if respond_to?(:draw_all)
+        else
+          show_message("Could not mark spritepack installed:\n#{result[:error]}")
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Spritepack mark installed failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not mark spritepack installed:\n#{e.message}")
+      end
+
+      def spritepack_success_message(result)
+        import = result[:import] || {}
+        lines = ["Spritepack installed:", result[:name].to_s]
+        if import[:total]
+          lines << ""
+          lines << "Files: #{import[:total].to_i}"
+          lines << "Copied: #{import[:copied].to_i}"
+          lines << "Skipped: #{import[:skipped].to_i}"
+          lines << "Failed: #{import[:failed].to_i}"
+        end
+        lines.join("\n")
+      end
+
+      def spritepack_failure_message(result)
+        case result[:status]
+        when :missing_url
+          "No download URL is configured for:\n#{result[:name]}\n\nEdit Reloaded/Spritepacks.json."
+        when :download_failed
+          url = result[:url].to_s
+          "Spritepack download failed.\nCheck your internet connection and the URL.#{url.empty? ? '' : "\n#{url}"}"
+        when :extract_failed
+          "Spritepack downloaded, but extraction failed.\nConfirm REQUIRED_BY_INSTALLER_UPDATER/7z.exe exists and supports the archive."
+        else
+          "Spritepack install failed.\n#{result[:error]}"
+        end
       end
 
       def fetch_changelog_text_value(value)
@@ -600,6 +722,7 @@ module Reloaded
 
       def update_available?(row)
         return false unless row && defined?(Reloaded::ModBrowser)
+        return false if spritepack_entry_row?(row)
         if core_entry_row?(row)
           entry = Reloaded::ModBrowser.entry(core_entry_id)
           latest = entry ? entry["latest_version"].to_s : ""
@@ -901,7 +1024,7 @@ module Reloaded
           y = pad
           lines.each do |line|
             align = center_text ? 1 : 0
-            pbDrawShadowText(bitmap, pad, y, box_w - pad * 2, line_h, line, WHITE, SHADOW, align)
+            draw_plain_text(bitmap, pad, y, box_w - pad * 2, line_h, line, WHITE, align)
             y += line_h
           end
           if choices
@@ -911,13 +1034,13 @@ module Reloaded
               draw_selection_box(bitmap, pad, y, box_w - pad * 2, row_h, popup_selection_fill) if index == selected
               color = index == selected ? WHITE : GRAY
               row_lines.each_with_index do |line, line_index|
-                pbDrawShadowText(bitmap, pad + 8, y + line_index * line_h - 1, box_w - pad * 2 - 16, line_h, line, color, SHADOW)
+                draw_plain_text(bitmap, pad + 8, y + line_index * line_h - 6, box_w - pad * 2 - 16, line_h, line, color)
               end
               y += row_h
             end
             draw_hint_text(bitmap, "Confirm (C) Back (B)", 0, box_h - 20, box_w)
           else
-            pbDrawShadowText(bitmap, -10, y + 4, box_w, line_h, "[OK]", GRAY, SHADOW, 1)
+            draw_plain_text(bitmap, -10, y + 4, box_w, line_h, "[OK]", GRAY, 1)
           end
         end
 
@@ -990,7 +1113,7 @@ module Reloaded
           draw_border(bitmap, 0, 0, box_w, box_h, PANEL_BORDER)
           apply_ui_font(bitmap)
           bitmap.font.size = 14 rescue nil
-          pbDrawShadowText(bitmap, pad, 8, box_w - pad * 2, 18, title.to_s, WHITE, SHADOW)
+          draw_plain_text(bitmap, pad, 8, box_w - pad * 2, 18, title.to_s, WHITE)
           bitmap.fill_rect(pad, title_h - 2, box_w - pad * 2, 1, PANEL_LINE)
           colored_lines.each_with_index do |entry, index|
             next if index < scroll
@@ -998,7 +1121,7 @@ module Reloaded
             y = title_h + (index - scroll) * line_h
             line_text = entry[:text].to_s
             line_text = Reloaded::Log.sanitize(line_text) if defined?(Reloaded::Log)
-            pbDrawShadowText(bitmap, pad + 4, y, box_w - pad * 2, line_h, line_text, entry[:color] || GRAY, SHADOW)
+            draw_plain_text(bitmap, pad + 4, y, box_w - pad * 2, line_h, line_text, entry[:color] || GRAY)
           end
           hint = colored_lines.length > max_visible ? "Scroll (Up/Down) Confirm (C) Back (B)" : "Confirm (C) Back (B)"
           draw_hint_text(bitmap, hint, 0, box_h - 20, box_w)
@@ -1063,7 +1186,7 @@ module Reloaded
           draw_border(bitmap, 0, 0, box_w, box_h, PANEL_BORDER)
           apply_ui_font(bitmap)
           bitmap.font.size = 14 rescue nil
-          pbDrawShadowText(bitmap, pad, 8, box_w - pad * 2, 18, title.to_s, WHITE, SHADOW)
+          draw_plain_text(bitmap, pad, 8, box_w - pad * 2, 18, title.to_s, WHITE)
           bitmap.fill_rect(pad, title_h - 2, box_w - pad * 2, 1, PANEL_LINE)
           rows.each_with_index do |entry, index|
             next if index < scroll
@@ -1072,9 +1195,9 @@ module Reloaded
             draw_selection_box(bitmap, pad, y, box_w - pad * 2, line_h, popup_selection_fill) if index == selected
             mark = checked[index] ? "[x]" : "[ ]"
             color = index == selected ? WHITE : GRAY
-            pbDrawShadowText(bitmap, pad + 6, y - 2, 34, line_h, mark, color, SHADOW)
+            draw_plain_text(bitmap, pad + 6, y - 7, 34, line_h, mark, color)
             label = trim_text(bitmap, entry[:label].to_s, box_w - pad * 2 - 48)
-            pbDrawShadowText(bitmap, pad + 44, y - 2, box_w - pad * 2 - 48, line_h, label, color, SHADOW)
+            draw_plain_text(bitmap, pad + 44, y - 7, box_w - pad * 2 - 48, line_h, label, color)
           end
           draw_hint_text(bitmap, "Toggle (C) Back (B) Confirm (A)", 0, box_h - 20, box_w)
         end
@@ -1195,12 +1318,12 @@ module Reloaded
           draw_rounded_rect(bitmap, 0, 0, box_w, box_h, PANEL_BG)
           draw_border(bitmap, 0, 0, box_w, box_h, PANEL_BORDER)
           apply_ui_font(bitmap)
-          pbDrawShadowText(bitmap, 14, 10, box_w - 28, 18, title.to_s, WHITE, SHADOW)
+          draw_plain_text(bitmap, 14, 10, box_w - 28, 18, title.to_s, WHITE)
           draw_rounded_rect(bitmap, 14, 38, box_w - 28, 28, SEARCH_ACTIVE)
           draw_border(bitmap, 14, 38, box_w - 28, 28, PANEL_LINE)
           cursor = ((Graphics.frame_count rescue 0) / 20) % 2 == 0 ? "|" : ""
           shown = trim_text(bitmap, value + cursor, box_w - 42)
-          pbDrawShadowText(bitmap, 22, 43, box_w - 44, 18, shown, WHITE, SHADOW)
+          draw_plain_text(bitmap, 22, 43, box_w - 44, 18, shown, WHITE)
           bitmap.font.size = 12 rescue nil
           draw_hint_text(bitmap, "Confirm (Enter) Back (Esc/Right Click)", 0, box_h - 20, box_w)
         end
@@ -1394,7 +1517,7 @@ module Reloaded
         pbDrawShadowText(bitmap, MARGIN, 6, -1, 22, "Profiles", WHITE, SHADOW)
         apply_ui_font(bitmap)
         bitmap.font.size = 12 rescue nil
-        pbDrawShadowText(bitmap, 260, 9, SCREEN_W - 268, 14, "Active: #{active_name}", BLUE, SHADOW, 1)
+        draw_plain_text(bitmap, 260, 9, SCREEN_W - 268, 14, "Active: #{active_name}", BLUE, 1)
       end
 
       def draw_left
@@ -1450,9 +1573,9 @@ module Reloaded
         y += 16
         y = draw_profile_mod_list(bitmap, x, y, disabled, DIM)
         y += 4
-        pbDrawShadowText(bitmap, x, y, PROFILE_RIGHT_W - 24, 16, "Load Order Entries: #{summary[:load_order] || 0}", GRAY, SHADOW)
+        draw_plain_text(bitmap, x, y, PROFILE_RIGHT_W - 24, 16, "Load Order Entries: #{summary[:load_order] || 0}", GRAY)
         y += 18
-        pbDrawShadowText(bitmap, x, y, PROFILE_RIGHT_W - 24, 16, "Mod Settings: #{summary[:mod_settings] || 0}", GRAY, SHADOW)
+        draw_plain_text(bitmap, x, y, PROFILE_RIGHT_W - 24, 16, "Mod Settings: #{summary[:mod_settings] || 0}", GRAY)
         y += 24
         bitmap.fill_rect(x, y, PROFILE_RIGHT_W - 24, 1, PANEL_BORDER)
         y += 8
@@ -1949,6 +2072,7 @@ module Reloaded
         if defined?(Reloaded::ModBrowser)
           Reloaded::ModBrowser.entries.values.each do |entry|
             copy = entry.dup
+            next if core_entry_row?(copy) || spritepack_entry_row?(copy)
             copy["kind"] = "mod"
             copy["installed"] = installed.include?(copy["id"].to_s)
             rows << copy
@@ -2006,7 +2130,7 @@ module Reloaded
         pbDrawShadowText(bitmap, MARGIN, 5, -1, 24, title, WHITE, SHADOW)
         apply_ui_font(bitmap)
         bitmap.font.size = 12 rescue nil
-        pbDrawShadowText(bitmap, SCREEN_W - MARGIN - 3, 0, -1, 14, @rows.length.to_s, GRAY, SHADOW, 1)
+        pbDrawTextPositions(bitmap, [[@rows.length.to_s, SCREEN_W - MARGIN - 3, 0, 2, GRAY, Color.new(0, 0, 0, 0)]])
         pbDrawTextPositions(bitmap, [[browser_sync_status_text, SCREEN_W - MARGIN - 23, 13, 2, DIM, Color.new(0, 0, 0, 0)]])
       end
 
@@ -2049,14 +2173,14 @@ module Reloaded
           priority = special_entry_priority(row)
           if priority == 0
             bitmap.font.size = 16 rescue nil
-            pbDrawShadowText(bitmap, 11, y + 1, 10, ROW_H, "*", YELLOW, SHADOW, 1)
+            draw_plain_text(bitmap, 11, y + 1, 10, ROW_H, "*", YELLOW, 1)
           else
             marker_color = priority == 1 ? PURPLE : (row["kind"] == "profile" ? PURPLE : BLUE)
             bitmap.fill_rect(13, y + 7, 6, 6, marker_color)
           end
           bitmap.font.size = 18 rescue nil
           label = trim_text(bitmap, row["name"], LEFT_W - 44)
-          pbDrawShadowText(bitmap, 25, y, LEFT_W - 38, ROW_H, label, color, SHADOW)
+          draw_plain_text(bitmap, 25, y - 6, LEFT_W - 38, ROW_H, label, color)
         end
 
         pbDrawShadowText(bitmap, LEFT_W / 2 - 10, LIST_Y - 12, 20, 12, "^", GRAY, SHADOW, 1) if @scroll > 0
@@ -2239,7 +2363,7 @@ module Reloaded
         if row["kind"] == "mod"
           deps = Array(row["dependencies"])
           bitmap.font.size = 16 rescue nil
-          pbDrawShadowText(bitmap, x, y, RIGHT_W - 24, 18, "Dependencies: #{deps.length}", BLUE, SHADOW)
+          draw_plain_text(bitmap, x, y, RIGHT_W - 24, 18, "Dependencies: #{deps.length}", BLUE)
         else
           mods = Array(row["mods"])
           bitmap.font.size = 16 rescue nil
@@ -2558,73 +2682,6 @@ module Reloaded
         return open_spritepack_menu if spritepack_entry_row?(row)
         return show_core_update_status(row) if core_entry_row?(row)
         row["kind"] == "profile" ? import_profile(row, true) : download_mod(row, false)
-      end
-
-      def open_spritepack_menu
-        unless defined?(Reloaded::ModBrowser)
-          show_message("Spritepack downloads are not available.")
-          return
-        end
-        choice = show_message("Spritepacks", ["Latest", "All Files", "Back"])
-        case choice
-        when 0 then open_spritepack_file_menu("Latest", Reloaded::ModBrowser.spritepack_latest_files)
-        when 1 then open_spritepack_file_menu("All Files", Reloaded::ModBrowser.spritepack_all_files)
-        end
-      rescue Exception => e
-        Reloaded::Log.exception("Spritepack menu failed", e, channel: :mods) if defined?(Reloaded::Log)
-        show_message("Spritepack menu failed:\n#{e.message}")
-      end
-
-      def open_spritepack_file_menu(title, files)
-        rows = Array(files).compact
-        if rows.empty?
-          show_message("No spritepacks are configured.")
-          return
-        end
-        labels = rows.map { |file| file["name"].to_s }
-        labels << "Back"
-        choice = show_message(title, labels)
-        file = rows[choice]
-        return unless file
-        confirm_spritepack_download(file)
-      end
-
-      def confirm_spritepack_download(file)
-        name = file["name"].to_s
-        url = file["url"].to_s.strip
-        if url.empty?
-          show_message("No download URL is configured for:\n#{name}\n\nEdit Reloaded/Spritepacks.json.")
-          return
-        end
-        choice = show_message(
-          "Download and extract #{name}?\n\nThis can take a while and will write sprite files into the game folder.",
-          ["Download", "Back"],
-          1
-        )
-        return unless choice == 0
-        show_message("Downloading #{name}...\nThe game may pause while the archive downloads and extracts.")
-        result = Reloaded::ModBrowser.download_spritepack(file)
-        if result[:success]
-          show_message("Spritepack installed:\n#{result[:name]}")
-        else
-          show_message(spritepack_failure_message(result))
-        end
-      rescue Exception => e
-        Reloaded::Log.exception("Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
-        show_message("Spritepack download failed:\n#{e.message}")
-      end
-
-      def spritepack_failure_message(result)
-        case result[:status]
-        when :missing_url
-          "No download URL is configured for:\n#{result[:name]}\n\nEdit Reloaded/Spritepacks.json."
-        when :download_failed
-          "Spritepack download failed.\nCheck your internet connection and the URL."
-        when :extract_failed
-          "Spritepack downloaded, but extraction failed.\nConfirm REQUIRED_BY_INSTALLER_UPDATER/7z.exe exists."
-        else
-          "Spritepack install failed.\n#{result[:error]}"
-        end
       end
 
       def open_browser_patch_notes_menu(row)
@@ -2982,11 +3039,81 @@ module Reloaded
       def installed_rows
         rows = Reloaded::ModManager.mod_rows rescue []
         if defined?(Reloaded::ModManager) && Reloaded::ModManager.respond_to?(:core_row)
-          rows = [Reloaded::ModManager.core_row] + rows
+          protected_rows = [Reloaded::ModManager.core_row]
+          spritepack = spritepack_installed_row
+          protected_rows << spritepack if spritepack
+          rows = protected_rows + rows
         end
         rows
       rescue
         []
+      end
+
+      def spritepack_installed_row
+        entry = defined?(Reloaded::ModBrowser) ? Reloaded::ModBrowser.spritepack_entry : nil
+        {
+          :id => spritepack_entry_id,
+          :game => "hoenn",
+          :name => entry ? entry["name"].to_s : "Spritepacks",
+          :version => entry ? entry["latest_version"].to_s : "",
+          :authors => entry ? Array(entry["authors"]) : ["Hoenn Reloaded"],
+          :description => entry ? entry["description"].to_s : "Download Hoenn Reloaded spritepacks.",
+          :source => :reloaded_spritepacks,
+          :folder_path => Reloaded::ModBrowser::SPRITEPACK_CONFIG_PATH,
+          :manifest_path => Reloaded::ModBrowser::SPRITEPACK_CONFIG_PATH,
+          :enabled => true,
+          :profile_enabled => true,
+          :profile_disabled => false,
+          :loaded => true,
+          :status => :ok,
+          :tags => entry ? Array(entry["tags"]) : ["Spritepacks"],
+          :system_tags => [],
+          :dependencies => [],
+          :incompatibilities => [],
+          :warnings => [],
+          :errors => [],
+          :scripts_loaded => 0,
+          :settings_count => 0,
+          :has_settings => false,
+          :moddev => false,
+          :featured => true,
+          :special_entry => true,
+          :virtual => true,
+          :protected => true,
+          :spritepack_entry => true
+        }
+      rescue
+        {
+          :id => spritepack_entry_id,
+          :game => "hoenn",
+          :name => "Spritepacks",
+          :version => "",
+          :authors => ["Hoenn Reloaded"],
+          :description => "Download Hoenn Reloaded spritepacks.",
+          :source => :reloaded_spritepacks,
+          :folder_path => nil,
+          :manifest_path => nil,
+          :enabled => true,
+          :profile_enabled => true,
+          :profile_disabled => false,
+          :loaded => true,
+          :status => :ok,
+          :tags => ["Spritepacks"],
+          :system_tags => [],
+          :dependencies => [],
+          :incompatibilities => [],
+          :warnings => [],
+          :errors => [],
+          :scripts_loaded => 0,
+          :settings_count => 0,
+          :has_settings => false,
+          :moddev => false,
+          :featured => true,
+          :special_entry => true,
+          :virtual => true,
+          :protected => true,
+          :spritepack_entry => true
+        }
       end
 
       def ordered_for_load_mode(rows)
@@ -3028,11 +3155,11 @@ module Reloaded
         pbDrawShadowText(bitmap, MARGIN, 5, -1, 24, "Reloaded Mod Manager", WHITE, SHADOW)
         apply_ui_font(bitmap)
         bitmap.font.size = 12 rescue nil
-        pbDrawShadowText(bitmap, SCREEN_W - MARGIN - 3, 0, -1, 14, @rows.length.to_s, GRAY, SHADOW, 1)
+        pbDrawTextPositions(bitmap, [[@rows.length.to_s, SCREEN_W - MARGIN - 3, 0, 2, GRAY, Color.new(0, 0, 0, 0)]])
         pbDrawTextPositions(bitmap, [[browser_sync_status_text, SCREEN_W - MARGIN - 23, 13, 2, DIM, Color.new(0, 0, 0, 0)]])
         bitmap.font.size = 12 rescue nil
         title_text = @load_order_mode ? "Load Order" : "Filter (Z): #{filter_label}"
-        pbDrawShadowText(bitmap, 176, 9, 168, 14, title_text, BLUE, SHADOW, 1)
+        draw_plain_text(bitmap, 176, 9, 168, 14, title_text, BLUE, 1)
       end
 
       def draw_left
@@ -3090,7 +3217,7 @@ module Reloaded
                   else
                     text_color_for_status(row[:status])
                   end
-          pbDrawShadowText(bitmap, 25, y, LEFT_W - 38, ROW_H, name, color, SHADOW)
+          draw_plain_text(bitmap, 25, y - 6, LEFT_W - 38, ROW_H, name, color)
         end
 
         pbDrawShadowText(bitmap, LEFT_W / 2 - 10, LIST_Y - 12, 20, 12, "^", GRAY, SHADOW, 1) if @scroll > 0
@@ -3122,12 +3249,16 @@ module Reloaded
         authors = Array(row[:authors]).join(", ")
         pbDrawTextPositions(bitmap, [["by #{authors.empty? ? 'Unknown' : authors}", x, y - 7, 0, GRAY, Color.new(0, 0, 0, 0)]])
         y += 16
-        pbDrawTextPositions(bitmap, [["v#{row[:version]}", x, y - 9, 0, GRAY, Color.new(0, 0, 0, 0)]])
-        y += 10
-        enabled_label = row[:enabled] ? "Enabled" : "Disabled"
-        enabled_color = row[:enabled] ? GREEN : RED
-        pbDrawTextPositions(bitmap, [[enabled_label, x, y - 5, 0, enabled_color, Color.new(0, 0, 0, 0)]])
-        y += 14
+        if spritepack_entry_row?(row)
+          y = draw_spritepack_status_rows(bitmap, x, y)
+        else
+          pbDrawTextPositions(bitmap, [["v#{row[:version]}", x, y - 9, 0, GRAY, Color.new(0, 0, 0, 0)]])
+          y += 10
+          enabled_label = row[:enabled] ? "Enabled" : "Disabled"
+          enabled_color = row[:enabled] ? GREEN : RED
+          pbDrawTextPositions(bitmap, [[enabled_label, x, y - 5, 0, enabled_color, Color.new(0, 0, 0, 0)]])
+          y += 14
+        end
 
         y = draw_tags(bitmap, x, y + 2, row)
         bitmap.fill_rect(x, y, RIGHT_W - 24, 1, PANEL_BORDER)
@@ -3168,6 +3299,29 @@ module Reloaded
 
         draw_dependency_summary(bitmap, row)
         draw_panel_hint(bitmap, panel_hint_text, RIGHT_W, CONTENT_H, 90)
+      end
+
+      def draw_spritepack_status_rows(bitmap, x, y)
+        full = defined?(Reloaded::ModBrowser) ? Reloaded::ModBrowser.spritepack_full_file : nil
+        latest = defined?(Reloaded::ModBrowser) ? Reloaded::ModBrowser.spritepack_latest_file : nil
+        full_installed = spritepack_file_installed?(full)
+        latest_installed = spritepack_file_installed?(latest)
+        pbDrawTextPositions(bitmap, [["Latest Full - #{full_installed ? 'Installed' : 'Not Installed'}", x, y - 9, 0, full_installed ? GREEN : RED, Color.new(0, 0, 0, 0)]])
+        y += 10
+        pbDrawTextPositions(bitmap, [["Latest Pack - #{latest_installed ? 'Installed' : 'Not Installed'}", x, y - 5, 0, latest_installed ? GREEN : RED, Color.new(0, 0, 0, 0)]])
+        y + 14
+      rescue
+        pbDrawTextPositions(bitmap, [["Latest Full - Not Installed", x, y - 9, 0, RED, Color.new(0, 0, 0, 0)]])
+        y += 10
+        pbDrawTextPositions(bitmap, [["Latest Pack - Not Installed", x, y - 5, 0, RED, Color.new(0, 0, 0, 0)]])
+        y + 14
+      end
+
+      def spritepack_file_installed?(file)
+        return false unless file && defined?(Reloaded::ModBrowser)
+        Reloaded::ModBrowser.spritepack_installed?(file)
+      rescue
+        false
       end
 
       def draw_tags(bitmap, x, y, row)
@@ -3228,7 +3382,7 @@ module Reloaded
         unless deps.empty?
           bad = deps.select { |entry| entry[:status] != :ok }
           bitmap.font.size = 16 rescue nil
-          pbDrawShadowText(bitmap, x, y, RIGHT_W - 24, 18, "Dependencies: #{deps.length}#{bad.empty? ? '' : " (#{bad.length} issue(s))"}", BLUE, SHADOW)
+          draw_plain_text(bitmap, x, y, RIGHT_W - 24, 18, "Dependencies: #{deps.length}#{bad.empty? ? '' : " (#{bad.length} issue(s))"}", BLUE)
           y += 18
         end
         unless conflicts.empty?
@@ -3588,6 +3742,10 @@ module Reloaded
 
       def open_action_menu(row)
         return unless row
+        if spritepack_entry_row?(row)
+          open_spritepack_menu
+          return
+        end
         if protected_entry_row?(row)
           choices = update_available?(row) ? ["Update", "Update Status"] : ["Check Updates"]
           choices << "Patch Notes" unless installed_changelog_url(row).empty?
@@ -4279,6 +4437,7 @@ module Reloaded
         Reloaded::ModBrowser.refresh(fetch_remote: true) if defined?(Reloaded::ModBrowser)
         reload_after_profile_change
       rescue Exception => e
+        raise if e.is_a?(SystemExit)
         Reloaded::Log.exception("Failed to open Manager Editor", e, channel: :mods) if defined?(Reloaded::Log)
         show_message("Could not open Manager Editor:\n#{e.message}")
       end

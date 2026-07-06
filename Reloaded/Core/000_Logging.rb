@@ -397,7 +397,10 @@ module Reloaded
         text = value.to_s.gsub("\\", "/")
         game_root = File.expand_path(GAME_ROOT).gsub("\\", "/")
         reloaded_root = File.expand_path(ROOT).gsub("\\", "/")
-        [[game_root, ""], [reloaded_root, "/Reloaded"]].each do |root, replacement|
+        temp_roots = [ENV["TEMP"], ENV["TMP"]].compact.map { |path| File.expand_path(path).gsub("\\", "/") }.uniq
+        replacements = [[game_root, ""], [reloaded_root, "/Reloaded"]]
+        temp_roots.each { |root| replacements << [root, "/Temp"] }
+        replacements.each do |root, replacement|
           next if root.empty?
           text = text.gsub(/#{Regexp.escape(root)}(?=\/|\z)/i, replacement)
         end

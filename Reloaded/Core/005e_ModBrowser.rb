@@ -37,6 +37,7 @@ module Reloaded
     CORE_HOMEPAGE_URL = "https://github.com/Stonewallxx/Hoenn-Reloaded"
     SPRITEPACK_CONFIG_URL = "https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/main/Reloaded/Spritepacks.json"
     SPRITEPACK_CONFIG_PATH = File.join(ROOT, "Spritepacks.json")
+    SPRITEPACK_INSTALL_STATE_PATH = File.join(GAME_ROOT, "Mods", "Reloaded", "SpritepacksInstalled.json")
     NETWORK_TIMEOUT_SECONDS = 8
 
     SOURCE_VERSION = 1
@@ -348,25 +349,63 @@ module Reloaded
         name = item["name"].to_s.empty? ? "Spritepack" : item["name"].to_s
         url = item["url"].to_s.strip
         return { :success => false, :status => :missing_url, :name => name } if url.empty?
-        filename = "spritepack_#{safe_filename(item["id"].to_s.empty? ? name : item["id"])}_#{Time.now.to_i}.zip"
+        filename = "spritepack_#{safe_filename(item["id"].to_s.empty? ? name : item["id"])}_#{Time.now.to_i}#{spritepack_archive_extension(url)}"
         archive = File.join(temp_root, filename)
-        unless download_file(url, archive, min_bytes: 1024)
+        log("Spritepack download requested: name=#{name} url=#{url} archive=#{relative_game_path(archive)}")
+        unless download_file(url, archive, min_bytes: 1024, label: name)
           File.delete(archive) rescue nil
-          log("Spritepack download failed: #{name}", :error)
-          return { :success => false, :status => :download_failed, :name => name }
+          log("Spritepack download failed: #{name} url=#{url}", :error)
+          return { :success => false, :status => :download_failed, :name => name, :url => url }
         end
         destination = spritepack_extract_destination(item)
+        log("Spritepack archive downloaded: name=#{name} bytes=#{File.size(archive) rescue 0} destination=#{relative_game_path(destination)}")
         unless extract_archive(archive, destination)
           File.delete(archive) rescue nil
-          return { :success => false, :status => :extract_failed, :name => name }
+          return { :success => false, :status => :extract_failed, :name => name, :url => url }
         end
         File.delete(archive) rescue nil
+        record_spritepack_installed(item, destination)
         log("Installed spritepack #{name} to #{relative_game_path(destination)}")
         { :success => true, :status => :ok, :name => name, :destination => destination }
       rescue Exception => e
         File.delete(archive) rescue nil if archive
         Reloaded::Log.exception("Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
         { :success => false, :status => :error, :name => name.to_s, :error => e.message }
+      end
+
+      def mark_spritepack_installed(file, destination = nil)
+        item = normalize_spritepack_file(file, 0)
+        name = item["name"].to_s.empty? ? "Spritepack" : item["name"].to_s
+        destination ||= spritepack_extract_destination(item)
+        summary = {
+          :success => true,
+          :manual => true,
+          :total => 0,
+          :copied => 0,
+          :skipped => 0,
+          :failed => 0,
+          :elapsed => 0.0
+        }
+        record_spritepack_installed(item, destination, summary)
+        log("Marked spritepack installed manually: #{name} destination=#{relative_game_path(destination)}")
+        { :success => true, :status => :ok, :name => name, :destination => destination, :manual => true }
+      rescue Exception => e
+        Reloaded::Log.exception("Could not mark spritepack installed", e, channel: :mods) if defined?(Reloaded::Log)
+        { :success => false, :status => :error, :name => name.to_s, :error => e.message }
+      end
+
+      def spritepack_installed?(file)
+        item = normalize_spritepack_file(file, 0)
+        id = item["id"].to_s
+        return false if id.empty?
+        records = spritepack_install_records
+        record = records[id]
+        return true if spritepack_install_record_matches?(record, item)
+        return false if truthy?(item["full"])
+        installed_full = records.values.find { |candidate| truthy?(candidate["full"]) }
+        spritepack_full_contains_pack?(installed_full, item)
+      rescue
+        false
       end
 
       def version_sort_key(version)
@@ -810,6 +849,72 @@ module Reloaded
         (((year * 10_000 + month * 100 + day) * 100 + hour) * 100 + minute) * 100 + second
       end
 
+      def spritepack_install_records
+        return {} unless File.exist?(SPRITEPACK_INSTALL_STATE_PATH)
+        data = parse_json_file(SPRITEPACK_INSTALL_STATE_PATH)
+        files = data.is_a?(Hash) ? data["files"] : {}
+        files.is_a?(Hash) ? files : {}
+      rescue
+        {}
+      end
+
+      def record_spritepack_installed(item, destination, import = nil)
+        records = spritepack_install_records
+        id = item["id"].to_s
+        return if id.empty?
+        import ||= {}
+        records[id] = {
+          "id" => id,
+          "name" => item["name"].to_s,
+          "url" => item["url"].to_s,
+          "updated_at" => item["updated_at"].to_s,
+          "full" => truthy?(item["full"]),
+          "manual" => import[:manual] ? true : false,
+          "files_total" => import[:total].to_i,
+          "files_copied" => import[:copied].to_i,
+          "files_skipped" => import[:skipped].to_i,
+          "files_failed" => import[:failed].to_i,
+          "import_elapsed_seconds" => format("%.2f", import[:elapsed].to_f),
+          "installed_at" => Time.now.strftime("%Y-%m-%d %H:%M:%S %z"),
+          "destination" => relative_game_path(destination)
+        }
+        ensure_directory(File.dirname(SPRITEPACK_INSTALL_STATE_PATH))
+        File.open(SPRITEPACK_INSTALL_STATE_PATH, "w") do |file|
+          file.write(JSON.generate({ "version" => 1, "files" => records }))
+        end
+      rescue Exception => e
+        log("Could not update Spritepack install state: #{e.class}: #{e.message}", :warning)
+      end
+
+      def spritepack_install_record_matches?(record, item)
+        return false unless record
+        record["url"].to_s == item["url"].to_s && record["updated_at"].to_s == item["updated_at"].to_s
+      rescue
+        false
+      end
+
+      def spritepack_full_contains_pack?(full_record, pack)
+        return false unless full_record && pack
+        numbers = spritepack_identity_numbers(pack)
+        return false if numbers.empty?
+        haystack = [
+          full_record["name"],
+          full_record["id"],
+          full_record["version"],
+          full_record["url"],
+          full_record["updated_at"]
+        ].map(&:to_s).join(" ")
+        numbers.any? { |number| haystack.match?(/(?:\D|\A)#{Regexp.escape(number)}(?:\D|\z)/) }
+      rescue
+        false
+      end
+
+      def spritepack_identity_numbers(file)
+        [file["version"], file["name"], file["id"], file["url"]].map(&:to_s).join(" ").scan(/\d+/).uniq
+      rescue
+        []
+      end
+
       def spritepack_extract_destination(file)
         extract_to = file["extract_to"].to_s.strip
         extract_to = spritepack_config["extract_to"].to_s.strip if extract_to.empty?
@@ -820,6 +925,13 @@ module Reloaded
         raise "Spritepack extract path is outside the game folder." unless target == root || target.start_with?(root + "/")
         ensure_directory(destination)
         destination
+      end
+
+      def spritepack_archive_extension(url)
+        path = URI.parse(url.to_s).path rescue url.to_s
+        ext = File.extname(path.to_s).downcase
+        return ext if [".zip", ".rar", ".7z"].include?(ext)
+        ".zip"
       end
 
       def download_entry(entry)
@@ -859,17 +971,227 @@ module Reloaded
         map
       end
 
-      def download_file(url, destination, min_bytes: 1)
+      def download_file(url, destination, min_bytes: 1, label: nil)
         File.delete(destination) rescue nil
+        log("Download start: url=#{url} destination=#{relative_game_path(destination)} min_bytes=#{min_bytes}")
         begin
           pbDownloadToFile(url, destination)
         rescue Exception => e
           log("pbDownloadToFile failed for #{url}: #{e.class}: #{e}", :warning)
         end
+        if valid_download?(destination, min_bytes)
+          log("Download completed with pbDownloadToFile: #{relative_game_path(destination)} bytes=#{File.size(destination) rescue 0}")
+          return true
+        end
+        pb_size = File.exist?(destination) ? File.size(destination).to_i : 0
+        log("pbDownloadToFile did not produce a valid file for #{url}: exists=#{File.exist?(destination)} bytes=#{pb_size}", :warning)
+        File.delete(destination) rescue nil
+        ok = download_file_with_powershell(url, destination, min_bytes: min_bytes, label: label)
+        return true if ok
+        ok = download_file_with_http_lite(url, destination, min_bytes: min_bytes)
+        return true if ok
+        if defined?(Net::HTTP) && defined?(URI)
+          ok = download_file_with_net_http(url, destination, min_bytes: min_bytes)
+          return true if ok
+        else
+          log("Net::HTTP is not available for download fallback", :warning)
+        end
         valid_download?(destination, min_bytes)
       rescue Exception => e
         Reloaded::Log.exception("Download command failed", e, channel: :mods) if defined?(Reloaded::Log)
         false
+      end
+
+      def download_file_with_powershell(url, destination, min_bytes: 1, label: nil)
+        powershell = powershell_path
+        unless powershell
+          log("PowerShell downloader is not available", :warning)
+          return false
+        end
+        ensure_directory(File.dirname(destination))
+        script = File.join(temp_root, "download_#{Time.now.to_i}_#{rand(100000)}.ps1")
+        error_file = "#{script}.error.txt"
+        display = label.to_s.strip
+        display = File.basename(destination.to_s) if display.empty?
+        ps = [
+          "$ErrorActionPreference = 'Stop'",
+          "try {",
+          "  $title = 'Downloading #{powershell_literal(display)}...'",
+          "  try { $host.UI.RawUI.WindowTitle = $title } catch {}",
+          "  Write-Host $title",
+          "  Write-Host ''",
+          "  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12",
+          "  $wc = New-Object Net.WebClient",
+          "  $wc.Headers['User-Agent'] = 'Hoenn Reloaded Mod Browser'",
+          "  $wc.DownloadFile('#{powershell_literal(url)}', '#{powershell_literal(destination)}')",
+          "  exit 0",
+          "} catch {",
+          "  [IO.File]::WriteAllText('#{powershell_literal(error_file)}', $_.Exception.ToString())",
+          "  exit 1",
+          "}"
+        ].join("\n")
+        File.open(script, "wb") { |file| file.write(ps) }
+        log("PowerShell download request: #{url}")
+        ok = system("\"#{powershell}\" -NoProfile -ExecutionPolicy Bypass -File \"#{script}\"")
+        File.delete(script) rescue nil
+        if !ok && File.exist?(error_file)
+          log("PowerShell download error: #{File.read(error_file).to_s[0, 700]}", :error)
+        end
+        File.delete(error_file) rescue nil
+        size = File.exist?(destination) ? File.size(destination).to_i : 0
+        valid = ok && size >= min_bytes.to_i
+        log("PowerShell download wrote #{relative_game_path(destination)} exit_ok=#{ok} bytes=#{size} ok=#{valid}")
+        File.delete(destination) rescue nil unless valid
+        valid
+      rescue Exception => e
+        File.delete(script) rescue nil if defined?(script) && script
+        File.delete(error_file) rescue nil if defined?(error_file) && error_file
+        log("PowerShell download failed for #{url}: #{e.class}: #{e.message}", :error)
+        false
+      end
+
+      def powershell_path
+        root = ENV["SystemRoot"].to_s
+        candidates = []
+        candidates << File.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") unless root.empty?
+        candidates << "powershell.exe"
+        candidates.find { |path| path == "powershell.exe" || File.exist?(path) }
+      end
+
+      def powershell_literal(value)
+        value.to_s.gsub("'", "''")
+      end
+
+      def download_file_with_http_lite(url, destination, min_bytes: 1, redirect_limit: 6)
+        unless defined?(HTTPLite)
+          log("HTTPLite is not available for download fallback", :warning)
+          return false
+        end
+        current = url.to_s
+        redirects = 0
+        loop do
+          log("HTTPLite download request: #{current}")
+          response = HTTPLite.get(current, download_headers) rescue nil
+          unless response.is_a?(Hash)
+            log("HTTPLite download returned no response for #{current}", :warning)
+            return false
+          end
+          status = response[:status].to_i
+          log("HTTPLite download response: status=#{status} keys=#{response.keys.map(&:to_s).join(',')}")
+          if [301, 302, 303, 307, 308].include?(status)
+            location = http_response_location(response)
+            log("HTTPLite download redirect #{status}: #{location}")
+            return false if location.empty?
+            redirects += 1
+            if redirects > redirect_limit
+              log("HTTPLite download exceeded redirect limit for #{url}", :error)
+              return false
+            end
+            current = join_url(current, location)
+            next
+          end
+          unless status == 200
+            log("HTTPLite download failed for #{current}: HTTP #{status}", :warning)
+            return false
+          end
+          body = response[:body].to_s
+          ensure_directory(File.dirname(destination))
+          File.open(destination, "wb") { |file| file.write(body) }
+          size = File.exist?(destination) ? File.size(destination).to_i : 0
+          ok = size >= min_bytes.to_i
+          log("HTTPLite download wrote #{relative_game_path(destination)} bytes=#{size} ok=#{ok}")
+          File.delete(destination) rescue nil unless ok
+          return ok
+        end
+      rescue Exception => e
+        log("HTTPLite download failed for #{url}: #{e.class}: #{e.message}", :error)
+        false
+      end
+
+      def download_file_with_net_http(url, destination, min_bytes: 1, redirect_limit: 6)
+        current = url.to_s
+        redirects = 0
+        loop do
+          uri = URI.parse(current)
+          request = Net::HTTP::Get.new(uri)
+          request["Cache-Control"] = "no-cache"
+          request["Pragma"] = "no-cache"
+          request["User-Agent"] = "Hoenn Reloaded Mod Browser"
+          log("Net::HTTP download request: #{current}")
+          response = nil
+          Net::HTTP.start(
+            uri.host,
+            uri.port,
+            :use_ssl => uri.scheme == "https",
+            :open_timeout => NETWORK_TIMEOUT_SECONDS,
+            :read_timeout => NETWORK_TIMEOUT_SECONDS
+          ) do |http|
+            http.request(request) do |res|
+              response = res
+              code = res.code.to_i
+              if code == 200
+                ensure_directory(File.dirname(destination))
+                File.open(destination, "wb") { |file| res.read_body { |chunk| file.write(chunk) } }
+              end
+            end
+          end
+          unless response
+            log("Net::HTTP download returned no response for #{current}", :error)
+            return false
+          end
+          code = response.code.to_i
+          if [301, 302, 303, 307, 308].include?(code)
+            location = response["location"].to_s
+            log("Net::HTTP download redirect #{code}: #{location}")
+            return false if location.empty?
+            redirects += 1
+            if redirects > redirect_limit
+              log("Net::HTTP download exceeded redirect limit for #{url}", :error)
+              return false
+            end
+            current = URI.join(current, location).to_s rescue location
+            next
+          end
+          unless code == 200
+            log("Net::HTTP download failed for #{current}: HTTP #{code}", :error)
+            return false
+          end
+          size = File.exist?(destination) ? File.size(destination).to_i : 0
+          ok = size >= min_bytes.to_i
+          log("Net::HTTP download wrote #{relative_game_path(destination)} bytes=#{size} ok=#{ok}")
+          return ok
+        end
+      rescue Exception => e
+        log("Net::HTTP download failed for #{url}: #{e.class}: #{e.message}", :error)
+        false
+      end
+
+      def download_headers
+        {
+          "Cache-Control" => "no-cache",
+          "Proxy-Connection" => "Close",
+          "Pragma" => "no-cache",
+          "User-Agent" => "Hoenn Reloaded Mod Browser"
+        }
+      end
+
+      def http_response_location(response)
+        direct = response[:location] || response["location"] || response[:Location] || response["Location"]
+        return direct.to_s if direct && !direct.to_s.empty?
+        headers = response[:headers] || response["headers"] || response[:header] || response["header"]
+        if headers.respond_to?(:[])
+          value = headers[:location] || headers["location"] || headers[:Location] || headers["Location"]
+          return value.to_s if value && !value.to_s.empty?
+        end
+        ""
+      end
+
+      def join_url(base, location)
+        return URI.join(base, location).to_s if defined?(URI)
+        return location if location.to_s =~ /\Ahttps?:\/\//i
+        location
+      rescue
+        location.to_s
       end
 
       def fetch_url(url, cache_bust: false)
@@ -917,16 +1239,20 @@ module Reloaded
 
       def extract_archive(archive_path, destination)
         sevenz = File.expand_path("./REQUIRED_BY_INSTALLER_UPDATER/7z.exe")
+        started_at = Time.now
+        log("Archive extraction start: archive=#{relative_game_path(archive_path)} bytes=#{File.size(archive_path) rescue 0} destination=#{relative_game_path(destination)} sevenz=#{relative_game_path(sevenz)}")
         ok = if File.exist?(sevenz)
-             system("\"#{sevenz}\" x -y \"-o#{destination}\" \"#{archive_path}\"")
+             system("\"#{sevenz}\" x -y -mmt=on -bsp1 -bso1 \"-o#{destination}\" \"#{archive_path}\"")
              else
               log("Archive extraction failed: 7z.exe was not found", :error)
               false
              end
+        elapsed = Time.now - started_at
         unless ok
-          log("Archive extraction failed: #{archive_path}", :error)
+          log("Archive extraction failed: archive=#{relative_game_path(archive_path)} destination=#{relative_game_path(destination)} elapsed=#{format('%.2f', elapsed)}s", :error)
           return false
         end
+        log("Archive extraction succeeded: archive=#{relative_game_path(archive_path)} destination=#{relative_game_path(destination)} elapsed=#{format('%.2f', elapsed)}s")
         true
       end
 
@@ -1324,9 +1650,10 @@ module Reloaded
         root = normalize_path(File.expand_path(GAME_ROOT))
         target = normalize_path(File.expand_path(path.to_s))
         return "." if target == root
-        target.start_with?(root + "/") ? target[(root.length + 1)..-1] : target
+        return target[(root.length + 1)..-1] if target.start_with?(root + "/")
+        File.basename(target)
       rescue
-        path.to_s
+        File.basename(path.to_s)
       end
 
       def log(message, level = :info)

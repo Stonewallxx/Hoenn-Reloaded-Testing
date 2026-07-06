@@ -20,10 +20,9 @@ It is responsible for finding downloadable mods, resolving missing profile
 mods, downloading archives, and installing mod folders into `Mods/`.
 
 The Mod Manager also injects protected non-mod entries for `Hoenn Reloaded` and
-`Spritepacks`. They are pinned above normal mods in the installed list and
-browser. These entries are read-only as normal mods: players can use their
-custom actions, but they cannot be disabled, reordered, downloaded, or
-uninstalled as normal mods.
+`Spritepacks`. They are pinned above normal mods in the installed list. These
+entries are read-only as normal mods: players can use their custom actions, but
+they cannot be disabled, reordered, downloaded, or uninstalled as normal mods.
 
 ## GitHub Source
 
@@ -65,17 +64,18 @@ Mod actions:
 - `Download & Enable`
 - `Versions`
 
-The pinned `Hoenn Reloaded` browser entry shows `Update` when a public update is
-available, plus `Check Updates` or `Update Status`, `Patch Notes`, `File A Bug
-Report`, and `Open Mods Folder` instead of download actions. `Update` confirms,
-runs `Hoenn Reloaded Installer.bat`, and closes the game immediately. `Patch
-Notes` opens a submenu with `View` and `Open`. `File A Bug Report` exports
+The pinned `Hoenn Reloaded` installed-list entry shows `Update` when a public
+update is available, plus `Check Updates` or `Update Status`, `Patch Notes`,
+`File A Bug Report`, and `Open Mods Folder` instead of normal mod actions.
+`Update` confirms, runs `Hoenn Reloaded Installer.bat`, and closes the game
+immediately. `Patch Notes` opens a submenu with `View` and `Open`. `File A Bug
+Report` exports
 `LatestBugReport.txt` with the same paste upload flow as
 `Tools -> Log Files -> Export`, copies the exported URL as a Discord-ready
 `[Bug Report](url)` link, and opens the Hoenn Reloaded bug-report Discord
 thread.
 
-The pinned `Spritepacks` browser entry opens a downloader menu:
+The pinned `Spritepacks` installed-list entry opens a downloader menu:
 
 - `Latest`
   - `Full Spritepack`
@@ -89,6 +89,10 @@ Spritepack downloads read the public GitHub copy of
 online fetch fails. Downloads use the selected URL, download a zip to a
 temporary file, extract it into the game folder with
 `REQUIRED_BY_INSTALLER_UPDATER/7z.exe`, then remove the temporary zip.
+Successful installs update a local marker at
+`Mods/Reloaded/SpritepacksInstalled.json`, which lets the protected installed
+list entry show whether the current Full Spritepack and latest normal
+spritepack are installed.
 
 Published profile actions:
 

@@ -6,6 +6,7 @@
 #
 # Responsibilities:
 #   - Add Mod Manager to the title menu above Options.
+#   - Place Mystery Gift below Options when a save file is available.
 #   - Open the in-game Reloaded Mod Manager from the title screen.
 #   - Register the title menu replacement with the Reloaded patch logger.
 #
@@ -82,7 +83,6 @@ if defined?(PokemonLoadScreen)
 
       if show_continue
         commands[cmd_continue = commands.length] = "#{@selected_file}"
-        commands[cmd_mystery_gift = commands.length] = _INTL("Mystery Gift")
       end
 
       commands[cmd_new_game = commands.length] = _INTL("New Game")
@@ -91,6 +91,7 @@ if defined?(PokemonLoadScreen)
       end
       commands[cmd_mod_manager = commands.length] = _INTL(Reloaded::TitleMenu::MOD_MANAGER_LABEL)
       commands[cmd_options = commands.length] = _INTL("Options")
+      commands[cmd_mystery_gift = commands.length] = _INTL("Mystery Gift") if show_continue
       commands[cmd_language = commands.length] = _INTL("Language") if Settings::LANGUAGES[Settings::GAME_ID].length >= 2
 
       cmd_links = {}
