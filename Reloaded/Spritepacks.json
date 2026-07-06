@@ -1,0 +1,28 @@
+{
+  "description": "Spritepacks for Hoenn Reloaded.
+Includes Pokemon, trainer, overworld, and custom battler sprite files.",
+  "extract_to": ".",
+  "files": [
+    {
+      "id": "full_spritepack_1_126",
+      "name": "Full Spritepack 1-126",
+      "url": "https://github.com/Stonewallxx/Hoenn-Reloaded/releases/download/Spritepacks/Full.Spritepack.1-126.May.2026.rar",
+      "updated_at": "07-05-26 20:30:22",
+      "latest": true,
+      "full": true
+    },
+    {
+      "id": "spritepack_125_april_2026",
+      "name": "Spritepack 125 (April 2026)",
+      "url": "https://github.com/Stonewallxx/Hoenn-Reloaded/releases/download/Spritepacks/Spritepack.125.April.2026.zip",
+      "updated_at": "07-05-26 20:30:46"
+    },
+    {
+      "id": "spritepack_126_may_2026",
+      "name": "Spritepack 126 (May 2026)",
+      "url": "https://github.com/Stonewallxx/Hoenn-Reloaded/releases/download/Spritepacks/Spritepack.126.May.2026.rar",
+      "updated_at": "07-05-26 20:31:04",
+      "latest": true
+    }
+  ]
+}

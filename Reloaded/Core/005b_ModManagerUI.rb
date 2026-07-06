@@ -618,6 +618,10 @@ module Reloaded
         defined?(Reloaded::ModBrowser::CORE_ENTRY_ID) ? Reloaded::ModBrowser::CORE_ENTRY_ID : "hoenn_reloaded"
       end
 
+      def spritepack_entry_id
+        defined?(Reloaded::ModBrowser::SPRITEPACK_ENTRY_ID) ? Reloaded::ModBrowser::SPRITEPACK_ENTRY_ID : "spritepacks"
+      end
+
       def core_entry_row?(row)
         return false unless row
         id = (row[:id] rescue nil) || (row["id"] rescue nil)
@@ -625,9 +629,16 @@ module Reloaded
         !!((row[:core_entry] rescue nil) || (row["core_entry"] rescue nil))
       end
 
+      def spritepack_entry_row?(row)
+        return false unless row
+        id = (row[:id] rescue nil) || (row["id"] rescue nil)
+        return true if id.to_s == spritepack_entry_id
+        !!((row[:spritepack_entry] rescue nil) || (row["spritepack_entry"] rescue nil))
+      end
+
       def protected_entry_row?(row)
         return false unless row
-        core_entry_row?(row) || !!((row[:protected] rescue nil) || (row["protected"] rescue nil))
+        core_entry_row?(row) || spritepack_entry_row?(row) || !!((row[:protected] rescue nil) || (row["protected"] rescue nil))
       end
 
       def core_installed_version
@@ -2515,6 +2526,8 @@ module Reloaded
           when "Import Profile" then import_profile(row, false)
           when "Import & Enable Mods" then import_profile(row, true)
           end
+        elsif spritepack_entry_row?(row)
+          open_spritepack_menu
         elsif core_entry_row?(row)
           choices = browser_update_available?(row) ? ["Update", "Update Status"] : ["Check Updates"]
           choices << "Patch Notes" unless changelog_url(row).empty?
@@ -2542,8 +2555,76 @@ module Reloaded
 
       def quick_download(row)
         return unless row
+        return open_spritepack_menu if spritepack_entry_row?(row)
         return show_core_update_status(row) if core_entry_row?(row)
         row["kind"] == "profile" ? import_profile(row, true) : download_mod(row, false)
+      end
+
+      def open_spritepack_menu
+        unless defined?(Reloaded::ModBrowser)
+          show_message("Spritepack downloads are not available.")
+          return
+        end
+        choice = show_message("Spritepacks", ["Latest", "All Files", "Back"])
+        case choice
+        when 0 then open_spritepack_file_menu("Latest", Reloaded::ModBrowser.spritepack_latest_files)
+        when 1 then open_spritepack_file_menu("All Files", Reloaded::ModBrowser.spritepack_all_files)
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Spritepack menu failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Spritepack menu failed:\n#{e.message}")
+      end
+
+      def open_spritepack_file_menu(title, files)
+        rows = Array(files).compact
+        if rows.empty?
+          show_message("No spritepacks are configured.")
+          return
+        end
+        labels = rows.map { |file| file["name"].to_s }
+        labels << "Back"
+        choice = show_message(title, labels)
+        file = rows[choice]
+        return unless file
+        confirm_spritepack_download(file)
+      end
+
+      def confirm_spritepack_download(file)
+        name = file["name"].to_s
+        url = file["url"].to_s.strip
+        if url.empty?
+          show_message("No download URL is configured for:\n#{name}\n\nEdit Reloaded/Spritepacks.json.")
+          return
+        end
+        choice = show_message(
+          "Download and extract #{name}?\n\nThis can take a while and will write sprite files into the game folder.",
+          ["Download", "Back"],
+          1
+        )
+        return unless choice == 0
+        show_message("Downloading #{name}...\nThe game may pause while the archive downloads and extracts.")
+        result = Reloaded::ModBrowser.download_spritepack(file)
+        if result[:success]
+          show_message("Spritepack installed:\n#{result[:name]}")
+        else
+          show_message(spritepack_failure_message(result))
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Spritepack download failed:\n#{e.message}")
+      end
+
+      def spritepack_failure_message(result)
+        case result[:status]
+        when :missing_url
+          "No download URL is configured for:\n#{result[:name]}\n\nEdit Reloaded/Spritepacks.json."
+        when :download_failed
+          "Spritepack download failed.\nCheck your internet connection and the URL."
+        when :extract_failed
+          "Spritepack downloaded, but extraction failed.\nConfirm REQUIRED_BY_INSTALLER_UPDATER/7z.exe exists."
+        else
+          "Spritepack install failed.\n#{result[:error]}"
+        end
       end
 
       def open_browser_patch_notes_menu(row)

@@ -810,6 +810,27 @@ Mods and published profiles listed in browser indexes can be downloaded by
 profile imports and the in-game Browser page. Reloaded does not require local
 Browser or Publish folders for public source data.
 
+The protected `Spritepacks` browser entry reads its download list from the
+public GitHub copy first:
+
+```text
+https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/main/Reloaded/Spritepacks.json
+```
+
+If the online fetch fails, it falls back to the shipped local file:
+
+```text
+Reloaded/Spritepacks.json
+```
+
+`full: true` marks the Full Spritepack and keeps it at the top. `updated_at`
+uses `MM-DD-YY HH:MM:SS` and is the preferred newest-first sort value for
+normal packs. `latest: true` marks the newest non-full pack for the `Latest`
+submenu. Other packs appear under `All Files`, sorted newest-first by
+`updated_at`, then by `version` or the number in the name. Each entry needs a
+`name` and `url`; optional `extract_to` overrides the default game-root
+extraction target for that pack.
+
 See `Reloaded/Documentation/Manager.md` for the source and index formats.
 
 ## Publishing

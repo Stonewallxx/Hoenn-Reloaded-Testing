@@ -11,7 +11,7 @@ set "REPO_RAW=https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/main"
 set "BRANCH=main"
 set "SCRIPT_DIR=%~dp0"
 set "GAME_ROOT="
-set "FILES_PROTECTED=REQUIRED_BY_INSTALLER_UPDATER plus ignored/user-created files. Other tracked release files are updated."
+set "FILES_PROTECTED=REQUIRED_BY_INSTALLER_UPDATER, this installer, plus ignored/user-created files. Other tracked release files are updated."
 set "FILES_UPDATED=Not started"
 set "CLEANUP_STATUS=No temporary cleanup needed"
 
@@ -36,6 +36,7 @@ echo   - Replace tracked release files with the latest release branch files.
 echo.
 echo   Protected:
 echo   - REQUIRED_BY_INSTALLER_UPDATER is protected so bundled Git is not replaced while running.
+echo   - This installer is protected so it does not delete itself during update.
 echo   - Git ignored/user-created files are left alone by Git.
 echo   - Save data is not stored in this repo and is not changed by this tool.
 echo.
@@ -158,12 +159,12 @@ if %errorlevel% neq 0 (
 
 echo  [3/3] Applying update while protecting installer runtime...
 set "DELETE_LIST=%TEMP%\hr_installer_deleted_%RANDOM%.txt"
-"%MGIT%" diff --name-only --diff-filter=D HEAD origin/%BRANCH% -- . ":(exclude)REQUIRED_BY_INSTALLER_UPDATER/**" > "%DELETE_LIST%" 2>nul
+"%MGIT%" diff --name-only --diff-filter=D HEAD origin/%BRANCH% -- . ":(exclude)REQUIRED_BY_INSTALLER_UPDATER/**" ":(exclude)Hoenn Reloaded Installer.bat" > "%DELETE_LIST%" 2>nul
 if exist "%DELETE_LIST%" (
     for /f "usebackq delims=" %%F in ("%DELETE_LIST%") do if exist "%%F" erase /f /q "%%F"
     erase /f /q "%DELETE_LIST%" >nul 2>&1
 )
-"%MGIT%" checkout -f origin/%BRANCH% -- . ":(exclude)REQUIRED_BY_INSTALLER_UPDATER/**"
+"%MGIT%" checkout -f origin/%BRANCH% -- . ":(exclude)REQUIRED_BY_INSTALLER_UPDATER/**" ":(exclude)Hoenn Reloaded Installer.bat"
 if %errorlevel% neq 0 (
     echo.
     color 0C
@@ -178,7 +179,7 @@ if %errorlevel% neq 0 (
 )
 "%MGIT%" update-ref refs/heads/%BRANCH% origin/%BRANCH% >nul 2>&1
 "%MGIT%" symbolic-ref HEAD refs/heads/%BRANCH% >nul 2>&1
-set "FILES_UPDATED=Updated tracked files from %REPO_URL% branch %BRANCH%, excluding REQUIRED_BY_INSTALLER_UPDATER"
+set "FILES_UPDATED=Updated tracked files from %REPO_URL% branch %BRANCH%, excluding REQUIRED_BY_INSTALLER_UPDATER and this installer"
 
 :: ============================================================
 ::  Re-read version after update

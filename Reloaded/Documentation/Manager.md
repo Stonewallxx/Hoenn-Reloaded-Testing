@@ -19,11 +19,11 @@ Manager browser page.
 It is responsible for finding downloadable mods, resolving missing profile
 mods, downloading archives, and installing mod folders into `Mods/`.
 
-The Mod Manager also injects one protected non-mod entry for `Hoenn Reloaded`.
-It is pinned above normal mods in the installed list and browser. This entry is
-read-only: players can check update status and view the Hoenn Reloaded
-Patch Notes, but it cannot be disabled, reordered, downloaded, or uninstalled
-as a normal mod.
+The Mod Manager also injects protected non-mod entries for `Hoenn Reloaded` and
+`Spritepacks`. They are pinned above normal mods in the installed list and
+browser. These entries are read-only as normal mods: players can use their
+custom actions, but they cannot be disabled, reordered, downloaded, or
+uninstalled as normal mods.
 
 ## GitHub Source
 
@@ -74,6 +74,21 @@ Notes` opens a submenu with `View` and `Open`. `File A Bug Report` exports
 `Tools -> Log Files -> Export`, copies the exported URL as a Discord-ready
 `[Bug Report](url)` link, and opens the Hoenn Reloaded bug-report Discord
 thread.
+
+The pinned `Spritepacks` browser entry opens a downloader menu:
+
+- `Latest`
+  - `Full Spritepack`
+  - latest non-full spritepack
+- `All Files`
+  - `Full Spritepack`
+  - all configured spritepacks, newest first
+
+Spritepack downloads read the public GitHub copy of
+`Reloaded/Spritepacks.json` first, then fall back to the local file if the
+online fetch fails. Downloads use the selected URL, download a zip to a
+temporary file, extract it into the game folder with
+`REQUIRED_BY_INSTALLER_UPDATER/7z.exe`, then remove the temporary zip.
 
 Published profile actions:
 
@@ -410,6 +425,9 @@ Reloaded::ModBrowser.sources
 Reloaded::ModBrowser.entries
 Reloaded::ModBrowser.profile_entries
 Reloaded::ModBrowser.core_entry
+Reloaded::ModBrowser.spritepack_entry
+Reloaded::ModBrowser.spritepack_files
+Reloaded::ModBrowser.download_spritepack(Reloaded::ModBrowser.spritepack_files.first)
 Reloaded::ModBrowser.entry("example_mod")
 Reloaded::ModBrowser.entry_for("example_mod", "1.0.0")
 Reloaded::ModBrowser.resolve_mod_ids(["example_mod"])

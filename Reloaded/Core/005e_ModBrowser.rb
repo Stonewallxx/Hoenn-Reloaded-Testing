@@ -31,9 +31,12 @@ module Reloaded
     TOOL_DIR = File.join(GAME_ROOT, "Modders Tools")
     DEFAULT_GITHUB_INDEX_URL = "https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded-Mods/main/index.json"
     CORE_ENTRY_ID = "hoenn_reloaded"
+    SPRITEPACK_ENTRY_ID = "spritepacks"
     CORE_VERSION_URL = "https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/main/Reloaded/Version.md"
     CORE_CHANGELOG_PATH = "Reloaded/Changelog.md"
     CORE_HOMEPAGE_URL = "https://github.com/Stonewallxx/Hoenn-Reloaded"
+    SPRITEPACK_CONFIG_URL = "https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/main/Reloaded/Spritepacks.json"
+    SPRITEPACK_CONFIG_PATH = File.join(ROOT, "Spritepacks.json")
     NETWORK_TIMEOUT_SECONDS = 8
 
     SOURCE_VERSION = 1
@@ -46,6 +49,8 @@ module Reloaded
     @last_refresh_at = nil
     @last_remote_fetch_at = nil
     @last_refresh_remote = false
+    @spritepack_config_cache = nil
+    @spritepack_config_source = nil
     @booted = false
 
     class << self
@@ -65,10 +70,13 @@ module Reloaded
         @entries = {}
         @profile_entries = {}
         @source_statuses = {}
+        @spritepack_config_cache = nil
+        @spritepack_config_source = nil
         @last_refresh_at = Time.now rescue nil
         @last_refresh_remote = fetch_remote
         @sources.each { |source| load_source_index(source, fetch_remote: fetch_remote) if truthy?(source["enabled"]) }
         register_core_entry(fetch_remote: fetch_remote)
+        register_spritepack_entry(fetch_remote: fetch_remote)
         @entries
       rescue Exception => e
         Reloaded::Log.exception("Mod Browser refresh failed", e, channel: :mods) if defined?(Reloaded::Log)
@@ -124,6 +132,10 @@ module Reloaded
 
       def core_entry
         @entries[CORE_ENTRY_ID] || build_core_entry
+      end
+
+      def spritepack_entry
+        @entries[SPRITEPACK_ENTRY_ID] || build_spritepack_entry
       end
 
       def available_mod_ids
@@ -305,6 +317,56 @@ module Reloaded
         restore_install_backups(backups) if backups
         delete_tree(staging) if staging
         false
+      end
+
+      def spritepack_files(fetch_remote: false)
+        files = normalize_spritepack_files(spritepack_config(fetch_remote: fetch_remote)["files"])
+        files.empty? ? default_spritepack_files : files
+      end
+
+      def spritepack_latest_files
+        full = spritepack_full_file
+        latest = spritepack_latest_file
+        [full, latest].compact.uniq { |file| file["id"].to_s }
+      end
+
+      def spritepack_all_files
+        spritepack_files
+      end
+
+      def spritepack_full_file
+        spritepack_files.find { |file| truthy?(file["full"]) } || spritepack_files.first
+      end
+
+      def spritepack_latest_file
+        explicit = spritepack_files.find { |file| !truthy?(file["full"]) && truthy?(file["latest"]) }
+        explicit || spritepack_files.find { |file| !truthy?(file["full"]) }
+      end
+
+      def download_spritepack(file)
+        item = normalize_spritepack_file(file, 0)
+        name = item["name"].to_s.empty? ? "Spritepack" : item["name"].to_s
+        url = item["url"].to_s.strip
+        return { :success => false, :status => :missing_url, :name => name } if url.empty?
+        filename = "spritepack_#{safe_filename(item["id"].to_s.empty? ? name : item["id"])}_#{Time.now.to_i}.zip"
+        archive = File.join(temp_root, filename)
+        unless download_file(url, archive, min_bytes: 1024)
+          File.delete(archive) rescue nil
+          log("Spritepack download failed: #{name}", :error)
+          return { :success => false, :status => :download_failed, :name => name }
+        end
+        destination = spritepack_extract_destination(item)
+        unless extract_archive(archive, destination)
+          File.delete(archive) rescue nil
+          return { :success => false, :status => :extract_failed, :name => name }
+        end
+        File.delete(archive) rescue nil
+        log("Installed spritepack #{name} to #{relative_game_path(destination)}")
+        { :success => true, :status => :ok, :name => name, :destination => destination }
+      rescue Exception => e
+        File.delete(archive) rescue nil if archive
+        Reloaded::Log.exception("Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
+        { :success => false, :status => :error, :name => name.to_s, :error => e.message }
       end
 
       def version_sort_key(version)
@@ -497,6 +559,14 @@ module Reloaded
         Reloaded::Log.exception("Failed to register Hoenn Reloaded browser entry", e, channel: :mods) if defined?(Reloaded::Log)
       end
 
+      def register_spritepack_entry(fetch_remote: false)
+        item = build_spritepack_entry(fetch_remote: fetch_remote)
+        @entries[item["id"]] = item
+        @source_statuses["spritepacks"] ||= @spritepack_config_source || "local"
+      rescue Exception => e
+        Reloaded::Log.exception("Failed to register Spritepacks browser entry", e, channel: :mods) if defined?(Reloaded::Log)
+      end
+
       def build_core_entry(fetch_remote: false)
         current = current_reloaded_version
         latest = current
@@ -535,6 +605,38 @@ module Reloaded
           "virtual" => true,
           "protected" => true,
           "core_entry" => true
+        }
+      end
+
+      def build_spritepack_entry(fetch_remote: false)
+        config = spritepack_config(fetch_remote: fetch_remote)
+        files = normalize_spritepack_files(config["files"])
+        files = default_spritepack_files if files.empty?
+        latest = spritepack_latest_file
+        full = spritepack_full_file
+        {
+          "id" => SPRITEPACK_ENTRY_ID,
+          "kind" => "mod",
+          "name" => "Spritepacks",
+          "version" => latest ? latest["name"].to_s : "",
+          "latest_version" => latest ? latest["name"].to_s : "",
+          "authors" => ["Hoenn Reloaded"],
+          "description" => config["description"].to_s,
+          "tags" => ["Spritepacks"],
+          "dependencies" => [],
+          "download_url" => "",
+          "versions" => [],
+          "homepage_url" => "",
+          "changelogurl" => "",
+          "source_id" => "spritepacks",
+          "featured" => true,
+          "special_entry" => true,
+          "virtual" => true,
+          "protected" => true,
+          "spritepack_entry" => true,
+          "spritepack_count" => files.length,
+          "spritepack_full" => full,
+          "spritepack_latest" => latest
         }
       end
 
@@ -601,6 +703,123 @@ module Reloaded
         copy["versions"] = [selected]
         copy["dependencies"] = normalize_dependencies(selected["dependencies"])
         copy
+      end
+
+      def spritepack_config(fetch_remote: false)
+        return @spritepack_config_cache if @spritepack_config_cache && (!fetch_remote || @spritepack_config_source == "remote")
+        if fetch_remote
+          remote = load_remote_spritepack_config
+          return remote if remote
+        end
+        local = load_local_spritepack_config
+        @spritepack_config_cache = local
+        @spritepack_config_source = File.exist?(SPRITEPACK_CONFIG_PATH) ? "local" : "default"
+        local
+      rescue Exception => e
+        log("Spritepack config could not be read: #{e.class}: #{e.message}", :warning)
+        @spritepack_config_cache = default_spritepack_config
+        @spritepack_config_source = "default"
+        default_spritepack_config
+      end
+
+      def load_remote_spritepack_config
+        raw = fetch_url(SPRITEPACK_CONFIG_URL, cache_bust: true).to_s
+        return nil if raw.strip.empty?
+        parsed = parse_json(raw)
+        unless parsed.is_a?(Hash)
+          log("Remote Spritepacks config was not a JSON object", :warning)
+          return nil
+        end
+        @last_remote_fetch_at = Time.now rescue @last_remote_fetch_at
+        @spritepack_config_cache = default_spritepack_config.merge(parsed)
+        @spritepack_config_source = "remote"
+        @spritepack_config_cache
+      rescue Exception => e
+        log("Remote Spritepacks config could not be read: #{e.class}: #{e.message}", :warning)
+        nil
+      end
+
+      def load_local_spritepack_config
+        return default_spritepack_config unless File.exist?(SPRITEPACK_CONFIG_PATH)
+        parsed = parse_json(File.read(SPRITEPACK_CONFIG_PATH))
+        parsed.is_a?(Hash) ? default_spritepack_config.merge(parsed) : default_spritepack_config
+      end
+
+      def default_spritepack_config
+        {
+          "description" => "Spritepacks for Hoenn Reloaded.\nIncludes Pokemon, trainer, overworld, and custom battler sprite files.",
+          "extract_to" => ".",
+          "files" => default_spritepack_files
+        }
+      end
+
+      def default_spritepack_files
+        [
+          { "id" => "full", "name" => "Full Spritepack", "url" => "", "updated_at" => "", "full" => true, "latest" => true },
+          { "id" => "latest", "name" => "Latest Spritepack", "url" => "", "updated_at" => "", "latest" => true }
+        ]
+      end
+
+      def normalize_spritepack_files(value)
+        Array(value).each_with_index.map { |file, index| normalize_spritepack_file(file, index) }.
+          reject { |file| file["name"].to_s.empty? }.
+          sort_by { |file| spritepack_sort_key(file) }
+      end
+
+      def normalize_spritepack_file(file, index)
+        source = file.is_a?(Hash) ? file : {}
+        name = source["name"].to_s.strip
+        id = source["id"].to_s.strip
+        id = normalize_mod_id(name.empty? ? "spritepack_#{index + 1}" : name) if id.empty?
+        {
+          "id" => id,
+          "name" => name.empty? ? id : name,
+          "url" => source["url"].to_s.strip,
+          "full" => truthy?(source["full"]),
+          "latest" => truthy?(source["latest"]),
+          "updated_at" => source["updated_at"].to_s.empty? ? source["update_date"].to_s : source["updated_at"].to_s,
+          "released_at" => source["released_at"].to_s,
+          "version" => source["version"].to_s,
+          "extract_to" => source["extract_to"].to_s,
+          "_index" => index.to_i
+        }
+      end
+
+      def spritepack_sort_key(file)
+        return [0, 0, 0, 0] if truthy?(file["full"])
+        updated = spritepack_date_sort_value(file["updated_at"])
+        version = file["version"].to_s.empty? ? file["name"].to_s : file["version"].to_s
+        parts = version_sort_key(version)
+        return [1, -updated, -(parts[0] || 0), -(parts[1] || 0), -(parts[2] || 0), file["_index"].to_i] if updated > 0
+        [1, -(parts[0] || 0), -(parts[1] || 0), -(parts[2] || 0), file["_index"].to_i]
+      end
+
+      def spritepack_date_sort_value(value)
+        text = value.to_s.strip
+        match = text.match(/\A(\d{1,2})-(\d{1,2})-(\d{2,4})(?:\s+(\d{1,2}):(\d{2}):(\d{2}))?\z/)
+        return 0 unless match
+        month = match[1].to_i
+        day = match[2].to_i
+        year = match[3].to_i
+        hour = match[4].to_i
+        minute = match[5].to_i
+        second = match[6].to_i
+        year += year >= 70 ? 1900 : 2000 if year < 100
+        return 0 if month < 1 || month > 12 || day < 1 || day > 31
+        return 0 if hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59
+        (((year * 10_000 + month * 100 + day) * 100 + hour) * 100 + minute) * 100 + second
+      end
+
+      def spritepack_extract_destination(file)
+        extract_to = file["extract_to"].to_s.strip
+        extract_to = spritepack_config["extract_to"].to_s.strip if extract_to.empty?
+        extract_to = "." if extract_to.empty?
+        destination = File.expand_path(File.join(GAME_ROOT, extract_to))
+        root = normalize_path(GAME_ROOT)
+        target = normalize_path(destination)
+        raise "Spritepack extract path is outside the game folder." unless target == root || target.start_with?(root + "/")
+        ensure_directory(destination)
+        destination
       end
 
       def download_entry(entry)
@@ -1099,6 +1318,15 @@ module Reloaded
 
       def safe_filename(value)
         value.to_s.gsub(/[^a-zA-Z0-9_\-]+/, "_")
+      end
+
+      def relative_game_path(path)
+        root = normalize_path(File.expand_path(GAME_ROOT))
+        target = normalize_path(File.expand_path(path.to_s))
+        return "." if target == root
+        target.start_with?(root + "/") ? target[(root.length + 1)..-1] : target
+      rescue
+        path.to_s
       end
 
       def log(message, level = :info)
