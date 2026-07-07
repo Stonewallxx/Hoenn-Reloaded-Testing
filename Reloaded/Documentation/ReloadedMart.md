@@ -330,6 +330,28 @@ PokeVial rewards are preflighted before money is charged. A single-use charge
 requires an empty charge slot, a full refill requires the vial to be below max,
 and a max-charge unlock must increase the player's current max.
 
+### IV Boundary Rewards
+
+Bundles, gifts, and Mystery Boxes can grant IV Boundary rewards instead of
+normal bag items.
+
+Temporary boost:
+
+```json
+{ "type": "iv_boundary_boost", "scope": "wild", "floor_bonus": 5, "duration_seconds": 600 }
+{ "type": "iv_boundary_boost", "scope": "egg", "min": 20, "max": 31, "duration_minutes": 10 }
+```
+
+One-shot next Pokemon rule:
+
+```json
+{ "type": "iv_boundary_force_next", "scope": "gift", "perfect_ivs": 3, "quantity": 1 }
+```
+
+Supported scopes are `wild`, `gift`, `static`, `egg`, and `player`.
+`iv_boundary_boost` expires by real time. `iv_boundary_force_next` is consumed
+by the next matching newly generated Pokemon.
+
 Reloaded also registers two hidden internal Medicine-pocket item datapatches for
 normal item rewards or shops. They can also be placed in Overworld Menu Quick
 Items:

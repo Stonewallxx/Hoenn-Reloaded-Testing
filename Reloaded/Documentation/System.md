@@ -47,6 +47,7 @@ Current player-facing entry points:
 ```text
 Options -> Reloaded -> Reloaded Mart
 Options -> Reloaded -> Overworld Menu
+Options -> Reloaded -> IV Boundaries
 Options -> Reloaded -> [ TM Vault ]
 Options -> Mods -> Mod Manager
 Options -> Mods -> Mod Settings

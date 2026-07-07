@@ -42,6 +42,7 @@ are:
 - `Reloaded::Options`
 - `Reloaded::Settings`
 - `ReloadedPauseMenu`
+- `ReloadedIVBoundaries`
 - `ReloadedPokeVial`
 
 ## Recommended Modding Rules
@@ -583,6 +584,104 @@ The handler receives the active `OverworldMenuScreen`. Return `:exit_menu`, or
 set `exit_on_select: true`, to close the overlay after the entry runs.
 
 See `Reloaded/Documentation/OverworldMenu.md` for the full entry contract.
+
+## IV Boundaries
+
+IV Boundaries is implemented in:
+
+```text
+Reloaded/Modules/007_IVBoundaries.rb
+```
+
+Players can set IV boundaries for newly generated player-side Pokemon through
+the Reloaded options menu. This applies to new wild Pokemon, gifts, static
+encounters, and Eggs. Existing party/box Pokemon are not changed.
+
+The options submenu includes presets, custom Min/Max IV sliders, and a preview
+action. If Max IV is below 31, perfect IVs are treated like any other
+out-of-range value and rerolled inside the active range.
+
+Trainer IV boundaries are not player-editable. They are controlled by difficulty
+rules and trainer-class config in `007_IVBoundaries.rb`:
+
+```ruby
+ReloadedIVBoundaries::TRAINER_DIFFICULTY_RULES
+ReloadedIVBoundaries::TRAINER_CLASS_GROUPS
+ReloadedIVBoundaries::TRAINER_CLASS_EXEMPTIONS
+```
+
+Mods can apply the same boundaries to custom Pokemon:
+
+```ruby
+ReloadedIVBoundaries.apply_to(pokemon, :wild)
+ReloadedIVBoundaries.apply_to(pokemon, :gift)
+ReloadedIVBoundaries.apply_to(pokemon, :static)
+ReloadedIVBoundaries.apply_to(pokemon, :egg)
+ReloadedIVBoundaries.apply_to(pokemon, :trainer, :trainer_type => :LEADER)
+```
+
+Supported scopes are `:wild`, `:gift`, `:static`, `:egg`, `:player`, and
+`:trainer`. Player scopes use the player-facing Min/Max IV options. Trainer
+scope uses the current difficulty and trainer class config.
+
+Useful checks and generators:
+
+```ruby
+ReloadedIVBoundaries.enabled?(:wild)
+ReloadedIVBoundaries.bounds_for(:wild)
+ReloadedIVBoundaries.bounds_for(:trainer, :trainer_type => :RIVAL1)
+ReloadedIVBoundaries.generate_iv(:wild)
+ReloadedIVBoundaries.generate_ivs(:egg)
+```
+
+`apply_to` preserves IVs that are already inside the active range. Any IV below
+the floor or above the ceiling is rerolled inside the active range instead of
+being clamped to the nearest boundary.
+
+One-shot event and reward helpers:
+
+```ruby
+ReloadedIVBoundaries.force_next(:egg, { :min => 25, :max => 31 }, source: :event)
+ReloadedIVBoundaries.force_next(:gift, { :perfect_ivs => 3 }, source: :event)
+ReloadedIVBoundaries.exempt_next(:gift, source: :my_mod)
+ReloadedIVBoundaries.grant_temporary_boost(:wild, { :floor_bonus => 5 }, duration_seconds: 600, source: :my_mod)
+```
+
+`force_next` affects the next matching newly generated Pokemon and then consumes
+itself. `exempt_next` skips the next matching Pokemon. Temporary boosts are
+stored in the Reloaded save bucket and expire by real time.
+
+Mods can also mark a specific Pokemon object as exempt:
+
+```ruby
+pokemon.reloaded_iv_boundaries_exempt = true
+```
+
+Reloaded Mart and Mystery Gift payloads can activate IV rewards:
+
+```json
+{ "type": "iv_boundary_boost", "scope": "wild", "floor_bonus": 5, "duration_seconds": 600 }
+{ "type": "iv_boundary_boost", "scope": "egg", "min": 20, "max": 31, "duration_minutes": 10 }
+{ "type": "iv_boundary_force_next", "scope": "gift", "perfect_ivs": 3, "quantity": 1 }
+```
+
+Supported aliases include `iv_boundary`, `iv_boundaries`, `iv_boost`,
+`iv_floor_boost`, `iv_force_next`, and `iv_next`.
+
+Mods can register callbacks:
+
+```ruby
+ReloadedIVBoundaries.on(:before_apply, :my_mod_iv_check) do |ctx|
+  # Return false to cancel. ctx includes :pokemon, :scope, :bounds, and :source.
+  true
+end
+
+ReloadedIVBoundaries.on(:after_apply, :my_mod_iv_after) do |ctx|
+  # ctx includes :changed, :ivs_before, and :ivs_after.
+end
+```
+
+Supported callback names are `:before_apply` and `:after_apply`.
 
 ## PokeVial
 

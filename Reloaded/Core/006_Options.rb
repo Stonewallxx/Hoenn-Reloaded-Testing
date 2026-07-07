@@ -1509,6 +1509,13 @@ if defined?(Window_PokemonOption)
       rect.width * LABEL_FRAC / ROW_FRAC
     end
 
+    def option_display_value(option, index)
+      return self[index] unless option.respond_to?(:current_value)
+      value = option.current_value rescue self[index]
+      setValueNoRefresh(index, value) if value
+      value
+    end
+
     def category_colors
       return Reloaded::Options.readable_text_colors unless Reloaded::Options.current_menu_frame_dark?
       theme = Reloaded::Options.theme(($PokemonSystem.reloaded_category_theme rescue 0))
@@ -1550,7 +1557,7 @@ if defined?(Window_PokemonOption)
       label_w = label_width(rect)
       pbDrawShadowText(self.contents, rect.x, rect.y, label_w, rect.height,
                        option.name, @nameBaseColor, @nameShadowColor)
-      value = option.optstart + (self[index] || 0).to_i
+      value = option.optstart + (option_display_value(option, index) || 0).to_i
       total = option.optend - option.optstart + 1
       draw_cycling_value("#{value}/#{total}", value <= option.optstart, value >= option.optend, rect, label_w)
     end
@@ -1561,7 +1568,7 @@ if defined?(Window_PokemonOption)
       pbDrawShadowText(self.contents, rect.x, rect.y, label_w, rect.height,
                        option.name, @nameBaseColor, @nameShadowColor)
       return if option.values.nil? || option.values.empty?
-      current = [[(self[index] || 0).to_i, 0].max, option.values.length - 1].min
+      current = [[(option_display_value(option, index) || 0).to_i, 0].max, option.values.length - 1].min
       draw_cycling_value(option.values[current].to_s, current <= 0, current >= option.values.length - 1, rect, label_w)
     end
 
@@ -1586,7 +1593,7 @@ if defined?(Window_PokemonOption)
       label_w = label_width(rect)
       pbDrawShadowText(self.contents, rect.x, rect.y, label_w, rect.height,
                        option.name, @nameBaseColor, @nameShadowColor)
-      actual = (self[index] || 0).to_f
+      actual = (option_display_value(option, index) || 0).to_f
       min_v = option.optstart.to_f
       max_v = option.optend.to_f
       range = max_v - min_v
