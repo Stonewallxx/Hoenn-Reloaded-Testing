@@ -141,6 +141,23 @@ Dir.chdir(GAME_ROOT) do
   check("Git inventory is available for release checks") do
     git_inventory_ok
   end
+  vanilla_changes_path = File.join(RELOADED_ROOT, "Documentation", "VanillaChanges.md")
+  vanilla_changes_text = File.file?(vanilla_changes_path) ? File.read(vanilla_changes_path) : ""
+  changed_base_output = IO.popen(
+    ["git", "diff", "HEAD", "--name-only", "--", "Data/Scripts", "Game.ini", "mkxp.json"],
+    &:read
+  )
+  untracked_base_output = IO.popen(
+    ["git", "ls-files", "--others", "--exclude-standard", "--", "Data/Scripts", "Game.ini", "mkxp.json"],
+    &:read
+  )
+  changed_base_files = (changed_base_output.to_s.lines + untracked_base_output.to_s.lines)
+                       .map { |line| line.strip.gsub("\\", "/") }
+                       .reject(&:empty?)
+                       .uniq
+  check("Changed vanilla files are recorded in VanillaChanges.md") do
+    changed_base_files.all? { |path| vanilla_changes_text.include?("`#{path}`") }
+  end
   generated_tracked = tracked_files.select do |path|
     next false if path == "Reloaded/Logging/.gitignore" || path == "Reloaded/Logging/Reports/.gitignore"
     path.start_with?("Admin Tools/") || path.start_with?("Pre-Public/") ||
@@ -462,8 +479,45 @@ Dir.chdir(GAME_ROOT) do
       File.read(download_target) == download_payload &&
       !File.exist?("#{download_target}.part")
   end
+  resume_target = File.join(download_test_root, "resume.bin")
+  resume_payload = "foundation-resumable-download"
+  resume_hash = Digest::SHA256.hexdigest(resume_payload)
+  resume_split = 12
+  resume_attempts = 0
+  Reloaded::Download.transport_override = proc do |_url, part, options, _task|
+    resume_attempts += 1
+    if resume_attempts == 1
+      File.open(part, "wb") { |file| file.write(resume_payload[0, resume_split]) }
+      raise Reloaded::Download::Failure.new(:network_error, "Expected resumable interruption")
+    end
+    existing = File.file?(part) ? File.read(part) : ""
+    raise "Partial download was not preserved." unless options[:resume] && existing == resume_payload[0, resume_split]
+    File.open(part, "ab") { |file| file.write(resume_payload[resume_split, resume_payload.length]) }
+    {
+      :final_url => "https://example.invalid/resume.bin",
+      :http_status => 206,
+      :content_length => resume_payload.bytesize,
+      :bytes => resume_payload.bytesize,
+      :sha256 => resume_hash,
+      :headers => { "accept-ranges" => "bytes" }
+    }
+  end
+  resumed_download = Reloaded::Download.fetch(
+    "https://example.invalid/resume.bin",
+    resume_target,
+    :sha256 => resume_hash,
+    :expected_bytes => resume_payload.bytesize,
+    :resume => true,
+    :retries => 1
+  )
+  check("Download API resumes an opted-in partial file across retries") do
+    resumed_download.success? && resumed_download.attempts == 2 &&
+      File.read(resume_target) == resume_payload &&
+      !File.exist?("#{resume_target}.part")
+  end
   Reloaded::Download.transport_override = nil
   File.delete(download_target) if File.file?(download_target)
+  File.delete(resume_target) if File.file?(resume_target)
   Dir.rmdir(download_test_root) if Dir.exist?(download_test_root) && Dir.entries(download_test_root).length == 2
   load File.join(RELOADED_ROOT, "Core", "Foundation", "Archive.rb")
   Reloaded::Settings.set("platform_override", "Windows", :persist => false)
@@ -487,6 +541,35 @@ Dir.chdir(GAME_ROOT) do
   end
   $DEBUG = archive_check_debug
   check("Archive API rejects traversal, absolute, and reserved entry paths") { archive_path_checks }
+  load File.join(RELOADED_ROOT, "Core", "Foundation", "SpritePacks.rb")
+  spritepack_check_root = File.join(RELOADED_ROOT, "Cache", "SpritePacks", "foundation_check_windows")
+  spritepack_path = File.join(spritepack_check_root, "1.pak")
+  Reloaded::SpritePacks.send(:ensure_directory, spritepack_check_root)
+  spritepack_png = [137, 80, 78, 71, 13, 10, 26, 10].pack("C*") + "foundation-sprite"
+  File.open(spritepack_path, "wb") do |file|
+    file.write("SPAK")
+    file.write([1].pack("V"))
+    file.write([1, 0, 0, spritepack_png.length].pack("VVVV"))
+    file.write(spritepack_png)
+  end
+  spritepack = Reloaded::SpritePacks::Pack.new(spritepack_path, 1)
+  spritepack_data = spritepack.read(spritepack.entry(1, ""))
+  check("Sprite Packs reads bounded AFI-compatible per-head entries") do
+    Reloaded::API.public?(:sprite_packs) && Reloaded::API.available?(:sprite_packs) &&
+      spritepack.entry_count == 1 && spritepack_data == spritepack_png
+  end
+  spritepack_layers = [
+    { :id => "older", :sequence => 20260701000000, :created_at => "2026-07-01T00:00:00Z" },
+    { :id => "newer", :sequence => 20260801000000, :created_at => "2026-08-01T00:00:00Z" }
+  ]
+  check("Sprite Packs orders monthly layers newest-first and honors Full cutoffs") do
+    sorted = Reloaded::SpritePacks.send(:sort_update_layers, spritepack_layers)
+    sorted.first[:id] == "newer" &&
+      Reloaded::SpritePacks.send(:update_compacted?, "2026-07-01T00:00:00Z", "2026-07-15T00:00:00Z") &&
+      !Reloaded::SpritePacks.send(:update_compacted?, "2026-08-01T00:00:00Z", "2026-07-15T00:00:00Z")
+  end
+  File.delete(spritepack_path) if File.file?(spritepack_path)
+  Dir.rmdir(spritepack_check_root) if Dir.exist?(spritepack_check_root) && Dir.entries(spritepack_check_root).length == 2
   Reloaded::Settings.set("platform_override", "JoiPlay", :persist => false)
   check("JoiPlay keeps downloads and archive extraction unavailable") do
     !Reloaded::Platform.supports?(:downloads) && !Reloaded::Download.available? &&

@@ -40,7 +40,7 @@ module Settings
   TRANSFER_BOX_DISCLAIMER_MESSAGE = ""
   CUSTOM_BASE_SPRITES_FOLDER = "Graphics/CustomBattlers/local_sprites/BaseSprites/"
   CUSTOM_BATTLERS_FOLDER = "Graphics/CustomBattlers/"
-  CUSTOM_SPRITES_TO_IMPORT_FOLDER = "Graphics/CustomBattlers/Sprites to import/"
+  CUSTOM_SPRITES_TO_IMPORT_FOLDER = "Graphics/CustomBattlers/Sprite Import/"
   CUSTOM_BATTLERS_FOLDER_INDEXED = "Graphics/CustomBattlers/local_sprites/indexed/"
   CUSTOM_BASE_SPRITE_FOLDER = "Graphics/CustomBattlers/local_sprites/BaseSprites/"
   BATTLERS_FOLDER = "Graphics/Battlers/Autogens/"

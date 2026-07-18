@@ -141,6 +141,23 @@ Dir.chdir(GAME_ROOT) do
   check("Git inventory is available for release checks") do
     git_inventory_ok
   end
+  vanilla_changes_path = File.join(RELOADED_ROOT, "Documentation", "VanillaChanges.md")
+  vanilla_changes_text = File.file?(vanilla_changes_path) ? File.read(vanilla_changes_path) : ""
+  changed_base_output = IO.popen(
+    ["git", "diff", "HEAD", "--name-only", "--", "Data/Scripts", "Game.ini", "mkxp.json"],
+    &:read
+  )
+  untracked_base_output = IO.popen(
+    ["git", "ls-files", "--others", "--exclude-standard", "--", "Data/Scripts", "Game.ini", "mkxp.json"],
+    &:read
+  )
+  changed_base_files = (changed_base_output.to_s.lines + untracked_base_output.to_s.lines)
+                       .map { |line| line.strip.gsub("\\", "/") }
+                       .reject(&:empty?)
+                       .uniq
+  check("Changed vanilla files are recorded in VanillaChanges.md") do
+    changed_base_files.all? { |path| vanilla_changes_text.include?("`#{path}`") }
+  end
   generated_tracked = tracked_files.select do |path|
     next false if path == "Reloaded/Logging/.gitignore" || path == "Reloaded/Logging/Reports/.gitignore"
     path.start_with?("Admin Tools/") || path.start_with?("Pre-Public/") ||
@@ -410,6 +427,35 @@ Dir.chdir(GAME_ROOT) do
       Reloaded::Platform::ROOT == RELOADED_ROOT &&
       Reloaded::Platform::GAME_ROOT == GAME_ROOT
   end
+  load File.join(RELOADED_ROOT, "Core", "Foundation", "SpritePacks.rb")
+  spritepack_check_root = File.join(RELOADED_ROOT, "Cache", "SpritePacks", "foundation_check_proton")
+  spritepack_path = File.join(spritepack_check_root, "1.pak")
+  Reloaded::SpritePacks.send(:ensure_directory, spritepack_check_root)
+  spritepack_png = [137, 80, 78, 71, 13, 10, 26, 10].pack("C*") + "foundation-sprite"
+  File.open(spritepack_path, "wb") do |file|
+    file.write("SPAK")
+    file.write([1].pack("V"))
+    file.write([1, 0, 0, spritepack_png.length].pack("VVVV"))
+    file.write(spritepack_png)
+  end
+  spritepack = Reloaded::SpritePacks::Pack.new(spritepack_path, 1)
+  spritepack_data = spritepack.read(spritepack.entry(1, ""))
+  check("Sprite Packs reads bounded AFI-compatible per-head entries") do
+    Reloaded::API.public?(:sprite_packs) && Reloaded::API.available?(:sprite_packs) &&
+      spritepack.entry_count == 1 && spritepack_data == spritepack_png
+  end
+  spritepack_layers = [
+    { :id => "older", :sequence => 20260701000000, :created_at => "2026-07-01T00:00:00Z" },
+    { :id => "newer", :sequence => 20260801000000, :created_at => "2026-08-01T00:00:00Z" }
+  ]
+  check("Sprite Packs orders monthly layers newest-first and honors Full cutoffs") do
+    sorted = Reloaded::SpritePacks.send(:sort_update_layers, spritepack_layers)
+    sorted.first[:id] == "newer" &&
+      Reloaded::SpritePacks.send(:update_compacted?, "2026-07-01T00:00:00Z", "2026-07-15T00:00:00Z") &&
+      !Reloaded::SpritePacks.send(:update_compacted?, "2026-08-01T00:00:00Z", "2026-07-15T00:00:00Z")
+  end
+  File.delete(spritepack_path) if File.file?(spritepack_path)
+  Dir.rmdir(spritepack_check_root) if Dir.exist?(spritepack_check_root) && Dir.entries(spritepack_check_root).length == 2
   load File.join(RELOADED_ROOT, "Core", "Foundation", "FileActions.rb")
   resolved_version = Reloaded::FileActions.resolve("Reloaded/Version.md", :type => :file)
   check("File Actions exposes the safe public API") do

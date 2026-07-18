@@ -19,6 +19,8 @@ module Reloaded
     ABANDONED_AGE = 24 * 60 * 60
     REMOTE_CACHE_MAX_AGE = 90 * 24 * 60 * 60
     REMOTE_CACHE_MAX_BYTES = 64 * 1024 * 1024
+    SPRITE_CACHE_MAX_AGE = 30 * 24 * 60 * 60
+    SPRITE_CACHE_MAX_BYTES = 2 * 1024 * 1024 * 1024
 
     DOWNLOAD_SCRIPT_PATTERN = /\Arld_download_\d+_\d+\.ps1(?:\.error\.txt)?\z/i
     DOWNLOADED_ARCHIVE_PATTERN = /\A(?:spritepack_[a-z0-9_-]+_\d+\.(?:zip|rar|7z)|[a-z0-9_-]+_\d+\.zip)\z/i
@@ -60,6 +62,7 @@ module Reloaded
         cleanup_runtime_files(now, summary)
         cleanup_publishing_files(now, summary)
         cleanup_remote_data(now, summary)
+        cleanup_sprite_pack_cache(now, summary)
         @ran = true
         @last_summary = summary
         log_summary(summary) unless options[:log] == false
@@ -159,6 +162,53 @@ module Reloaded
         )
       rescue Exception
         summary[:failures] += 1
+      end
+
+      def cleanup_sprite_pack_cache(now, summary)
+        root = if defined?(Reloaded::SpritePacks)
+                 Reloaded::SpritePacks::CACHE_ROOT
+               else
+                 File.join(GAME_ROOT, "Reloaded", "Cache", "SpritePacks")
+               end
+        root = File.expand_path(root.to_s)
+        return summary unless Dir.exist?(root)
+
+        Dir[File.join(root, "**", "*.part")].each do |path|
+          next unless File.file?(path) || File.symlink?(path)
+          remove_file(path, root, summary) if stale_path?(path, ABANDONED_AGE, now)
+        end
+
+        files = Dir[File.join(root, "**", "*.png")].select { |path| File.file?(path) }
+        files.each do |path|
+          next unless stale_path?(path, SPRITE_CACHE_MAX_AGE, now)
+          if remove_file(path, root, summary)
+            summary[:sprite_cache_files] += 1
+          end
+        end
+
+        files = Dir[File.join(root, "**", "*.png")].select { |path| File.file?(path) }
+        total_bytes = files.inject(0) { |total, path| total + safe_file_size(path) }
+        files.sort_by { |path| safe_mtime(path) }.each do |path|
+          break if total_bytes <= SPRITE_CACHE_MAX_BYTES
+          size = safe_file_size(path)
+          if remove_file(path, root, summary)
+            summary[:sprite_cache_files] += 1
+            total_bytes -= size
+          end
+        end
+        remove_empty_cache_directories(root)
+        summary
+      rescue Exception
+        summary[:failures] += 1
+      end
+
+      def remove_empty_cache_directories(root)
+        directories = Dir[File.join(root, "**", "*")].select { |path| Dir.exist?(path) && !File.symlink?(path) }
+        directories.sort_by { |path| -path.length }.each do |path|
+          next unless safe_child?(path, root)
+          Dir.rmdir(path) if Dir.entries(path).length == 2
+        end
+      rescue
       end
 
       def prune_remote_cache(root, protected_paths, now, summary, max_age = REMOTE_CACHE_MAX_AGE,
@@ -299,7 +349,14 @@ module Reloaded
       end
 
       def new_summary
-        { :files => 0, :directories => 0, :cache_files => 0, :bytes => 0, :failures => 0 }
+        {
+          :files => 0,
+          :directories => 0,
+          :cache_files => 0,
+          :sprite_cache_files => 0,
+          :bytes => 0,
+          :failures => 0
+        }
       end
 
       def duplicate_summary(summary)

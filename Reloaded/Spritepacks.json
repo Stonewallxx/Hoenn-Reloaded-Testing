@@ -1,5 +1,5 @@
 {
-  "description": "Spritepacks for Hoenn Reloaded. Unless specified, it is spritepacks for Pokemon Infinite Fusion.",
+  "description": "Hoenn Reloaded Spritepacks. Install the Full Spritepack first, then newer monthly updates as they are released.",
   "extract_to": ".",
   "files": [
     {
@@ -14,13 +14,15 @@
       "id": "spritepack_125_april_2026",
       "name": "Spritepack 125 (April 2026)",
       "url": "https://github.com/Stonewallxx/Hoenn-Reloaded/releases/download/Spritepacks/Spritepack.125.April.2026.zip",
-      "updated_at": "07-05-26 20:30:46"
+      "updated_at": "07-05-26 20:30:46",
+      "monthly": true
     },
     {
       "id": "spritepack_126_may_2026",
       "name": "Spritepack 126 (May 2026)",
       "url": "https://github.com/Stonewallxx/Hoenn-Reloaded/releases/download/Spritepacks/Spritepack.126.May.2026.zip",
       "updated_at": "07-05-26 20:31:04",
+      "monthly": true,
       "latest": true
     }
   ]

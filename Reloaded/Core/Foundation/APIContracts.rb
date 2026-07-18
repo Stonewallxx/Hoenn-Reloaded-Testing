@@ -16,6 +16,8 @@ module Reloaded
       :save_data       => { :classification => :stable,        :constant => "Reloaded::SaveData" },
       :save_migrations => { :classification => :stable,        :constant => "Reloaded::SaveMigrations" },
       :assets          => { :classification => :stable,        :constant => "Reloaded::Assets" },
+      :sprite_packs    => { :classification => :stable,        :constant => "Reloaded::SpritePacks" },
+      :sprite_import   => { :classification => :stable,        :constant => "Reloaded::SpriteImport" },
       :platform        => { :classification => :stable,        :constant => "Reloaded::Platform" },
       :download        => { :classification => :stable,        :constant => "Reloaded::Download" },
       :archive         => { :classification => :stable,        :constant => "Reloaded::Archive" },

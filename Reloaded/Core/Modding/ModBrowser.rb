@@ -563,6 +563,8 @@ module Reloaded
         return { :success => false, :status => :unsupported, :name => "Spritepack" } if defined?(Reloaded::Platform) && !Reloaded::Platform.supports?(:browser_downloads)
         item = normalize_spritepack_file(file, 0)
         name = item["name"].to_s.empty? ? "Spritepack" : item["name"].to_s
+        components = Array(item["components"])
+        return perform_component_spritepack_download(item, components, task) unless components.empty?
         url = item["url"].to_s.strip
         return { :success => false, :status => :missing_url, :name => name } if url.empty?
         filename = "spritepack_#{safe_filename(item["id"].to_s.empty? ? name : item["id"])}_#{Time.now.to_i}#{spritepack_archive_extension(url)}"
@@ -577,6 +579,7 @@ module Reloaded
           :min_bytes => 1024,
           :expected_bytes => item["size"],
           :sha256 => item["sha256"],
+          :resume => true,
           :progress_range => [0.05, 0.68]
         )
         unless result.success?
@@ -599,6 +602,7 @@ module Reloaded
           return { :success => false, :status => :extract_failed, :name => name, :url => url }
         end
         File.delete(archive) rescue nil
+        Reloaded::SpritePacks.clear_index if defined?(Reloaded::SpritePacks)
         log("Installed spritepack #{name} to #{relative_game_path(destination)}")
         task.report(1.0, "Installed #{name}") if task
         { :success => true, :status => :ok, :name => name, :destination => destination, :item => item }
@@ -609,6 +613,99 @@ module Reloaded
         File.delete(archive) rescue nil if archive
         Reloaded::Log.exception("Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
         { :success => false, :status => :error, :name => name.to_s, :error => e.message }
+      end
+
+      def perform_component_spritepack_download(item, components, task = nil)
+        name = item["name"].to_s.empty? ? "Spritepack" : item["name"].to_s
+        installed = []
+        total = components.length
+        components.each_with_index do |component, index|
+          task.checkpoint! if task
+          component_name = component["name"].to_s
+          component_name = component["id"].to_s if component_name.empty?
+          component_name = "Component #{index + 1}" if component_name.empty?
+          url = component["url"].to_s.strip
+          if url.empty?
+            return {
+              :success => false,
+              :status => :missing_url,
+              :name => name,
+              :error => "#{component_name} has no download URL.",
+              :installed_components => installed
+            }
+          end
+          segment_start = 0.04 + (index.to_f / total.to_f) * 0.92
+          segment_end = 0.04 + ((index + 1).to_f / total.to_f) * 0.92
+          download_end = segment_start + (segment_end - segment_start) * 0.68
+          filename = "spritepack_#{safe_filename(item['id'])}_#{safe_filename(component['id'])}_#{Time.now.to_i}#{spritepack_archive_extension(url)}"
+          archive = File.join(temp_root, filename)
+          task.report(segment_start, "Downloading #{component_name}") if task
+          result = Reloaded::Download.fetch(
+            url,
+            archive,
+            :task => task,
+            :label => component_name,
+            :min_bytes => 1024,
+            :expected_bytes => component["size"],
+            :sha256 => component["sha256"],
+            :resume => true,
+            :progress_range => [segment_start, download_end]
+          )
+          unless result.success?
+            File.delete(archive) rescue nil
+            return {
+              :success => false,
+              :status => result.error_code || :download_failed,
+              :name => name,
+              :error => "#{component_name}: #{result.error_message}",
+              :installed_components => installed
+            }
+          end
+          destination = spritepack_extract_destination(component)
+          task.report(download_end, "Installing #{component_name}") if task
+          extracted = extract_archive(
+            archive,
+            destination,
+            :task => task,
+            :overwrite => :overwrite,
+            :progress_range => [download_end, segment_end]
+          )
+          File.delete(archive) rescue nil
+          unless extracted
+            return {
+              :success => false,
+              :status => :extract_failed,
+              :name => name,
+              :error => "#{component_name} could not be extracted.",
+              :installed_components => installed
+            }
+          end
+          installed << component["id"].to_s
+          log("Installed Spritepack component #{component_name} (#{index + 1}/#{total})")
+        end
+        Reloaded::SpritePacks.clear_index if defined?(Reloaded::SpritePacks)
+        task.report(1.0, "Installed #{name}") if task
+        {
+          :success => true,
+          :status => :ok,
+          :name => name,
+          :destination => GAME_ROOT,
+          :components => installed,
+          :item => item
+        }
+      rescue Reloaded::Task::Cancelled
+        File.delete(archive) rescue nil if defined?(archive) && archive
+        raise
+      rescue Exception => e
+        File.delete(archive) rescue nil if defined?(archive) && archive
+        Reloaded::Log.exception("Component Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
+        {
+          :success => false,
+          :status => :error,
+          :name => name.to_s,
+          :error => e.message,
+          :installed_components => installed || []
+        }
       end
 
       def mark_spritepack_installed(file, destination = nil)
@@ -1133,7 +1230,7 @@ module Reloaded
       def default_spritepack_files
         [
           { "id" => "full", "name" => "Full Spritepack", "url" => "", "updated_at" => "", "full" => true, "latest" => true },
-          { "id" => "latest", "name" => "Latest Spritepack", "url" => "", "updated_at" => "", "latest" => true }
+          { "id" => "latest", "name" => "Latest Spritepack Update", "url" => "", "updated_at" => "", "monthly" => true, "latest" => true }
         ]
       end
 
@@ -1153,6 +1250,7 @@ module Reloaded
           "name" => name.empty? ? id : name,
           "url" => source["url"].to_s.strip,
           "full" => truthy?(source["full"]),
+          "monthly" => truthy?(source["monthly"]) || source["type"].to_s.downcase == "monthly",
           "latest" => truthy?(source["latest"]),
           "updated_at" => source["updated_at"].to_s.empty? ? source["update_date"].to_s : source["updated_at"].to_s,
           "released_at" => source["released_at"].to_s,
@@ -1160,8 +1258,26 @@ module Reloaded
           "extract_to" => source["extract_to"].to_s,
           "sha256" => first_string(source["sha256"], source["checksum"]),
           "size" => positive_download_size(source["size"] || source["bytes"]),
+          "components" => normalize_spritepack_components(source["components"]),
           "_index" => index.to_i
         }
+      end
+
+      def normalize_spritepack_components(value)
+        Array(value).each_with_index.map do |component, index|
+          source = component.is_a?(Hash) ? component : {}
+          id = normalize_mod_id(source["id"].to_s)
+          id = "component_#{index + 1}" if id.empty?
+          {
+            "id" => id,
+            "name" => source["name"].to_s.strip.empty? ? id : source["name"].to_s.strip,
+            "component" => source["component"].to_s.strip.downcase,
+            "url" => source["url"].to_s.strip,
+            "extract_to" => source["extract_to"].to_s,
+            "sha256" => first_string(source["sha256"], source["checksum"]),
+            "size" => positive_download_size(source["size"] || source["bytes"])
+          }
+        end
       end
 
       def spritepack_sort_key(file)
@@ -1207,8 +1323,10 @@ module Reloaded
           "id" => id,
           "name" => item["name"].to_s,
           "url" => item["url"].to_s,
+          "components" => Array(item["components"]),
           "updated_at" => item["updated_at"].to_s,
           "full" => truthy?(item["full"]),
+          "monthly" => truthy?(item["monthly"]),
           "manual" => import[:manual] ? true : false,
           "files_total" => import[:total].to_i,
           "files_copied" => import[:copied].to_i,
@@ -1228,9 +1346,26 @@ module Reloaded
 
       def spritepack_install_record_matches?(record, item)
         return false unless record
-        record["url"].to_s == item["url"].to_s && record["updated_at"].to_s == item["updated_at"].to_s
+        return false unless record["updated_at"].to_s == item["updated_at"].to_s
+        components = Array(item["components"])
+        if components.empty?
+          record["url"].to_s == item["url"].to_s
+        else
+          component_signature(record["components"]) == component_signature(components)
+        end
       rescue
         false
+      end
+
+      def component_signature(value)
+        Array(value).map do |component|
+          [
+            component["id"].to_s,
+            component["url"].to_s,
+            component["sha256"].to_s,
+            component["size"].to_i
+          ].join("|")
+        end.sort
       end
 
       def spritepack_full_contains_pack?(full_record, pack)

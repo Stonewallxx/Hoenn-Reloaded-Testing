@@ -79,10 +79,10 @@ The pinned `Spritepacks` installed-list entry opens a downloader menu:
 
 - `Latest`
   - `Full Spritepack`
-  - latest non-full spritepack
+  - latest monthly Spritepack update
 - `All Files`
   - `Full Spritepack`
-  - all configured spritepacks, newest first
+  - all configured monthly updates, newest first
 
 Spritepack downloads read the public GitHub copy of
 `Reloaded/Spritepacks.json` first, then fall back to the local file if the
@@ -93,8 +93,27 @@ Spritepack extraction intentionally uses overwrite mode
 without a second staging copy, while still rejecting unsafe archive entries.
 Successful installs update a local marker at
 `Mods/Reloaded/SpritepacksInstalled.json`, which lets the protected installed
-list entry show whether the current Full Spritepack and latest normal
-spritepack are installed.
+list entry show whether the current Full Spritepack and latest monthly update
+are installed.
+
+The Full Spritepack is one player-facing archive containing internal Base and
+Expanded components under `Graphics/SpritePacks`. Base wins duplicate logical
+sprite names; Expanded supplies missing current sprites, expanded-species
+sprites, icons, and cries. Existing loose sprites and active mod overrides win
+over both components.
+
+Monthly archives install sparse overlays under
+`Graphics/SpritePacks/Updates/<update-id>`. They load newest-first above both
+Full components. When monthly updates are compacted into a new Full archive,
+the Full manifest records a cutoff and the runtime ignores included older
+update layers without deleting their files.
+
+Component archives should include the builder-generated `manifest.json`.
+Every per-head `.pak` record in that manifest has an entry count, exact size,
+and SHA-256. The outer Spritepack catalog row should still provide its own
+optional archive `size` and `sha256`, which are checked before extraction.
+Downloaded packs and `Reloaded/Cache/SpritePacks` are runtime output and must
+not be committed.
 
 Published profile actions:
 
@@ -127,6 +146,37 @@ Mod version rows and Spritepack file rows may include:
 
 Spritepack rows use `url` instead of `download_url`. `sha256` and `size` are
 optional, but current Windows and Proton mod publishers add both automatically.
+
+A Full Spritepack and a monthly update are both ordinary single-archive rows:
+
+```json
+{
+  "id": "full_spritepack_2026_08",
+  "name": "Full Spritepack (August 2026)",
+  "full": true,
+  "updated_at": "07-17-26 21:30:00",
+  "url": "https://example.com/full-spritepack.zip",
+  "size": 123456789,
+  "sha256": "64 hexadecimal characters"
+}
+```
+
+```json
+{
+  "id": "spritepack_update_2026_09",
+  "name": "Spritepack Update (September 2026)",
+  "monthly": true,
+  "latest": true,
+  "updated_at": "09-01-26 12:00:00",
+  "url": "https://example.com/spritepack-update-2026-09.zip",
+  "size": 1234567,
+  "sha256": "64 hexadecimal characters"
+}
+```
+
+Spritepack archives use resumable `.part` downloads when the host supports
+byte ranges. The older `components` field remains readable for compatibility,
+but new Full releases should use one archive.
 
 Recommended format:
 

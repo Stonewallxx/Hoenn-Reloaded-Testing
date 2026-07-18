@@ -36,7 +36,7 @@ module Reloaded
     REDIRECT_CODES = [301, 302, 303, 307, 308].freeze
     RETRYABLE_CODES = [:network_error, :timeout, :incomplete_download,
                        :transport_failed, :checksum_mismatch,
-                       :http_server_error].freeze
+                       :http_server_error, :resume_rejected].freeze
     SENSITIVE_HEADERS = ["authorization", "proxy-authorization", "cookie"].freeze
     MAX_ERROR_TEXT = 700
 
@@ -103,7 +103,7 @@ module Reloaded
           (opts[:retries] + 1).times do |retry_index|
             attempts += 1
             checkpoint!(opts[:task])
-            delete_file(part)
+            delete_file(part) unless resumable_part?(part, opts)
             stage = download_stage(opts)
             stage += " (retry #{retry_index})" if retry_index > 0
             report(opts[:task], 0.0, stage, opts)
@@ -131,7 +131,7 @@ module Reloaded
               return result
             rescue Failure => e
               last_error = e
-              delete_file(part)
+              delete_file(part) unless preserve_partial?(part, opts, e)
               break if terminal_failure?(e) || !retryable_failure?(e)
             end
           end
@@ -139,7 +139,9 @@ module Reloaded
         end
         raise(last_error || Failure.new(:transport_unavailable, "No download transport is available."))
       rescue Exception => e
-        delete_file(part) if defined?(part) && part
+        if defined?(part) && part
+          delete_file(part) unless defined?(opts) && preserve_partial?(part, opts, e)
+        end
         raise if cancelled_exception?(e)
         result = failed_result(e, url, destination, started, attempts || 0)
         log_error("Download failed destination=#{result.destination} code=#{result.error_code} reason=#{result.error_message} attempts=#{result.attempts}")
@@ -196,6 +198,7 @@ module Reloaded
         opts[:max_bytes] = positive_integer(opts[:max_bytes], DEFAULT_MAX_BYTES)
         opts[:expected_bytes] = nonnegative_integer(opts[:expected_bytes] || opts[:size], 0)
         opts[:sha256] = normalize_sha256(opts[:sha256] || opts[:checksum])
+        opts[:resume] = !!opts[:resume]
         opts[:label] = opts[:label].to_s.strip
         opts[:allowed_roots] = allowed_roots
         opts[:progress_range] = normalize_progress_range(opts[:progress_range])
@@ -315,6 +318,8 @@ module Reloaded
           request_path = "/" if request_path.empty?
           request = Net::HTTP::Get.new(request_path)
           headers.each { |key, value| request[key] = value }
+          resume_bytes = resumable_part?(part, opts) ? File.size(part).to_i : 0
+          request["range"] = "bytes=#{resume_bytes}-" if resume_bytes > 0
           http = Net::HTTP.new(uri.host, uri.port)
           http.use_ssl = true
           http.open_timeout = opts[:open_timeout] if http.respond_to?(:open_timeout=)
@@ -334,15 +339,23 @@ module Reloaded
                 metadata = { :redirect => next_url }
                 next
               end
-              unless status == 200
+              if status == 416 && resume_bytes > 0
+                delete_file(part)
+                raise_failure(:resume_rejected, "The server rejected the partial download.", status)
+              end
+              unless status == 200 || (status == 206 && resume_bytes > 0)
                 code = status >= 500 ? :http_server_error : :http_error
                 raise_failure(code, "Download returned HTTP #{status}.", status)
               end
+              partial = status == 206 && resume_bytes > 0
               expected = response["content-length"].to_i
-              validate_announced_size!(expected, opts)
+              total = partial ? response_total_bytes(response, resume_bytes, expected) : expected
+              total = opts[:expected_bytes] if total <= 0 && opts[:expected_bytes].to_i > 0
+              validate_announced_size!(total, opts)
               digest = sha256_digest
-              bytes = 0
-              File.open(part, "wb") do |file|
+              update_digest_from_file(digest, part) if partial && digest
+              bytes = partial ? resume_bytes : 0
+              File.open(part, partial ? "ab" : "wb") do |file|
                 response.read_body do |chunk|
                   checkpoint!(opts[:task])
                   data = chunk.to_s
@@ -350,14 +363,14 @@ module Reloaded
                   raise_failure(:file_too_large, "Download exceeded the configured size limit.", status) if bytes > opts[:max_bytes]
                   file.write(data)
                   digest.update(data) if digest
-                  report_bytes(opts[:task], bytes, expected, opts)
+                  report_bytes(opts[:task], bytes, total, opts)
                 end
                 file.flush rescue nil
               end
               metadata = {
                 :final_url => current,
                 :http_status => status,
-                :content_length => expected,
+                :content_length => total,
                 :bytes => bytes,
                 :sha256 => digest ? digest.hexdigest : "",
                 :headers => safe_response_headers(response)
@@ -473,6 +486,47 @@ module Reloaded
         }
       end
 
+      def resumable_part?(part, opts)
+        return false unless opts && opts[:resume]
+        return false unless File.file?(part)
+        bytes = File.size(part).to_i
+        return false if bytes <= 0 || bytes >= opts[:max_bytes].to_i
+        return false if opts[:expected_bytes].to_i > 0 && bytes >= opts[:expected_bytes].to_i
+        true
+      rescue
+        false
+      end
+
+      def preserve_partial?(part, opts, error)
+        return false unless resumable_part?(part, opts)
+        code = error.respond_to?(:code) ? error.code : nil
+        [:network_error, :timeout, :incomplete_download,
+         :transport_failed, :http_server_error].include?(code)
+      rescue
+        false
+      end
+
+      def response_total_bytes(response, resume_bytes, content_length)
+        content_range = response["content-range"].to_s
+        if content_range =~ /\Abytes\s+(\d+)-(\d+)\/(\d+|\*)\z/i
+          start_byte = Regexp.last_match(1).to_i
+          total_text = Regexp.last_match(3)
+          raise_failure(:resume_rejected, "The server resumed from the wrong byte.") unless start_byte == resume_bytes.to_i
+          return total_text.to_i if total_text != "*" && total_text.to_i > 0
+        end
+        return 0 if content_length.to_i <= 0
+        resume_bytes.to_i + content_length.to_i
+      end
+
+      def update_digest_from_file(digest, path)
+        return unless digest && File.file?(path)
+        File.open(path, "rb") do |file|
+          while (chunk = file.read(1024 * 1024))
+            digest.update(chunk)
+          end
+        end
+      end
+
       def validate_announced_size!(bytes, opts)
         return true if bytes.to_i <= 0
         raise_failure(:download_too_small, "Server file is smaller than the required minimum.") if bytes.to_i < opts[:min_bytes]
@@ -573,7 +627,7 @@ module Reloaded
 
       def safe_response_headers(response)
         result = {}
-        ["content-length", "content-type", "etag", "last-modified"].each do |key|
+        ["content-length", "content-range", "accept-ranges", "content-type", "etag", "last-modified"].each do |key|
           value = response[key].to_s
           result[key] = value unless value.empty?
         end

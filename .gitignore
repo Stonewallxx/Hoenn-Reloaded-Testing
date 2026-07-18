@@ -12,7 +12,8 @@ Graphics/CustomBattlers/spritesheets/spritesheets_base/*
 Graphics/CustomBattlers/spritesheets/spritesheets_custom/*
 Graphics/CustomBattlers/local_sprites/BaseSprites/*
 Graphics/CustomBattlers/local_sprites/indexed/*
-Graphics/CustomBattlers/Sprites to import/*
+Graphics/CustomBattlers/Sprite Import/*
+Graphics/SpritePacks/*
 Graphics/CustomBattlers/custom_sprites
 Graphics/CustomBattlers/desktop.ini
 Graphics/Other/
@@ -28,7 +29,7 @@ Graphics/Battlers/Shiny/*
 !Graphics/CustomBattlers/spritesheets/spritesheets_custom/.gitkeep
 !Graphics/CustomBattlers/local_sprites/BaseSprites/.gitkeep
 !Graphics/CustomBattlers/local_sprites/indexed/.gitkeep
-!Graphics/CustomBattlers/Sprites to import/.gitkeep
+!Graphics/CustomBattlers/Sprite Import/.gitkeep
 !Graphics/Pokemon/FusionIcons/.gitkeep
 !Graphics/Battlers/Shiny/.gitkeep
 
@@ -76,6 +77,7 @@ Reloaded/Settings.txt.bak
 Reloaded/Logging/*.txt
 Reloaded/Logging/Reports/*
 Reloaded/Cache/RemoteData/
+Reloaded/Cache/SpritePacks/
 Reloaded/Documentation/VanillaChanges.md
 Reloaded/Documentation/To-Do.md
 Reloaded/Documentation/ReloadedMart-To-Do.md

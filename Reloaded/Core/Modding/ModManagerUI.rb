@@ -508,7 +508,7 @@ module Reloaded
       def spritepack_picker_detail(file)
         lines = []
         lines << file["name"].to_s
-        lines << "Type: #{file["full"] ? 'Full Spritepack' : 'Spritepack'}"
+        lines << "Type: #{file["full"] ? 'Full Spritepack' : 'Monthly Update'}"
         updated = file["updated_at"].to_s.strip
         lines << "Updated: #{updated}" unless updated.empty?
         lines.join("\n")
@@ -529,7 +529,8 @@ module Reloaded
       def confirm_spritepack_download(file)
         name = file["name"].to_s
         url = file["url"].to_s.strip
-        if url.empty?
+        components = Array(file["components"])
+        if url.empty? && components.empty?
           show_message("No download URL is configured for:\n#{name}\n\nEdit Reloaded/Spritepacks.json.")
           return
         end

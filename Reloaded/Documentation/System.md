@@ -36,6 +36,8 @@ Hoenn Reloaded currently has these framework systems in place:
 - Central version, API contract, system registry, and feature flag APIs.
 - Shared runtime/developer validation with failure-safe reports.
 - Runtime asset resolver for active mod assets.
+- Lazy per-head Spritepack resolver with separate Base and Expanded
+  components, loose/mod asset priority, and one-file cache extraction.
 - Shared platform detection and desktop adapters for Windows, Proton, and
   restricted JoiPlay behavior.
 - Shared streaming large-file downloads through `Reloaded::Download`, with
@@ -46,7 +48,7 @@ Hoenn Reloaded currently has these framework systems in place:
   fallbacks through `Reloaded::RemoteData`.
 - Conservative boot cleanup for abandoned Reloaded downloads, extraction
   folders, publishing payloads, temporary scripts, and old unregistered
-  Remote Data caches.
+Remote Data caches, and disposable packed-sprite cache files.
 - Shared background tasks with cooperative cancellation, structured outcomes,
   main-thread callbacks, and input-safe Toast delivery through `Reloaded::Task`.
 - Shared HR-style determinate and indeterminate task progress through
@@ -128,7 +130,9 @@ Large runtime downloads must use `Reloaded::Download`, not scene-local HTTP,
 PowerShell, or engine download helpers. The shared API confines destinations,
 streams into `.part` files, validates expected size and optional SHA-256
 metadata, reports progress, supports cooperative cancellation, and preserves
-the previous destination on failure.
+the previous destination on failure. Large Spritepack component downloads use
+the opt-in resumable mode. A partial file is preserved only for interrupted
+network/transport failures; invalid sizes and checksums discard it.
 
 Runtime archive extraction must use `Reloaded::Archive`, not direct 7-Zip or
 shell commands. The shared API applies entry/path validation, extraction limits,
@@ -142,6 +146,51 @@ oldest-first if that cache directory exceeds 64 MB. Every cache registered for
 the current session is protected regardless of age or size. The cleanup does
 not scan installed mods, imported Spritepacks, local fallback files, save data,
 or any other installed game content. Unknown files are left untouched.
+Packed sprite PNGs under `Reloaded/Cache/SpritePacks` are disposable runtime
+materializations, not installed content. Files unused for 30 days are removed,
+and the oldest files are pruned if that cache exceeds 2 GB. The source `.pak`
+files under `Graphics/SpritePacks` are never removed by cleanup.
+
+Packed sprites use AFI-compatible SPAK v2 files, split by head ID:
+
+```text
+Graphics/SpritePacks/Base/Custom/<head>.pak
+Graphics/SpritePacks/Base/Base/<head>.pak
+Graphics/SpritePacks/Expanded/Custom/<head>.pak
+Graphics/SpritePacks/Expanded/Base/<head>.pak
+Graphics/SpritePacks/Expanded/Autogen/<head>.pak
+Graphics/SpritePacks/Updates/<update-id>/Base/<type>/<head>.pak
+Graphics/SpritePacks/Updates/<update-id>/Expanded/<type>/<head>.pak
+```
+
+Resolution order is active mod/loose file, monthly updates newest-first, Full
+Base, Full Expanded, then the existing spritesheet/download fallback. Only the
+requested PNG is copied to the cache. Hoenn Reloaded never expands an entire
+head pack during gameplay. A Full manifest can mark the cutoff through which
+monthly updates were compacted; those older layers are ignored.
+Monthly manifests may also tombstone removed per-head packs so lower layers do
+not restore content that was intentionally removed.
+
+`Reloaded::SpritePacks.verify_component(:base)`,
+`verify_component(:expanded)`, and `verify_update(update_id)` explicitly
+verify manifests, file sizes, SHA-256 checksums, pack structure, and missing
+files. Verification is not run during every boot because Full components can
+be several gigabytes.
+
+Player-provided PNGs belong in:
+
+```text
+Graphics/CustomBattlers/Sprite Import/
+```
+
+`Reloaded::SpriteImport` scans that inbox once during startup, validates PNG
+signatures and supported sprite filenames, and moves valid files into the
+normal loose override folders. Loose imports remain higher priority than
+packed sprites. Imports of 20 or more files use a determinate HR progress
+window on Windows and Proton; platforms without background-task support use
+the same batched importer synchronously. Per-file success logging is avoided.
+Conflicts include both existing loose files and entries already present in a
+Spritepack, and continue through the existing replace-or-skip prompt.
 
 Systems should query capabilities instead of branching on platform names.
 Unsupported actions are omitted from menus rather than displayed as disabled

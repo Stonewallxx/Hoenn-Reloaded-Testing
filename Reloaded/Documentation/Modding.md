@@ -960,6 +960,11 @@ their `.part` files and preserve any valid existing destination. Windows and
 Proton use streaming HTTPS with a platform fallback. JoiPlay does not expose
 remote downloads.
 
+Pass `:resume => true` only for large immutable downloads with an expected size
+and preferably SHA-256. Interrupted network/transport failures preserve the
+`.part` file for a byte-range retry. Validation failures discard it. Full and
+monthly Spritepack archives enable this automatically.
+
 ## Archive API
 
 Use `Reloaded::Archive` to inspect or extract ZIP, RAR, and 7Z files. It lists
@@ -999,6 +1004,52 @@ Extraction uses the bundled 7-Zip adapter on Windows and Proton. JoiPlay does
 not expose archive extraction; Android users install archive contents manually.
 Run extraction inside `Reloaded::Task` and display `Reloaded::ProgressWindow`
 for user-started operations. Worker code must not modify game UI or game state.
+
+## Spritepack API
+
+`Reloaded::SpritePacks` reads AFI-compatible SPAK v2 per-head packs without
+extracting a whole head. Normal loose files and active mod assets always keep
+priority.
+
+```ruby
+path = Reloaded::SpritePacks.materialize_entry(:CUSTOM, 25, 133, "a")
+bitmap = AnimatedBitmap.new(path) if path
+
+entries = Reloaded::SpritePacks.entries(:CUSTOM, 25)
+packed = Reloaded::SpritePacks.entry?(:CUSTOM, 25, 133, "a")
+health = Reloaded::SpritePacks.pack_health
+verified = Reloaded::SpritePacks.verify_component(:expanded)
+update = Reloaded::SpritePacks.verify_update("2026-08")
+layers = Reloaded::SpritePacks.installed_updates
+```
+
+Supported entry types are `:CUSTOM`, `:AUTOGEN`, and `:BASE`. `materialize`
+also accepts a `PIFSprite`. Materialized paths point into the disposable
+Reloaded cache and must not be saved as permanent mod data. Mods should still
+ship ordinary `Graphics` overrides unless they are intentionally publishing a
+large per-head Spritepack component.
+
+Monthly update layers load newest-first above Full Base and Expanded. Base has
+higher priority than Expanded within each layer. No packed layer overrides a
+loose file or active mod asset. Verification is explicit because hashing a
+multi-gigabyte install during every boot would be inappropriate.
+
+## Sprite Import API
+
+Players place manually supplied PNGs in
+`Graphics/CustomBattlers/Sprite Import`. `Reloaded::SpriteImport.import`
+validates and sorts them into the loose Base or indexed custom-sprite folders.
+Large batches display `Reloaded::ProgressWindow` where background tasks are
+supported. The returned summary contains `:imported`, `:conflicts`, `:invalid`,
+and `:failed`.
+
+```ruby
+summary = Reloaded::SpriteImport.import
+record = Reloaded::SpriteImport.classify_filename("25.133a.png")
+```
+
+Mods should normally install their own `Graphics` overrides rather than place
+files in the player import inbox.
 
 ## Background Task API
 
@@ -2296,13 +2347,13 @@ If the online fetch fails, it falls back to the shipped local file:
 Reloaded/Spritepacks.json
 ```
 
-`full: true` marks the Full Spritepack and keeps it at the top. `updated_at`
-uses `MM-DD-YY HH:MM:SS` and is the preferred newest-first sort value for
-normal packs. `latest: true` marks the newest non-full pack for the `Latest`
-submenu. Other packs appear under `All Files`, sorted newest-first by
-`updated_at`, then by `version` or the number in the name. Each entry needs a
-`name` and `url`; optional `extract_to` overrides the default game-root
-extraction target for that pack.
+`full: true` marks the one Full Spritepack and keeps it at the top.
+`monthly: true` identifies a monthly overlay. `updated_at` uses
+`MM-DD-YY HH:MM:SS` and is the preferred newest-first sort value.
+`latest: true` marks the newest monthly update for the `Latest` submenu. Other
+updates appear under `All Files`, sorted newest-first by `updated_at`, then by
+`version` or the number in the name. Each entry needs a `name` and `url`;
+optional `extract_to` overrides the default game-root extraction target.
 
 See `Reloaded/Documentation/Manager.md` for the source and index formats.
 

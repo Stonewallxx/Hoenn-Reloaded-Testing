@@ -34,10 +34,15 @@ def handleReplaceExistingSprites()
 
     return
   when 1 #Replace olds
-    spritesToReplaceList.each do |oldPath, newPath|
-      File.rename(oldPath, newPath)
-      $game_temp.nb_imported_sprites+=1
-      echo "\nSorted " + oldPath + " into " + newPath
+    if defined?(Reloaded::SpriteImport)
+      summary = Reloaded::SpriteImport.replace_conflicts(spritesToReplaceList)
+      $game_temp.nb_imported_sprites += summary[:imported].to_i
+    else
+      spritesToReplaceList.each do |oldPath, newPath|
+        File.delete(newPath) if File.file?(newPath)
+        File.rename(oldPath, newPath)
+        $game_temp.nb_imported_sprites+=1
+      end
     end
     #when 2 #Keep olds (rename new as alts)
   end
@@ -67,11 +72,18 @@ def clearTempFolder()
 end
 
 def sortCustomBattlers()
+  if defined?(Reloaded::SpriteImport)
+    summary = Reloaded::SpriteImport.import
+    $game_temp.nb_imported_sprites = summary[:imported].to_i
+    $game_temp.unimportedSprites = summary[:conflicts] || {}
+    return summary
+  end
+
   $game_temp.nb_imported_sprites=0
   echo "Sorting CustomBattlers files..."
 
   # pbMessage("Warning: Sprites that are manually imported will not get updated when a new sprite pack releases. This means that if some contain errors, these will not get fixed for you. All of the sprites from the latest spritepack are already available in your game without the need to manually import anything.")
-  # if !pbConfirmMessage("Do you still wish to import the sprites that are in the \"Sprites to import\" folder")
+  # if !pbConfirmMessage("Do you still wish to import the sprites that are in the \"Sprite Import\" folder")
   #   return
   # end
 
