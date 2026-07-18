@@ -215,6 +215,9 @@ def generateTrainerTradeOffer(trainer)
   chosen_index = pbGet(1)
   if chosen_index && chosen_index >= 0
     chosen_pokemon = $Trainer.party[chosen_index]
+    if defined?(Reloaded::PokemonDistribution) && Reloaded::PokemonDistribution.reject_trade(chosen_pokemon)
+      return trainer
+    end
     offered_pokemon = offerPokemonForTrade(chosen_pokemon, trainer.currentTeam, trainer.trainerType, trainer.favorite_type)
     if !offered_pokemon
       pbMessage(_INTL("{1} {2} does not want to trade...", trainerClassName, trainer.trainerName))

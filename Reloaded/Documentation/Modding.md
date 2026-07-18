@@ -36,10 +36,32 @@ are:
 - `Reloaded::ModManager`
 - `Reloaded::ModBrowser`
 - `Reloaded::Publisher`
+- `Reloaded::Platform`
+- `Reloaded::Download`
+- `Reloaded::Archive`
+- `Reloaded::FileActions`
+- `Reloaded::RemoteData`
+- `Reloaded::Task`
+- `Reloaded::ProgressWindow`
+- `Reloaded::Rewards`
+- `Reloaded::Diagnostics`
+- `Reloaded::ModArchives`
+- `Reloaded::ModDevelopment`
 - `Reloaded::ModderTools`
 - `Reloaded::Profiles`
 - `Reloaded::ModSettings`
 - `Reloaded::Options`
+- `Reloaded::PopupWindow`
+- `Reloaded::ActionMenu`
+- `Reloaded::TextInput`
+- `Reloaded::ListState`
+- `Reloaded::ListPicker`
+- `Reloaded::GameDataPicker`
+- `Reloaded::NumberPicker`
+- `Reloaded::Form`
+- `Reloaded::HintText`
+- `Reloaded::InputBindings`
+- `Reloaded::Toast`
 - `Reloaded::Settings`
 - `ReloadedPauseMenu`
 - `ReloadedIVBoundaries`
@@ -55,6 +77,91 @@ are:
   errors.
 - Avoid replacing vanilla methods unless wrapping or events cannot solve the
   problem.
+
+## API Contracts
+
+Reloaded APIs are classified so mods can distinguish supported integration
+points from compatibility and development surfaces:
+
+- `stable` - supported public APIs intended for mods.
+- `compatibility` - retained aliases or older surfaces; prefer the replacement.
+- `developer` - diagnostics, publishing, archives, and development tools.
+- `internal` - implementation details with no compatibility promise.
+
+Inspect a contract without loading or calling the target system:
+
+```ruby
+Reloaded::API.contract(:events)
+Reloaded::API.public?(:events)
+Reloaded::API.available?(:events)
+Reloaded::API.contracts
+```
+
+Contract hashes returned to callers are copies and cannot mutate the registry.
+Compatibility code can emit a once-per-session developer warning without
+showing a player popup:
+
+```ruby
+Reloaded.deprecate("Reloaded::Hooks", :replacement => "Reloaded::Events")
+```
+
+`Reloaded::Hooks` and `Reloaded::ModderTools` remain available for existing
+mods. New integrations should use their listed replacements.
+
+## Systems And Feature Flags
+
+Most content mods do not need to register a system. Register one when a mod
+provides a substantial reusable subsystem with dependencies, save data, or
+public integration points:
+
+```ruby
+Reloaded.register_system(
+  :example_quests,
+  :name => "Example Quests",
+  :owner => :example_mod,
+  :required_systems => [:save_data, :events],
+  :save_keys => [:example_mod]
+)
+```
+
+Check an optional Reloaded integration with one call:
+
+```ruby
+if Reloaded::Systems.active?(:poke_vial)
+  # Integrate with the PokeVial API.
+else
+  Reloaded::Log.mod("example_mod", Reloaded::Systems.reason(:poke_vial))
+end
+```
+
+Mods with unfinished or optional structural subsystems can register feature
+flags:
+
+```ruby
+Reloaded::Features.register(
+  :example_advanced_quests,
+  :name => "Advanced Quests",
+  :owner => :example_mod,
+  :default => false,
+  :classification => :experimental
+)
+
+return unless Reloaded::Features.active?(:example_advanced_quests)
+```
+
+Ordinary player preferences should remain normal Options settings. Feature
+flags are intended for structural availability, staged development, platform
+restrictions, and safe mod requirements.
+
+Official system and feature IDs can be inspected through:
+
+```ruby
+Reloaded::Systems.systems
+Reloaded::Features.features
+```
+
+See `Reloaded/Documentation/System.md` for the complete registration fields,
+states, classifications, and override scopes.
 
 ## Logging
 
@@ -101,6 +208,37 @@ provide an answer.
 
 See `Reloaded/Documentation/Events.md` for the full event reference.
 
+## Mod Validation
+
+Mods can register diagnostics without editing foundation files:
+
+```ruby
+Reloaded::Validation.register(
+  :example_mod_assets,
+  :owner => :example_mod,
+  :category => :assets,
+  :phase => :developer
+) do
+  next [] if pbResolveBitmap("Graphics/Pictures/example_icon")
+  {
+    :severity => :warning,
+    :code => :missing_example_icon,
+    :message => "Example Mod icon is missing.",
+    :recommended_fix => "Reinstall Example Mod."
+  }
+end
+```
+
+Validators return `nil`, `true`, a finding hash, or an array of finding hashes.
+Supported phases are `boot`, `modules_loaded`, `game_data_loaded`,
+`save_loaded`, `developer`, and `release`. Validator exceptions are isolated
+and reported rather than stopping the game.
+
+Background validation keeps findings in memory and sends serious results to
+the bug report without continuously writing a separate validation file.
+`Reloaded::Validation.refresh_report` reruns the non-release checks and writes
+`Reloaded/Logging/ValidationReport.txt` when a detailed report is needed.
+
 ## Patches
 
 Use `Reloaded::Patches` when a mod or Reloaded system changes vanilla behavior,
@@ -140,10 +278,1106 @@ save = Reloaded::SaveData.mod(:example_mod)
 save["quest_stage"] = 2
 ```
 
+Save metadata can be inspected for diagnostics and compatibility reporting:
+
+```ruby
+metadata = Reloaded::SaveData.metadata
+saved_with = Reloaded::SaveData.last_saved_with_version
+```
+
+The returned metadata is a defensive copy. Mods should not use metadata as
+their own storage area; use the mod namespace APIs instead.
+
+### Mod Save Migrations
+
+When a mod changes the shape of its saved data, register sequential namespace
+migrations before the selected game is loaded:
+
+```ruby
+Reloaded::SaveMigrations.register_mod(
+  :example_mod,
+  :from => 0,
+  :to => 1
+) do |data|
+  data["enabled"] = true unless data.key?("enabled")
+  data
+end
+```
+
+Each step must advance by one version. Reloaded stores the resulting version as
+`_schema_version` in that mod's namespace. Migration blocks may mutate and
+return the supplied hash, or return a replacement hash.
+
+Do not migrate another mod's namespace or base-game save objects through this
+API. A failed mod migration preserves the original namespace, logs the failure,
+and allows unrelated migrations to continue.
+
+When the selected save requires a Reloaded schema migration, Reloaded creates
+and verifies a rolling backup of the source slot before running the migration.
+If the backup fails, the migration is cancelled and Reloaded save writes are
+blocked for that session.
+
 Do not add random fields to vanilla save objects for mod data unless there is no
 Reloaded API that can handle the use case.
 
 See `Reloaded/Documentation/System.md` for the full save data reference.
+
+## Action Menu API
+
+Use `Reloaded::ActionMenu` for state-aware command menus. It delegates drawing,
+scrolling, mouse handling, Back behavior, and modal input consumption to
+`Reloaded::PopupWindow`.
+
+```ruby
+commands = [
+  {
+    :id => :use,
+    :label => "Use",
+    :enabled => proc { |context| context[:usable] },
+    :disabled_reason => "This item cannot be used here.",
+    :callback => proc { |context| context[:scene].use_item }
+  },
+  {
+    :id => :discard,
+    :label => "Discard",
+    :visible => proc { |context| !context[:key_item] },
+    :confirm => "Throw this item away?",
+    :callback => proc { |context| context[:scene].discard_item }
+  }
+]
+
+selected = Reloaded::ActionMenu.open(
+  "Item Actions",
+  commands,
+  { :scene => self, :usable => true, :key_item => false },
+  :remember_key => :example_item_actions,
+  :list_state => @list_state
+)
+```
+
+Each command requires a unique `:id` other than the reserved `:back` ID and
+supports `:label`, `:visible`,
+`:enabled`, `:disabled_reason`, `:callback`, `:confirm`, `:close_on_run`,
+`:color`, and `:align`. Labels and state values may be static or callable.
+Callables can accept no arguments, the supplied context, or the context and
+normalized command.
+
+Disabled commands remain navigable but dimmed. Activating one plays the denial
+sound, displays its reason, and returns to the same row. Hidden commands are not
+shown. Back returns `:back` and never invokes a command callback.
+
+`Reloaded::ActionMenu.open` executes the selected callback.
+`Reloaded::ActionMenu.choose` only returns the selected command ID, which is
+useful when an existing scene must preserve its own dispatch logic. Pass
+`:close_on_run => false` on a command to reevaluate and reopen the menu after
+its callback. Options include `:start_id`, `:remember_key`, `:add_back`,
+`:back_label`, `:list_state`, `:on_back`, and normal PopupWindow presentation
+options.
+
+Short aliases are available as `Reloaded.action_menu` and
+`Reloaded.choose_action`.
+
+## Popup Window API
+
+Use `Reloaded::PopupWindow` when a mod needs a Reloaded-styled popup instead of
+copying UI code.
+
+```ruby
+Reloaded::PopupWindow.message("Settings saved.")
+```
+
+Short aliases are also available for simple mod scripts and event calls:
+
+```ruby
+Reloaded.message("Settings saved.")
+
+if Reloaded.confirm("Use this?")
+  # do work
+end
+
+choice = Reloaded.choice("Choose a reward", ["Potion", "Rare Candy", "Back"])
+Reloaded.toast("Downloaded.")
+```
+
+The same short helpers are also exposed under `Reloaded::Confirm` for modders
+who prefer a grouped namespace:
+
+```ruby
+Reloaded::Confirm.message("Settings saved.")
+Reloaded::Confirm.confirm("Use this?")
+Reloaded::Confirm.choice("Choose a reward", ["Potion", "Rare Candy", "Back"])
+Reloaded::Confirm.toast("Downloaded.")
+```
+
+Confirm popups return `true` or `false`.
+
+```ruby
+if Reloaded::PopupWindow.confirm("Enable this feature?")
+  # apply setting
+end
+```
+
+Choice popups return the selected value, or `-1` if the player backs out.
+
+```ruby
+choice = Reloaded::PopupWindow.choice("Choose a reward", [
+  "Potion",
+  "Rare Candy",
+  { :label => "Unavailable", :disabled => true },
+  { :label => "Back", :value => -1, :back => true }
+])
+```
+
+Section headers are centered and cannot be selected.
+
+```ruby
+Reloaded::PopupWindow.choice("Spritepacks", [
+  { :label => "Latest", :header => true },
+  { :label => "Full Spritepack", :value => :full },
+  { :label => "Latest Pack", :value => :latest },
+  { :label => "All Files", :header => true },
+  { :label => "Back", :value => -1, :back => true }
+])
+```
+
+Command popups can run procs safely. Failures are logged and shown as a Reloaded
+error popup instead of being silently swallowed.
+
+```ruby
+Reloaded::PopupWindow.command("Tools", [
+  ["Open Folder", proc { MyMod.open_folder }],
+  { :label => "Back", :value => -1, :back => true }
+])
+```
+
+Async popups can be shown while work happens, then updated or closed.
+
+```ruby
+popup = Reloaded::PopupWindow.async("Fetching data...")
+begin
+  # do work
+  popup.update("Installing files...") if popup
+ensure
+  popup.close if popup
+end
+```
+
+Theme examples:
+
+```ruby
+Reloaded::PopupWindow.message("Saved.", :theme => :success)
+Reloaded::PopupWindow.message("Check this before continuing.", :theme => :warning)
+Reloaded::PopupWindow.message("Download failed.", :theme => :error)
+```
+
+Supported themes are `:hr`, `:success`, `:warning`, and `:error`.
+
+## Text Input API
+
+Use `Reloaded::TextInput` when a mod needs player/admin text entry without
+copying a custom input loop.
+
+```ruby
+name = Reloaded::TextInput.open("Name", :initial => "New Entry")
+```
+
+Short aliases are available for common input types:
+
+```ruby
+name = Reloaded.text_input("Name", :initial => "New Entry")
+notes = Reloaded.multiline_input("Description", :initial => "")
+code = Reloaded.code_input("Promo Code", :max_length => 32)
+url = Reloaded.url_input("Download URL", :initial => "")
+```
+
+Text inputs use the HR popup style, wrap text inside the input field, and scroll
+vertically when the content is longer than the visible area. Mouse wheel and
+right-stick scrolling are supported where the current input backend exposes
+them.
+
+Controls:
+
+- `Enter` confirms.
+- `Esc` cancels.
+- `Shift+Enter` inserts a new line in multiline mode.
+- `Ctrl+A` selects all.
+- `Ctrl+C` copies.
+- `Ctrl+V` pastes.
+- `Ctrl+X` cuts.
+
+Validation failures should return a message from the validator. The field stays
+open and shows the message as a warning toast.
+
+```ruby
+url = Reloaded.text_input(
+  "Download URL",
+  :initial => "",
+  :size => :large,
+  :validator => proc { |value|
+    value =~ /\Ahttps?:\/\//i || "Enter a valid URL."
+  }
+)
+```
+
+## List State API
+
+Use `Reloaded::ListState` inside a custom scene when the scene owns its own
+layout but needs standard Reloaded list behavior. It does not draw anything or
+run scene actions.
+
+```ruby
+state = Reloaded::ListState.new(
+  :rows => rows,
+  :visible_rows => 10,
+  :row_id => proc { |row, _index| row[:id] },
+  :disabled => proc { |row, _index| row[:locked] },
+  :disabled_reason => proc { |row, _index| row[:locked_reason] },
+  :horizontal => :jump,
+  :remember => true,
+  :memory_key => [:my_mod, :reward_list]
+)
+
+event = state.update_input(
+  :mouse_index => proc { |mouse_x, mouse_y| row_at(mouse_x, mouse_y, state.scroll) }
+)
+case event.type
+when :moved   then redraw_list
+when :activate then use_row(event.row)
+when :disabled then Reloaded.toast_warning(event.reason)
+when :back    then close_scene
+end
+```
+
+The state owns one-row Up/Down movement, three-row Left/Right jumps, selection,
+scrolling, stable row IDs, headers, disabled rows, active-only mouse input, and
+session-only cursor memory. Use `:horizontal => :external` when Left/Right
+belongs to the scene, such as changing Bag or Mart pockets. Use
+`:horizontal => :disabled` when the scene handles those inputs before the list.
+
+Call `replace_rows(new_rows, :preserve => :id)` after filtering or refreshing.
+Call `dialog_closed!`, or wrap a modal call with `with_dialog`, so the input
+that closes a popup cannot activate the background list. Disabled rows remain
+focusable by default and produce a `:disabled` event; set
+`:focus_disabled => false` to skip them entirely.
+
+`Reloaded::ListState` complements `Reloaded::ListPicker`: use ListPicker for a
+complete shared selector and ListState for a scene-specific layout.
+
+## List Picker API
+
+Use `Reloaded::ListPicker` for shared HR-style list selection instead of
+building a scene-specific command window.
+
+```ruby
+item = Reloaded::ListPicker.open(
+  "Choose an Item",
+  rows,
+  :layout => :popup,
+  :search => true,
+  :wrap => true,
+  :start_value => :POTION
+)
+```
+
+`Reloaded.list_picker` is the short alias. `Reloaded::ListPicker.popup` and
+`Reloaded::ListPicker.fullscreen` select a layout directly. A single-select
+picker returns the selected row value, or `nil` when Back is chosen or pressed.
+
+Rows can be strings, `[label, value, status, detail]` arrays, or hashes:
+
+```ruby
+rows = [
+  { :label => "Medicine", :header => true },
+  {
+    :label => "Potion",
+    :value => :POTION,
+    :status => "x12",
+    :detail => "Restores HP.",
+    :search_text => "medicine healing potion"
+  },
+  {
+    :label => "Max Potion",
+    :value => :MAXPOTION,
+    :disabled => true,
+    :disabled_reason => "You do not own this item."
+  }
+]
+```
+
+Supported behavior includes:
+
+- Non-selectable section headers and disabled rows.
+- A Back row plus Back-input cancellation without background input bleed.
+- Optional `:start_on_back => true` for selectors that should open on Back.
+- One-row Up/Down movement and three-row Left/Right jumps.
+- Optional top/bottom wrapping.
+- Click-only search with Clear, stable cursor restoration, and matched-header
+  filtering.
+- Mouse hover, click selection, wheel scrolling, and a proportional scrollbar.
+- Shared `Controls (Y)` footer access through `Reloaded::HintText`; button
+  mappings are shown in the Controls toast instead of being laid out in the
+  footer.
+- Fixed-height wrapped rows or ellipsis for long labels.
+- Optional right-aligned status text, row colors, details, footer status, and
+  final selection validation.
+- Stable selection during filtering and live provider refreshes.
+
+Full-screen pickers can show a right-side details panel. Popup pickers place the
+optional details panel below the list.
+
+```ruby
+choice = Reloaded::ListPicker.fullscreen(
+  "Choose a Reward",
+  rows,
+  :details => true,
+  :footer_status => "Rare rewards only",
+  :on_highlight => proc { |row| reward_description(row[:value]) }
+)
+```
+
+Multi-select mode adds a Done row and returns an array. Back still returns
+`nil`.
+
+```ruby
+selected = Reloaded::ListPicker.open(
+  "Affected Entries",
+  rows,
+  :multi_select => true,
+  :start_values => [:POTION, :ANTIDOTE],
+  :done_label => "Apply"
+)
+```
+
+For a live list, pass a proc and enable refresh. Providers should be fast and
+side-effect free because they may be called more than once.
+
+```ruby
+Reloaded::ListPicker.open(
+  "Downloads",
+  proc { build_download_rows },
+  :live_refresh => true,
+  :refresh_interval => 30
+)
+```
+
+Icons, badges, reordering, and nested/tree rows are intentionally outside the
+current List Picker contract.
+
+Reloaded mouse-aware UI uses `Reloaded::MouseInput.active_position`. It only
+returns a position on frames where the mouse moved, clicked, or scrolled, and
+keyboard/controller commands take priority. A stationary cursor therefore
+cannot override the current list selection.
+
+## Game Data Picker API
+
+Use `Reloaded::GameDataPicker` when an editor or ModDev tool needs a canonical
+game-data ID. It builds searchable ListPicker rows from the live registries and
+returns the selected ID rather than display text.
+
+```ruby
+item_id = Reloaded::GameDataPicker.item(
+  "Catalog Item",
+  :start_value => :SUPERPOTION
+)
+
+species_ids = Reloaded::GameDataPicker.species(
+  "Gift Pokemon",
+  :multi_select => true,
+  :start_values => [:TREECKO, :TORCHIC, :MUDKIP]
+)
+```
+
+Available selectors are `item`, `species`/`pokemon`, `move`, `ability`, `type`,
+`map`, and `trainer_class`/`trainer_type`. The generic entry point is
+`Reloaded::GameDataPicker.pick(kind, title, options)`, with the short alias
+`Reloaded.pick_game_data`.
+
+Rows include the localized name, canonical internal ID, numeric ID when one is
+available, search aliases, and useful record details. Maps use the live
+`MapInfos.rxdata` data because they are not stored in the same registry shape.
+Back returns `nil`; multi-select returns an array of canonical IDs.
+
+Options include `:start_value`, `:start_values`, `:filter`, `:include`,
+`:exclude`, `:disabled`, `:disabled_reason`, `:sort`, `:multi_select`,
+`:layout`, `:search`, `:details`, `:include_placeholders`, and `:return`.
+Set `:return => :data` to receive the selected GameData record instead of its
+ID. Filter and row-state procs receive the record and canonical ID.
+
+```ruby
+move_id = Reloaded::GameDataPicker.move(
+  "Damaging Move",
+  :filter => proc { |move| move.base_damage.to_i > 0 },
+  :exclude => [:STRUGGLE]
+)
+```
+
+The picker only selects data. It does not grant rewards, mutate registries, or
+apply Data Patches.
+
+## Number Picker API
+
+Use `Reloaded::NumberPicker` for quantity and integer selection. Cancel returns
+`nil`, allowing zero to remain a valid editor value.
+
+```ruby
+quantity = Reloaded::NumberPicker.quantity(
+  "Potion",
+  :min => 1,
+  :max => 99,
+  :initial => 1,
+  :step => 1,
+  :large_step => 10,
+  :unit_price => 300,
+  :show_unit_price => true,
+  :currency_formatter => proc { |value| "$#{value}" }
+)
+```
+
+`Up/Down` uses `:step`; `Left/Right` uses `:large_step`. Normal steps can
+wrap with `:wrap`, while large steps clamp. Mouse wheel changes one step,
+left-clicking the value confirms, and right-click cancels. Set
+`:allow_max_shortcut => true` to let Action jump to the maximum.
+
+At the maximum, `:show_max_label => true` displays blue `MAX (number)`.
+`:value_prefix`, `:value_suffix`, `:preview`, `:preview_color`, `:on_change`,
+and `:validator` support non-Mart editors and reward tools. NumberPicker does
+not draw a Controls footer label, but Y still opens its Controls toast.
+
+`Reloaded::NumberPicker.confirm` uses the same title, item, quantity,
+unit-price, and total layout with `Yes/No` rows. The quantity picker keeps its
+cursor on `OK`; the confirmation variant keeps it only on `Yes/No`.
+
+`Reloaded.number_picker` and `Reloaded.quantity_picker` are short aliases.
+
+## Form API
+
+Use `Reloaded::Form` for full-screen editors that need several typed fields,
+field descriptions, validation, dirty-state tracking, and safe save/discard
+behavior. Form edits an isolated draft and returns the saved hash. Back returns
+`nil`; the source hash is never modified directly.
+
+```ruby
+result = Reloaded::Form.open(
+  "Reward Editor",
+  [
+    {
+      :id => "name",
+      :label => "Name",
+      :type => :text,
+      :required => true,
+      :description => "Display name for this reward."
+    },
+    {
+      :id => "item",
+      :label => "Item",
+      :type => :game_data,
+      :game_data => :item,
+      :required => true
+    },
+    {
+      :id => "quantity",
+      :label => "Quantity",
+      :type => :number,
+      :min => 1,
+      :max => 9999,
+      :step => 1,
+      :large_step => 10
+    },
+    {
+      :id => "enabled",
+      :label => "Enabled",
+      :type => :toggle,
+      :default => true
+    }
+  ],
+  { "name" => "Potion Pack", "item" => "POTION", "quantity" => 5 }
+)
+```
+
+Supported field types are `:text`, `:multiline`, `:number`, `:toggle`,
+`:enum`, `:list`, `:game_data`, `:custom`, `:readonly`, and `:header`.
+Common properties include `:default`, `:required`, `:description`, `:min`,
+`:max`, `:step`, `:large_step`, `:choices`, `:visible`, `:enabled`,
+`:disabled_reason`, `:normalize`, `:validate`, and `:on_change`.
+
+Conditions and callbacks receive the current draft. Field validation may return
+`true`, an error string, or `{ :level => :warning, :message => "..." }`.
+Form-level `:validate`, `:on_change`, and `:on_save` callbacks are supplied in
+the options hash. `:on_save` runs on the main thread and may return `false` or
+an error string to keep the form open.
+
+Enums use `Reloaded::ListPicker`, GameData fields use
+`Reloaded::GameDataPicker`, and numbers use `Reloaded::NumberPicker`.
+Up/Down moves one field and Left/Right moves three. Confirm edits, Action saves,
+Back handles dirty confirmation, and Y opens the Controls Toast. The short
+alias is `Reloaded.form(title, fields, values, options)`.
+
+## File Actions API
+
+Use `Reloaded::FileActions` instead of launching files, folders, or clipboard
+operations directly. Relative paths resolve from the game folder. Absolute
+paths are allowed only when they resolve inside the game folder; outside paths,
+including paths reached through a symlink or junction, are refused.
+
+```ruby
+Reloaded::FileActions.open_folder("Mods")
+Reloaded::FileActions.open_file("Reloaded/Changelog.md")
+Reloaded::FileActions.open("Reloaded/Logging/Log.txt")
+
+Reloaded::FileActions.copy("Text copied by my mod")
+text = Reloaded::FileActions.read_clipboard
+```
+
+Online text-file and log exports use the existing diagnostics uploader and
+copy the returned URL to the clipboard:
+
+```ruby
+url = Reloaded::FileActions.export_log("LatestBugReport.txt")
+url = Reloaded::FileActions.export_file("Reloaded/Logging/Mods.txt")
+```
+
+`export_file` is for non-empty text files up to 5 MB, not binary archives or
+images.
+Desktop file, clipboard, and export actions should be hidden unless the
+corresponding `Reloaded::Platform.supports?` capability is available.
+
+For safe display and logging, never show a resolved absolute path. Use:
+
+```ruby
+path = Reloaded::FileActions.resolve("Mods/My Mod/mod.json", :type => :file)
+Reloaded::FileActions.inside_game?(path, :must_exist => true)
+Reloaded::FileActions.display_path(path)
+Reloaded::FileActions.sanitize(error.message)
+```
+
+`display_path` returns a game-relative path for in-game files and only the
+basename for refused outside paths. File action errors contain sanitized paths.
+
+## Remote Data API
+
+Use `Reloaded::RemoteData` for small remote text or JSON sources that need a
+validated last-known-good cache and an optional shipped local fallback. It is
+used by the Mod Browser, Spritepacks, Reloaded Mart catalog, Hoenn Reloaded
+version checks, remote changelogs, and published profile text.
+
+Register a named source owned by your mod, then fetch it:
+
+```ruby
+Reloaded::RemoteData.register(
+  :example_catalog,
+  :owner => :example_mod,
+  :format => :json,
+  :url => "https://example.com/catalog.json",
+  :local_path => "Mods/Example Mod/catalog.json",
+  :timeout => 8,
+  :retries => 1,
+  :ttl => 3600,
+  :validator => proc { |value| value.is_a?(Hash) && value["entries"].is_a?(Array) }
+)
+
+result = Reloaded::RemoteData.fetch(:example_catalog)
+entries = result.value["entries"] if result.ok?
+```
+
+The retrieval order is remote, validated cache, then local fallback. A failed,
+oversized, malformed, or validator-rejected response never replaces the good
+cache. `load` reads only cache/local data and never starts a network request:
+
+```ruby
+result = Reloaded::RemoteData.load(:example_catalog)
+```
+
+`Result` exposes `ok?`, `value`, `body`, `source`, `status`, `fetched_at`,
+`loaded_at`, `cache_age`, `stale?`, `fallback?`, `remote_confirmed?`,
+`http_status`, `attempts`, `error_code`, `error_message`, `source_id`, and
+`url_label`. A cache returned after a failed remote attempt has
+`fallback? == true`. A `304 Not Modified` cache result has
+`remote_confirmed? == true`.
+
+For one-off text or JSON, use:
+
+```ruby
+text_result = Reloaded::RemoteData.fetch_text("https://example.com/notes.txt")
+json_result = Reloaded::RemoteData.fetch_json("https://example.com/data.json")
+```
+
+RemoteData accepts HTTPS only, refuses cache/local paths outside the game
+folder, follows bounded HTTPS redirects, applies response-size limits, and
+sanitizes logged errors. Windows and Proton support remote retrieval. JoiPlay
+uses existing cache/local fallbacks without attempting a network request.
+
+RemoteData is synchronous. Use `Reloaded::Task` when a fetch must not block the
+rendering loop. Do not use RemoteData for mod archives, spritepack archives,
+images, or other large binary files; use `Reloaded::Download` for those.
+
+## Download API
+
+Use `Reloaded::Download` for large HTTPS files. It streams into a
+same-directory `.part` file, applies configured size and SHA-256 checks, and
+only then atomically promotes the completed file to its destination.
+
+```ruby
+result = Reloaded::Download.fetch(
+  download_url,
+  archive_path,
+  :task => task,
+  :label => "Example Mod",
+  :min_bytes => 128,
+  :expected_bytes => 12_345_678,
+  :sha256 => "64 lowercase or uppercase hexadecimal characters",
+  :progress_range => [0.0, 0.6]
+)
+
+task.fail!(result.error_message, result.error_code) unless result.success?
+```
+
+`expected_bytes` and `sha256` are optional. When supplied, both must match
+before the destination is replaced. `max_bytes`, `open_timeout`,
+`read_timeout`, `redirect_limit`, `retries`, custom `headers`, and a `label`
+may also be supplied. Redirects remain HTTPS and sensitive headers are removed
+when the origin changes.
+
+`Result` exposes `success?`/`ok?`, `status`, `error_code`, `error_message`,
+sanitized `url`, `final_url`, and `destination`, plus `bytes`,
+`expected_bytes`, `sha256`, `duration`, `attempts`, `transport`, `http_status`,
+and safe response `headers`.
+
+For a standalone background download, use:
+
+```ruby
+handle = Reloaded::Download.start(
+  download_url,
+  archive_path,
+  :label => "Example Mod",
+  :task_options => { :owner => :example_mod, :duplicate => :reuse }
+)
+Reloaded::ProgressWindow.show(handle, :title => "Downloading", :cancellable => true)
+```
+
+Downloads are restricted to the game folder and Reloaded's system temporary
+folder. Failed, cancelled, oversized, incomplete, or invalid downloads remove
+their `.part` files and preserve any valid existing destination. Windows and
+Proton use streaming HTTPS with a platform fallback. JoiPlay does not expose
+remote downloads.
+
+## Archive API
+
+Use `Reloaded::Archive` to inspect or extract ZIP, RAR, and 7Z files. It lists
+and validates every archive entry before extraction, rejects absolute and
+parent-directory paths, links, encrypted entries, duplicate paths, Windows
+device names, excessive entry sizes/counts, and unsafe compression ratios.
+
+```ruby
+result = Reloaded::Archive.extract(
+  archive_path,
+  destination,
+  :overwrite => :fail,
+  :task => task,
+  :progress_range => [0.25, 0.9],
+  :verify => true
+)
+
+task.fail!(result.error_message, result.error_code) unless result.success?
+```
+
+`overwrite` accepts `:fail`, `:skip`, or `:overwrite`. Prefer `:fail` for a new
+staging folder. Use `:overwrite` only for an intentional update flow such as a
+Spritepack replacing existing sprite files. `verify` checks that every listed
+file exists afterward and should be reserved for smaller archives where the
+additional file-system pass is worthwhile.
+
+`inspect_archive(path)` performs the same safety preflight without extracting.
+Both methods return `Reloaded::Archive::Result`, exposing `success?`/`ok?`,
+`status`, `error_code`, `error_message`, `entry_count`, `expanded_bytes`,
+`packed_bytes`, sanitized `archive`/`destination` labels, `duration`, and
+`warnings`. Pass `:include_entries => true` only when the caller needs the
+validated entry rows.
+
+Archive sources and destinations are limited to the game folder and Reloaded's
+system temporary folder. Errors and logs never expose full machine paths.
+Extraction uses the bundled 7-Zip adapter on Windows and Proton. JoiPlay does
+not expose archive extraction; Android users install archive contents manually.
+Run extraction inside `Reloaded::Task` and display `Reloaded::ProgressWindow`
+for user-started operations. Worker code must not modify game UI or game state.
+
+## Background Task API
+
+Use `Reloaded::Task` for network, archive, export, publisher-launch, or other
+blocking I/O. A worker block may perform I/O and computation only. It must not
+change scenes, draw UI, write save/profile state, use the clipboard, or mutate
+live game registries. Apply those changes from callbacks, which Task delivers
+on the game thread after popup and held-input state is clear.
+
+```ruby
+handle = Reloaded::Task.start(
+  :example_catalog_refresh,
+  :owner => :example_mod,
+  :duplicate => :reuse,
+  :timeout => 30,
+  :on_success => proc do |outcome|
+    ExampleCatalog.replace(outcome.value)
+    Reloaded.toast_success("Catalog updated.")
+  end,
+  :on_failure => proc do |outcome|
+    Reloaded.toast_error("Catalog failed: #{outcome.error_message}")
+  end
+) do |task|
+  task.report(0.1, "Fetching")
+  result = Reloaded::RemoteData.fetch(:example_catalog, :force => true)
+  task.fail!(result.error_message, result.error_code) unless result.ok?
+  task.checkpoint!
+  task.report(1.0, "Ready")
+  result.value
+end
+```
+
+Duplicate policies are `:reuse`, `:reject`, and `:queue`. Cancellation is
+cooperative: long workers should call `task.checkpoint!` between stages.
+`handle.state`, `handle.running?`, `handle.complete?`, `handle.cancel`,
+`handle.progress`, `handle.stage`, and `handle.outcome` expose task state.
+Outcomes provide `success?`, `failed?`, `cancelled?`, the returned `value`,
+error details, timestamps, duration, progress, and stage.
+
+For optional built-in completion notices, pass `:notify` with `:success`,
+`:failure`, and optional `:mode => :auto`. Callbacks still own all game-state
+changes. Windows and Proton support background tasks; JoiPlay keeps these
+desktop/network actions hidden.
+
+## Progress Window API
+
+Use `Reloaded::ProgressWindow` for explicit user-started work that should keep
+the current scene visible while preventing background input. It uses the HR
+popup style, supports determinate or indeterminate progress, and can offer
+cooperative cancellation.
+
+```ruby
+handle = Reloaded::Task.start(
+  :example_export,
+  :owner => :example_mod,
+  :on_success => proc { |_outcome| Reloaded.toast_success("Export complete.") },
+  :on_failure => proc { |outcome| Reloaded.toast_error(outcome.error_message) },
+  :on_cancel => proc { |_outcome| Reloaded.toast_warning("Export cancelled.") }
+) do |task|
+  task.report_ratio(1, 3, "Collecting files")
+  task.checkpoint!
+  task.indeterminate!("Writing archive")
+  path = ExampleExporter.write_archive
+  task.checkpoint!
+  task.report(1.0, "Complete")
+  path
+end
+
+outcome = Reloaded::ProgressWindow.show(
+  handle,
+  :title => "Exporting Example",
+  :cancellable => true,
+  :cancel_prompt => "Cancel this export?"
+)
+```
+
+`:mode` accepts `:auto`, `:determinate`, or `:indeterminate`. In `:auto`, a
+reported numeric value draws a percentage and a missing value draws the
+animated indeterminate bar. Other options include `:stage`, `:width`,
+`:minimum_visible_time`, `:show_dim`, `:confirm_cancel`, `:cancel_text`, and
+`:cancelling_text`. `Reloaded::ProgressWindow.run(key, options) { |task| ... }`
+is a convenience wrapper that starts and displays one task.
+
+Cancellation never kills a worker thread. Workers must call `task.checkpoint!`
+between meaningful stages; an external downloader, archive tool, or publisher
+may take time to return before cancellation can finish. The window closes only
+after the task is ready and held input is clear, then Task delivers callbacks
+and Toasts on the game thread. Start the task and show its window from the
+owning scene. Do not open a ProgressWindow from inside that task's callback.
+
+Use ProgressWindow for explicit downloads, extraction, imports, exports,
+backups, and publishing. Keep passive Mod Browser/Mart refreshes on normal
+`Reloaded::Task` plus Toast notifications so opening those scenes never waits
+on a modal window.
+
+## Rewards API
+
+Use `Reloaded::Rewards` to grant items, currencies, Pokemon, unlocks, and
+registered system/mod rewards through one validated path. Reloaded Mart,
+custom Mystery Gifts, event scripts, and mods use the same registry.
+
+```ruby
+result = Reloaded.grant_reward(
+  { :type => :item, :id => :POTION, :quantity => 3 },
+  :source => :my_event
+)
+
+result = Reloaded.grant_rewards([
+  { :type => :money, :amount => 5000 },
+  { :type => :pokevial_charge, :quantity => 1 }
+], :source => :my_mod)
+```
+
+`grant_reward` returns a `Reloaded::Rewards::Result`. Check `ok?`, `code`,
+`message`, `reward`, `receipt`, and `details`. `grant_rewards` preflights the
+whole batch, grants in registered priority order, and rolls already-applied
+rewards back in reverse order if a later grant fails.
+
+Built-in and Reloaded module reward types are:
+
+- `:item` - requires `:id`/`:item_id` and optional `:quantity`.
+- `:money` - requires a positive `:amount`.
+- `:currency` - requires `:currency` and a positive `:amount`. Built-ins are
+  `:money`, `:coins`, `:battle_points`, `:quest_points`, and
+  `:cosmetics_money` (Glimmer Coins).
+- `:pokemon` - requires `:species`; supports fallback species, level, quantity,
+  party/storage delivery, eggs, forms, shiny state, gender, nature, ability,
+  held item, moves, exact or ranged IVs, EVs, happiness, Poke Ball, nickname,
+  custom typings, OT/origin data, distribution identity/version, duplicate
+  policy, evolution policy, and an optional trade lock.
+- `:tm_vault` - requires `:move` and permanently adds it to the TM Vault.
+- `:outfit` - requires `:category` (`:clothes`, `:hat`, or `:hairstyle`) and
+  `:outfit_id`.
+- `:feature_unlock` - requires the ID of an explicitly registered Reloaded
+  feature that is not already enabled.
+- `:group` - requires `:grants`, an array of rewards that must all validate and
+  grant atomically. Group rollback runs in reverse order when a child fails.
+- `:choice` - requires `:options`, an array of reward payloads. The player
+  selects one currently valid option.
+- `:random` - requires `:rewards`, an array of reward payloads. Entries can
+  use relative `:weight` values or percentages through `:percentage` or
+  `:chance`. Percentage entries must all use percentages totaling exactly 100.
+  Only currently valid entries can be rolled.
+- `:pokevial_charge` - grants one or more charges.
+- `:pokevial_refill` - restores all missing charges.
+- `:pokevial_max_uses` - raises the unlocked maximum to `:max_uses`.
+- `:iv_boundary_boost` - grants a temporary IV Boundary rule.
+- `:iv_boundary_force_next` - queues a rule for matching new Pokemon.
+
+Pokemon rewards default to `:delivery => :either`, which fills the party first
+and then Pokemon Storage. Use `:party` or `:storage` to require one destination.
+Custom typings accept one or two type IDs and are saved on that Pokemon. Battle
+logic and Reloaded UI both read the stored types.
+
+```ruby
+Reloaded.grant_reward({
+  :type => :pokemon,
+  :species => :RALTS,
+  :level => 12,
+  :types => [:PSYCHIC, :FAIRY],
+  :nature => :MODEST,
+  :moves => [:CONFUSION, :DISARMINGVOICE],
+  :distribution_id => "my_mod:ralts:1",
+  :distribution_version => 1,
+  :duplicate_policy => :reject,
+  :untradeable => true,
+  :trade_lock_reason => "This event Pokemon cannot be traded.",
+  :delivery => :either
+}, :source => :my_event)
+```
+
+Use `:egg => true` for an egg. Explicit `:ivs` and `:evs` are hashes keyed by
+main stat IDs and override the generated values. If they are omitted, normal
+generation applies, including the IV Boundaries system. Pokemon granted with
+`:source => :reloaded_mart` are the exception: Reloaded Mart distributions
+always bypass player IV Boundaries and use only their configured IV payload or
+normal unconstrained generation.
+
+`duplicate_policy` accepts `:allow`, `:reject`, or `:replace` and requires a
+stable `distribution_id` unless it is `:allow`. `evolution_policy` accepts
+`:allow` or `:block`. An untradeable distribution also requires a stable ID;
+the restriction follows fusions and is enforced by normal trades, NPC trades,
+and Wonder Trade.
+
+Choice and weighted-random rewards can contain any registered reward type,
+including other groups up to eight levels deep:
+
+```ruby
+{
+  :type => :choice,
+  :prompt => "Choose your prize",
+  :options => [
+    { :type => :item, :id => :RARECANDY, :quantity => 3 },
+    { :type => :currency, :currency => :battle_points, :amount => 20 }
+  ]
+}
+
+{
+  :type => :group,
+  :name => "Supply Drop",
+  :grants => [
+    { :type => :item, :id => :POTION, :quantity => 5 },
+    { :type => :currency, :currency => :battle_points, :amount => 10 }
+  ]
+}
+
+{
+  :type => :random,
+  :rewards => [
+    { :type => :item, :id => :NUGGET, :chance => 80 },
+    { :type => :pokemon, :species => :EEVEE, :level => 10, :chance => 20 }
+  ]
+}
+```
+
+Percentage values are converted to the same internal weighted-roll path. Do
+not mix percentage fields and `:weight` within one random reward. If unavailable
+entries are filtered out, their percentages are removed and the remaining
+values are treated proportionally.
+
+Mods can add a currency without creating another reward handler:
+
+```ruby
+Reloaded::Rewards.register_currency(
+  :my_tokens,
+  :owner => :my_mod,
+  :name => "Tokens",
+  :getter => proc { MyMod.tokens },
+  :setter => proc { |value| MyMod.tokens = value },
+  :max => 999
+)
+```
+
+Register a mod reward type with a globally unique snake-case ID. The active
+mod ID is used as owner automatically while the Mod Manager loads a mod, but an
+explicit owner is recommended in reusable code:
+
+```ruby
+Reloaded::Rewards.register(
+  :my_mod_tokens,
+  :owner => :my_mod,
+  :aliases => [:legacy_my_tokens],
+  :validate => proc { |reward, context|
+    reward[:quantity].to_i > 0
+  },
+  :grant => proc { |reward, context|
+    before = MyMod.tokens
+    MyMod.tokens += reward[:quantity].to_i
+    Reloaded::Rewards.success(
+      :reward => reward,
+      :details => { :receipt_data => { :before => before } }
+    )
+  },
+  :rollback => proc { |receipt, context|
+    MyMod.tokens = receipt.data[:before]
+    true
+  },
+  :describe => proc { |reward|
+    "my_mod_tokens quantity=#{reward[:quantity]}"
+  }
+)
+```
+
+Handlers may also provide `:normalize`, `:expand`, `:finalize`, `:label`, and
+`:message`. `normalize` converts compatibility payloads, `expand` controls
+bundle quantity behavior, `finalize` performs non-reversible side effects only
+after an atomic batch succeeds, `label` supplies player-facing Mart text, and
+`message` supplies Mystery Gift presentation text. Reloaded Mart also defers
+finalizers until the complete purchase transaction succeeds.
+
+Duplicate type IDs and aliases are rejected unless framework code explicitly
+uses `override: true`. Registrations are rebuilt each boot and are not saved.
+Use `registered?`, `type`, and `types` for read-only inspection.
+
+Normal reward handlers should not open UI directly. The caller owns Mart,
+Mystery Gift, event-dialogue, or silent presentation. `:choice` is the one
+built-in exception because choosing its leaf reward is part of granting it.
+Use `context[:source]` for source-specific behavior and logging.
+
+## Toast API
+
+Use `Reloaded::Toast` for short HR-style status messages. Toasts default to an
+`OK` row with the HR cursor so confirm input is consumed by the toast. Choice
+and row toasts support mouse hover, click selection, and wheel scrolling.
+Custom OK toasts support clicking OK, and automatic toasts can be dismissed by
+clicking their panel.
+
+```ruby
+Reloaded::Toast.show("Saved.")
+Reloaded::Toast.ok("Browser updated.")
+Reloaded::Toast.success("Downloaded.")
+Reloaded::Toast.warning("No updates found.")
+Reloaded::Toast.error("Download failed.")
+```
+
+Auto mode is available for non-blocking timed status messages. Auto toasts need
+the owning scene to call `Reloaded::Toast.update` during its update loop.
+
+```ruby
+Reloaded::Toast.show("Saved.", :mode => :auto, :duration => 90)
+Reloaded::Toast.update
+```
+
+Custom toast bodies can render directly into the HR toast panel. The block gets
+the popup bitmap and a usable body rectangle.
+
+```ruby
+Reloaded::Toast.custom("Controls", :body_height => 96) do |bitmap, rect|
+  pbDrawTextPositions(bitmap, [["Custom body", rect[:x], rect[:y], 0,
+    Color.new(248, 248, 248), Color.new(0, 0, 0, 0)]])
+end
+```
+
+## Hint Text API
+
+Use `Reloaded::HintText` for Reloaded-owned footer/help rows instead of
+hand-formatting each scene.
+
+```ruby
+entries = [
+  Reloaded::HintText.confirm("Use"),
+  Reloaded::HintText.back,
+  Reloaded::HintText.action("Favorite"),
+  Reloaded::HintText.special("Promo Code"),
+  Reloaded::HintText.other("Sort", :sort)
+]
+
+hint = Reloaded::HintText.format(entries)
+```
+
+Formatted hints use `Action (input)` labels, separate entries with ` | `, and
+sort entries in this order: Confirm, Back, Action, Special, Others. Input labels
+come from the game's global `keybindings.mkxp1` file. Controller bindings are
+shown while a controller is connected; otherwise keyboard bindings are shown.
+`Hint Texts` defaults to `On` and can hide Reloaded-owned hint rows.
+
+To draw directly:
+
+```ruby
+Reloaded::HintText.draw(bitmap, entries, 8, 360, 496)
+```
+
+For scene footers, prefer the compact footer helper. It shows a clickable
+`Controls (Y)` button at the right of the footer and lets active scene modes
+appear as short status text. Do not add it to directional footer focus.
+`HintText.triggered?` opens the Controls popup from `Input::Y`.
+
+```ruby
+statuses = [Reloaded::HintText.status("Quick-Buy Mode", Color.new(80, 240, 120))]
+Reloaded::HintText.draw_footer(
+  bitmap, entries, 8, 360, 496,
+  :statuses => statuses
+)
+Reloaded::HintText.open_popup("Mart Hints", entries, :statuses => statuses) if Reloaded::HintText.triggered?
+```
+
+Short aliases are also available:
+
+```ruby
+Reloaded.hint_text(entries)
+Reloaded.draw_hint_text(bitmap, entries, 8, 360, 496)
+Reloaded.draw_hint_footer(bitmap, entries, 8, 360, 496)
+Reloaded.open_hint_popup("Hints", entries)
+```
+
+## Input Bindings API
+
+`Reloaded::InputBindings` is a read-only presentation helper. It reads the
+game's active global `keybindings.mkxp1` and never changes or intercepts input.
+
+```ruby
+confirm_label = Reloaded::InputBindings.label(:confirm)
+sort_label = Reloaded::InputBindings.label(:sort)
+```
+
+Supported action IDs are `:confirm`, `:back`, `:action`, `:special`, `:sort`,
+`:quick`, `:menu`, `:left`, `:right`, `:page`, and `:pocket`.
+Use the normal base `Input.trigger?`, `Input.press?`, and `Input.repeat?`
+methods for behavior.
 
 ## Data Patches
 
@@ -467,7 +1701,7 @@ end
 The Reloaded Pause Menu is implemented in:
 
 ```text
-Reloaded/Modules/001_ReloadedPauseMenu.rb
+Reloaded/Modules/PauseMenu.rb
 ```
 
 The active pause menu is controlled by the `Pause Menu` option in the
@@ -526,7 +1760,7 @@ ReloadedPauseMenu.register_module(
 ### Ordering Rules
 
 Ordering is controlled by the REPM order config near the top of
-`001_ReloadedPauseMenu.rb`:
+`PauseMenu.rb`:
 
 - `FIXED_ROW_ORDER`: the fixed first row. Users do not customize this row.
 - `CAROUSEL_ORDER`: the default carousel order. Registered modules not listed here are appended to the end.
@@ -559,7 +1793,7 @@ REPM layout state uses the Reloaded save bucket under
 The Overworld Menu is implemented in:
 
 ```text
-Reloaded/Modules/004_OverworldMenu.rb
+Reloaded/Modules/OverworldMenu.rb
 ```
 
 It preserves the reference quick-access overlay UI and opens from the overworld
@@ -590,7 +1824,7 @@ See `Reloaded/Documentation/OverworldMenu.md` for the full entry contract.
 IV Boundaries is implemented in:
 
 ```text
-Reloaded/Modules/007_IVBoundaries.rb
+Reloaded/Modules/IVBoundaries.rb
 ```
 
 Players can set IV boundaries for newly generated player-side Pokemon through
@@ -602,7 +1836,7 @@ action. If Max IV is below 31, perfect IVs are treated like any other
 out-of-range value and rerolled inside the active range.
 
 Trainer IV boundaries are not player-editable. They are controlled by difficulty
-rules and trainer-class config in `007_IVBoundaries.rb`:
+rules and trainer-class config in `IVBoundaries.rb`:
 
 ```ruby
 ReloadedIVBoundaries::TRAINER_DIFFICULTY_RULES
@@ -668,6 +1902,15 @@ Reloaded Mart and Mystery Gift payloads can activate IV rewards:
 Supported aliases include `iv_boundary`, `iv_boundaries`, `iv_boost`,
 `iv_floor_boost`, `iv_force_next`, and `iv_next`.
 
+Event scripts and mods can grant the same payloads directly:
+
+```ruby
+Reloaded.grant_reward(
+  { :type => :iv_boundary_boost, :scope => :wild, :floor_bonus => 5, :duration_minutes => 10 },
+  :source => :my_event
+)
+```
+
 Mods can register callbacks:
 
 ```ruby
@@ -688,11 +1931,20 @@ Supported callback names are `:before_apply` and `:after_apply`.
 PokeVial is implemented in:
 
 ```text
-Reloaded/Modules/006_PokeVial.rb
+Reloaded/Modules/PokeVial.rb
 ```
 
-Mods and Reloaded systems can grant charges, refill the vial, or unlock higher
-charge limits through the public script API:
+Mods and Reloaded systems should grant charges, refills, and unlocks through
+the shared Rewards API:
+
+```ruby
+Reloaded.grant_reward({ :type => :pokevial_charge, :quantity => 2 }, :source => :my_mod)
+Reloaded.grant_reward({ :type => :pokevial_refill }, :source => :my_mod)
+Reloaded.grant_reward({ :type => :pokevial_max_uses, :max_uses => 4 }, :source => :my_mod)
+```
+
+The lower-level PokeVial script methods remain available for direct feature
+control:
 
 ```ruby
 ReloadedPokeVial.add_uses(1, source: :my_mod)
@@ -711,7 +1963,7 @@ false if the vial is already full or unavailable.
 `unlock_max_uses(amount)` records a save-specific progression unlock while
 Progressive Uses is enabled. It does not lower an existing unlock. The current
 maximum also respects the built-in badge progression and any configured
-switch/variable progression rules in `006_PokeVial.rb`.
+switch/variable progression rules in `PokeVial.rb`.
 
 Useful checks:
 
@@ -759,7 +2011,7 @@ Remove a callback by ID:
 ReloadedPokeVial.unregister_callback(:before_use, :my_mod_vial_check)
 ```
 
-Optional progression config lives in `006_PokeVial.rb`:
+Optional progression config lives in `PokeVial.rb`:
 
 ```ruby
 PROGRESSION_SWITCH_UNLOCKS = {
@@ -774,7 +2026,7 @@ PROGRESSION_VARIABLE_UNLOCKS = {
 }
 ```
 
-Optional per-map denial text also lives in `006_PokeVial.rb`:
+Optional per-map denial text also lives in `PokeVial.rb`:
 
 ```ruby
 BLOCKED_MAP_IDS = [123]
@@ -809,7 +2061,7 @@ normal Bag-usable items:
 TM Vault is implemented in:
 
 ```text
-Reloaded/Modules/002_TMVault.rb
+Reloaded/Modules/TMVault.rb
 ```
 
 The vault stores its data in the Reloaded save bucket under the `tm_vault`
@@ -920,8 +2172,8 @@ Event payloads include:
 Reloaded Mart is implemented in:
 
 ```text
-Reloaded/Modules/003_ReloadedMart.rb
-Reloaded/Modules/003a_ReloadedMartUI.rb
+Reloaded/Modules/ReloadedMart/Backend.rb
+Reloaded/Modules/ReloadedMart/UI.rb
 ```
 
 Standalone Reloaded Mart fetches the online catalog every time it opens,
@@ -1056,10 +2308,11 @@ See `Reloaded/Documentation/Manager.md` for the source and index formats.
 
 ## Publishing
 
-Publishing uses the external Modders Tools script:
+Publishing uses the matching external ModDev script:
 
 ```text
-Modders Tools/Publish to GitHub.bat
+ModDev/Windows/Publish to GitHub.bat
+ModDev/Proton/Publish to GitHub.sh
 ```
 
 In-game, use:
@@ -1071,9 +2324,31 @@ Mod Manager -> Tools -> Publish
 The external script selects and validates the mod or profile, then does the
 GitHub work before pushing.
 
+## Reloaded Bag Autosort
+
+Reloaded Bag custom list order can be exported/imported from:
+
+```text
+Mods/Reloaded/ReloadedBagAutosort.txt
+```
+
+Format:
+
+```text
+[POCKET 1]
+POTION
+POKEVIAL_CHARGE
+POKEVIAL_REFILL
+```
+
+Each pocket block uses item IDs, one per line. Missing valid items are appended
+automatically when the list is loaded, so mods can ship partial pocket order
+snippets without needing to list every item.
+
 ## UI Hint Text
 
-Use this format for Reloaded UI hint text:
+Prefer `Reloaded::HintText` for Reloaded UI hint text. When writing a literal
+hint, use this format:
 
 ```text
 Action (input)
@@ -1082,7 +2357,7 @@ Action (input)
 The normal order is:
 
 ```text
-Confirm (C) Back (B) ActionInput (A) SpecialInput (Z) Others
+Confirm (C) | Back (B) | Action (A) | Special (Z) | Others
 ```
 
 Only include actions that are relevant to the current screen.
@@ -1332,20 +2607,20 @@ defaults, such as missing `id`, `name`, `version`, `authors`, `dependencies`,
 
 The template generator can create:
 
-- a starter mod folder with `mod.json`, `Scripts/`, assets folders,
-  `Settings.json`, `Changelog.txt`, and documentation,
-- a starter profile under `Mods/Reloaded/Profiles/` with blank publish-safe
-  changelog metadata.
+- a starter mod folder under `ModDev/` with `mod.json`, `Scripts/`, asset
+  folders, `Settings.json`, `Changelog.txt`, and documentation.
+
+Profiles are created through the normal Profiles interface rather than a
+separate template action.
 
 The backend API is:
 
 ```ruby
-Reloaded::ModderTools.open_log("Log.txt")
-Reloaded::ModderTools.export_log("Mods.txt")
-Reloaded::ModderTools.backup_all_mods
-Reloaded::ModderTools.validate_manifests
-Reloaded::ModderTools.create_mod_template("My Mod")
-Reloaded::ModderTools.create_profile_template("My Profile")
+Reloaded::Diagnostics.open_log("Log.txt")
+Reloaded::Diagnostics.export_log("Mods.txt")
+Reloaded::ModArchives.backup_all_mods
+Reloaded::ModDevelopment.validate_manifests
+Reloaded::ModDevelopment.create_mod_template("My Mod")
 ```
 
 
@@ -1384,6 +2659,7 @@ Each mod must include `mod.json`:
   "description": "Example Reloaded mod.",
   "minimum_reloaded_version": "1.0.0",
   "dependencies": [],
+  "required_features": [],
   "incompatible": [],
   "tags": ["mod", "gameplay"],
   "changelogurl": "https://example.com/example_mod_changelog.txt"
@@ -1401,6 +2677,9 @@ Rules:
 - The mod folder name does not need to match `id`.
 - `version` and `minimum_reloaded_version` use `Major.Minor.Patch`.
 - `authors`, `dependencies`, and `tags` are arrays.
+- `required_features` is an optional array of registered Reloaded feature IDs.
+  If a required feature is unknown, unavailable, or disabled when mods are
+  validated, the Mod Manager skips the mod and reports the reason.
 - `enabled` is legacy metadata; active profiles decide whether a mod loads.
 - `changelogurl` is optional and should point to a raw text changelog if used.
   Mods can instead include a local `Changelog.txt`/`changelog.txt` in their mod
@@ -1421,7 +2700,7 @@ Rules:
 Editable tag arrays live at the top of:
 
 ```text
-Reloaded/Core/005_ModManager.rb
+Reloaded/Core/Modding/ModManager.rb
 ```
 
 Author tags are grouped into role and content tags. System tags are assigned by
@@ -1492,11 +2771,3 @@ The first resolver patches common helper paths:
 - `Audio.se_play`
 
 Reloaded does not globally patch `Bitmap.new` yet.
-
-## Planned Documentation Sections
-
-These sections should be added as the systems are created:
-
-- dependency rules,
-- broader custom content registration,
-- compatibility guidelines.

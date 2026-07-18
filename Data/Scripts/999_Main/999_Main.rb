@@ -171,7 +171,7 @@ def mainFunctionDebug
     MessageTypes.loadMessageFile("Data/messages.dat") if safeExists?("Data/messages.dat")
     PluginManager.runPlugins
     begin
-      _reloaded_bootstrap = File.expand_path("./Reloaded/000_Bootstrap.rb")
+      _reloaded_bootstrap = File.expand_path("./Reloaded/Bootstrap.rb")
       if File.exist?(_reloaded_bootstrap)
         load _reloaded_bootstrap
         Reloaded::Bootstrap.boot if defined?(Reloaded::Bootstrap)

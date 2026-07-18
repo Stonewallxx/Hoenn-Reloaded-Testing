@@ -3,7 +3,7 @@
 The Overworld Menu is implemented in:
 
 ```text
-Reloaded/Modules/004_OverworldMenu.rb
+Reloaded/Modules/OverworldMenu.rb
 ```
 
 It opens a compact quick-access overlay from the overworld using the same

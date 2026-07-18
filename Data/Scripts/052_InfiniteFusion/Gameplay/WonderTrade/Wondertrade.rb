@@ -59,9 +59,13 @@ def pbWonderTrade(lvl, except = [], except2 = [], premiumWonderTrade = true)
   chosen = pbChoosePokemon(1, 2, # Choose eligable pokemon
                            proc {
                              |poke| !poke.egg? && !(poke.isShadow?) && # No Eggs, No Shadow Pokemon
-                               (poke.level >= lvl) && !(except.include?(poke.species)) # None under "lvl", no exceptions.
+                               (poke.level >= lvl) && !(except.include?(poke.species)) &&
+                               (!defined?(Reloaded::PokemonDistribution) || Reloaded::PokemonDistribution.tradeable?(poke)) # None under "lvl", no exceptions.
                            })
-  poke = $Trainer.party[pbGet(1)]
+  chosen_index = pbGet(1)
+  return if chosen_index.nil? || chosen_index < 0
+  poke = $Trainer.party[chosen_index]
+  return if defined?(Reloaded::PokemonDistribution) && Reloaded::PokemonDistribution.reject_trade(poke)
   if !pbConfirmMessage(_INTL("Trade {1} away?",poke.name))
     return
   end

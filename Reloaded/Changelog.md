@@ -21,9 +21,19 @@ Features
 - Added Reloaded Mart.
 -- Custom buy/sell UI with favorites, daily featured rows, promo codes,
    services, and animated boxes.
+-- Supports PokeDollars, Coins, Battle Points, Quest Points, Glimmer Coins,
+   and mod-registered purchase currencies.
+-- Bundles, gifts, and Mystery Boxes can grant any shared reward type,
+   including fully configured Pokemon and atomic multi-reward outcomes.
+-- Mystery Boxes show possible contents by rarity without exposing exact odds,
+   and persist the selected result through a per-save transaction ledger.
+-- Curated offers require a fresh online catalog; generated Daily Featured
+   offers remain available offline.
 - Added Reloaded Mart Editor.
 -- Local Admin Tools editor for entries, categories, services, promo codes,
    target tags, affected entries, dates, times, and publishing.
+-- Added typed reward creation, Pokemon distribution controls, entry versions,
+   bundle-value checks, and Mystery Box expected-value checks.
 - Added TM Vault.
 -- Supports TM/HM browsing, relearn flows, filters, type icons, and PokeNav
    integration.
@@ -71,7 +81,7 @@ Debug & Modding
 - Added manifest validation for mod IDs, versions, authors, tags, dependencies,
   incompatibilities, settings, and system tags.
 - Added ModDev scanning through Reloaded/Settings.txt.
-- Added optional development browser sources through Modders Tools/Sources.json.
+- Added optional development browser sources through ModDev/Sources.json.
 - Added rollback protection for archive installs.
 - Added Reloaded::ModBrowser.core_entry for the Hoenn Reloaded pinned entry.
 - Added public APIs for logging, events, patches, save data, settings, assets,

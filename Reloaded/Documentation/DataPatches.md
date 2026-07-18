@@ -984,25 +984,25 @@ Supported outfit fields match the base outfit JSON fields used by the game:
 
 Data patch code lives in the `008` core range:
 
-- `008_DataPatches.rb` - generic scanner, validator, conflict registration, and
+- `Core/DataPatches/Registry.rb` - generic scanner, validator, conflict registration, and
   runtime registry.
-- `008a_DataPatchOutfits.rb` - active outfit bridge for clothes, hats, and
+- `Core/DataPatches/Outfits.rb` - active outfit bridge for clothes, hats, and
   hairstyles.
-- `008b_DataPatchItems.rb` - active item bridge for `GameData::Item::DATA`.
-- `008c_DataPatchMoves.rb` - active move bridge for `GameData::Move::DATA`.
-- `008d_DataPatchAbilities.rb` - active ability bridge for
+- `Core/DataPatches/Items.rb` - active item bridge for `GameData::Item::DATA`.
+- `Core/DataPatches/Moves.rb` - active move bridge for `GameData::Move::DATA`.
+- `Core/DataPatches/Abilities.rb` - active ability bridge for
   `GameData::Ability::DATA`.
-- `008d_AbilityAPI.rb` - script-facing ability helper API for data and battle
+- `Core/DataPatches/AbilityAPI.rb` - script-facing ability helper API for data and battle
   handler behavior.
-- `008e_DataPatchSpecies.rb` - active bridge for species core data, learnsets,
+- `Core/DataPatches/Species.rb` - active bridge for species core data, learnsets,
   evolutions, and ability lists.
-- `008f_DataPatchTrainers.rb` - active bridge for classic, remix, and expert
+- `Core/DataPatches/Trainers.rb` - active bridge for classic, remix, and expert
   trainer parties, trainer bag items, held items, text metadata, and validation.
-- `008g_DataPatchEncounters.rb` - active encounter bridge for classic, remix,
+- `Core/DataPatches/Encounters.rb` - active encounter bridge for classic, remix,
   and randomized wild encounter tables.
-- `008i_DataPatchTrainerTypes.rb` - active bridge for trainer type AI skill
+- `Core/DataPatches/TrainerTypes.rb` - active bridge for trainer type AI skill
   data, skill code flags, and reward money multipliers.
-- `008h_DataPatchQuests.rb` - reserved quest bridge.
+- `Core/DataPatches/Quests.rb` - reserved quest bridge.
 
 Reserved bridge files are intentionally loaded but inactive. They give future
 data groups dedicated files without claiming that direct base-game data mutation

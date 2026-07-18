@@ -77,8 +77,8 @@ class SpriteOptionsScene < PokemonOption_Scene
     )
 
     options << EnumOption.new(_INTL("Fusion Icons"), [_INTL("Combined"), _INTL("DNA")],
-                              proc { $game_variables[VAR_FUSION_ICON_STYLE] },
-                              proc { |value| $game_variables[VAR_FUSION_ICON_STYLE] = value },
+                              proc { $game_variables ? $game_variables[VAR_FUSION_ICON_STYLE] : 0 },
+                              proc { |value| $game_variables[VAR_FUSION_ICON_STYLE] = value if $game_variables },
                               [_INTL("Combines both Pokémon's party icons"),
                                _INTL("Uses the same party icon for all fusions")]
     )

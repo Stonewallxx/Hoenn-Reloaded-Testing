@@ -18,6 +18,24 @@ future mods. It does not replace specialized base game systems such as
 they are the correct fit. Use Reloaded events for broader lifecycle and
 cross-system integration points.
 
+## Event Contracts
+
+Define an event before registering or emitting it:
+
+```ruby
+Reloaded::Events.define(
+  :my_mod_rewarded,
+  :mode => :notification,
+  :required_context => [:reward],
+  :optional_context => [:source]
+)
+```
+
+Contracts document whether an event is a `:notification` or `:decision` and
+which context keys callers must provide. Missing keys are logged without
+crashing gameplay. Inspect contracts with `contract`, `contracts`, and
+`validate`; returned contract data is a defensive copy.
+
 ## Register A Handler
 
 ```ruby
@@ -25,6 +43,27 @@ Reloaded::Events.on(:bootstrap_loaded, :my_feature, priority: 100) do |ctx|
   Reloaded::Bootstrap.log("My feature saw #{ctx[:event]}") rescue nil
 end
 ```
+
+Handlers can require active systems or feature flags. A handler whose
+requirements are inactive is skipped:
+
+```ruby
+Reloaded::Events.register(
+  :my_mod_rewarded,
+  :my_reward_effect,
+  :requires => { :systems => [:save_data], :features => [:my_feature] }
+) do |ctx|
+  apply_reward(ctx[:reward])
+end
+```
+
+`register` is an alias for `on`.
+
+Handlers that raise three times in one session are disabled to prevent repeated
+errors and log flooding. Re-registering that event/handler ID clears its failure
+state. Inspect session-disabled handlers with
+`Reloaded::Events.disabled_handlers`; they are also included in validation and
+bug reports.
 
 - `event_name`: Symbol naming the event.
 - `id`: Unique handler ID for this event. Registering the same ID again replaces
@@ -82,7 +121,7 @@ needed. Any new base-file edit must also be documented in the local ignored
 
 ## Gameplay Bridge Events
 
-`Reloaded/Core/001a_EventBridges.rb` emits notification-only events around
+`Reloaded/Core/Foundation/EventBridges.rb` emits notification-only events around
 common vanilla methods. These events do not alter vanilla results.
 
 Item events:
@@ -107,6 +146,21 @@ Context:
 - `:method` - wrapped method name, usually `:pbReceiveMoney`.
 - `:args` - original method arguments. The first entry is the money delta.
 - `:result` - raw return value.
+
+Reward events:
+
+- `:reward_grant_requested` - decision event before a validated reward is
+  applied. Return `false` or a failed `Reloaded::Rewards::Result` to cancel it.
+- `:reward_granted` - notification after a reward or full atomic batch commits.
+- `:reward_grant_failed` - notification when a reward is rejected or fails.
+
+Context:
+
+- `:reward` - normalized reward Hash.
+- `:source` - normalized caller, such as `:reloaded_mart`, `:mystery_gift`, or
+  a mod ID.
+- `:context` - complete caller context.
+- `:result` - `Reloaded::Rewards::Result` for completion/failure events.
 
 Wild battle request events:
 

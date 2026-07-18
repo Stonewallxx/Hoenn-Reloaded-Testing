@@ -86,9 +86,11 @@ The pinned `Spritepacks` installed-list entry opens a downloader menu:
 
 Spritepack downloads read the public GitHub copy of
 `Reloaded/Spritepacks.json` first, then fall back to the local file if the
-online fetch fails. Downloads use the selected URL, download a zip to a
-temporary file, extract it into the game folder with
-`REQUIRED_BY_INSTALLER_UPDATER/7z.exe`, then remove the temporary zip.
+online fetch fails. Downloads use `Reloaded::Download` to stream an archive to
+a temporary `.part` file, validate optional size/SHA-256 metadata, atomically
+finish the archive, then validate and extract it through `Reloaded::Archive`.
+Spritepack extraction intentionally uses overwrite mode
+without a second staging copy, while still rejecting unsafe archive entries.
 Successful installs update a local marker at
 `Mods/Reloaded/SpritepacksInstalled.json`, which lets the protected installed
 list entry show whether the current Full Spritepack and latest normal
@@ -102,7 +104,7 @@ Published profile actions:
 Developers can add optional extra sources through:
 
 ```text
-Modders Tools/Sources.json
+ModDev/Sources.json
 ```
 
 That file is only for development and testing. The public player source should
@@ -112,6 +114,19 @@ come from GitHub.
 
 A source index may be either a raw array of mod entries or an object with a
 `mods`, `entries`, or `value` array.
+
+Mod version rows and Spritepack file rows may include:
+
+```json
+{
+  "download_url": "https://example.com/example.zip",
+  "sha256": "64 hexadecimal characters",
+  "size": 12345678
+}
+```
+
+Spritepack rows use `url` instead of `download_url`. `sha256` and `size` are
+optional, but current Windows and Proton mod publishers add both automatically.
 
 Recommended format:
 
@@ -178,6 +193,11 @@ is already installed at the required version or newer, it is reused instead of
 downloaded again. If the dependency cannot be found in the GitHub index, or the
 index has no version new enough, the UI reports that specifically. Entries that
 exist in the index but do not have a `download_url` are also reported separately.
+
+Installed `mod.json` manifests may include an optional `required_features`
+array. Every listed ID must be registered and active through
+`Reloaded::Features` or the Mod Manager rejects the mod before loading its
+scripts. This is separate from mod-to-mod `dependencies`.
 
 `changelogurl` may point to a raw text file for installed mod details and
 published metadata.
@@ -445,14 +465,21 @@ Reloaded::ModBrowser.import_published_profile("challenge_profile")
 Publishing is handled by:
 
 ```text
-Modders Tools/Publish to GitHub.bat
+ModDev/Windows/Publish to GitHub.bat
+ModDev/Proton/Publish to GitHub.sh
 ```
 
 The in-game Mod Manager `Tools -> Publish` menu launches the publisher.
 
-The batch file selects the mod or profile, validates it before uploading, uses
-a sparse Git checkout for only the index and selected target folder, updates the
-GitHub index, packages mods, writes profile payloads, commits, and pushes to:
+The Browser, updater, backup, publishing, folder-opening, and other desktop
+actions are capability-gated through `Reloaded::Platform`. JoiPlay keeps the
+installed mod/profile manager but hides unsupported desktop and download
+actions. Proton uses the same player-facing manager features as Windows.
+
+The platform publisher selects the mod or profile, validates it before
+uploading, uses a sparse Git checkout for only the index and selected target
+folder, updates the GitHub index, packages mods, writes profile payloads,
+commits, and pushes to:
 
 ```text
 Stonewallxx/Hoenn-Reloaded-Mods
@@ -473,9 +500,11 @@ Admin Tools/Manager Editor/ManagerEditor.md
 
 - Publisher tools require Git and GitHub credentials or collaborator access.
 - Remote JSON fetches use the engine HTTP helpers.
-- Mod archive downloads use `pbDownloadToFile`.
-- Archive extraction uses `7z.exe`; PowerShell extraction is avoided so the
-  browser does not trip Windows malicious-command warnings.
+- Mod and Spritepack archives use `Reloaded::Download`; incomplete `.part`
+  files never replace completed downloads.
+- Archive extraction uses `Reloaded::Archive` with the bundled `7z.exe` adapter;
+  PowerShell extraction is avoided. ZIP, RAR, and 7Z entries are preflighted for
+  traversal, links, encryption, collisions, and configured safety limits.
 - The browser uses GitHub index data. If the remote index changes, opening or
   refreshing the Mod Manager fetches a fresh index instead of trusting stale
   local cache data.

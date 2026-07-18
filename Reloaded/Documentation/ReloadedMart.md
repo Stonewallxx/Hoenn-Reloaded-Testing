@@ -15,14 +15,14 @@
 Reloaded Mart is implemented in:
 
 ```text
-Reloaded/Modules/003_ReloadedMart.rb
-Reloaded/Modules/003a_ReloadedMartUI.rb
+Reloaded/Modules/ReloadedMart/Backend.rb
+Reloaded/Modules/ReloadedMart/UI.rb
 ```
 
-`003_ReloadedMart.rb` owns catalog loading, validation, pricing, availability,
+`Backend.rb` owns catalog loading, validation, pricing, availability,
 stock, limits, inventory transactions, stats, events, and save data.
 
-`003a_ReloadedMartUI.rb` owns the REX buy/sell screens and the vanilla
+`UI.rb` owns the REX buy/sell screens and the vanilla
 `pbPokemonMart` wrapper.
 
 ## Entry Points
@@ -91,11 +91,15 @@ The standalone Reloaded Mart is online-catalog driven.
 
 On open:
 
-- The mart performs a blocking online fetch every time it opens.
+- The mart opens immediately and refreshes the catalog through `Reloaded::Task`.
 - Every online fetch uses a cache-busted URL.
 - A valid online response replaces the last-good cache.
-- Malformed or unsupported data logs validation issues and falls back to cache.
-- If no cache is available, the player sees a short unavailable message.
+- Curated catalog entries, banners, events, and promo codes are shown only
+  while the current source is a freshly confirmed online response.
+- Cached catalog data is retained for recovery and metadata but never exposes
+  expired curated offers while offline.
+- Locally generated automation, including Daily Featured, remains available
+  offline and uses its built-in defaults until a fresh catalog arrives.
 
 The current online URL is:
 
@@ -124,7 +128,7 @@ Top-level fields:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "catalog_version": "07.04.26",
   "generated_at": "2026-07-04T12:00:00Z",
   "stock_epoch": "summer_2026",
@@ -190,6 +194,7 @@ All entries share these fields where applicable:
 ```json
 {
   "id": "item:POTION",
+  "entry_version": 1,
   "kind": "item",
   "item": "POTION",
   "name": "Potion",
@@ -211,7 +216,14 @@ All entries share these fields where applicable:
 
 `item` entries grant one item stack based on `item`.
 
-`bundle` and `gift` entries grant every item listed in `grants`.
+Purchases can use `money`, `coins`, `battle_points`, `quest_points`, or
+`cosmetics_money`. Mods can add currencies through
+`Reloaded::Rewards.register_currency`; the same wallet API is used for Mart
+validation, debit, and refunds.
+
+`bundle` and `gift` entries grant every registered reward listed in `grants`.
+Items use the built-in `item` reward type. Mods can register additional grant
+types through `Reloaded::Rewards` before the catalog is opened.
 
 `service` and `unlock` are registry-backed entry kinds. `service` currently
 supports `display.service_key: "instant_hatch"`, which opens the party screen,
@@ -286,17 +298,55 @@ Mystery Box example:
   "name": "Mystery Box",
   "price": 5000,
   "display": {
-    "description": "???",
+    "description": "Contains one possible reward outcome.",
     "mystery_box": true
   },
   "grants": [
-    { "id": "RARECANDY", "qty": 1 }
+    {
+      "type": "item", "id": "RARECANDY", "quantity": 1,
+      "rarity": "rare", "chance": 25
+    },
+    {
+      "type": "group", "name": "Potion Supply", "rarity": "common",
+      "chance": 75,
+      "grants": [
+        { "type": "item", "id": "POTION", "quantity": 5 },
+        { "type": "item", "id": "POKEBALL", "quantity": 2 }
+      ]
+    }
   ]
 }
 ```
 
-Mystery Box contents are hidden in the UI, but transactions still preflight the
-real hidden grants before money is charged.
+The UI lists possible outcome names and colors them by rarity, but never shows
+exact chances. Chances must total exactly 100. One outcome is selected per box;
+a `group` outcome grants every child reward atomically.
+
+The transaction ledger stores the selected outcome before charging. Mystery
+transactions force a save before the debit and again after successful delivery,
+before the reveal UI begins. A prepared transaction found after an interrupted
+session is marked abandoned because the prepared save predates the debit.
+
+All grant payloads are normalized and applied through `Reloaded::Rewards`.
+Unknown reward types invalidate the containing bundle instead of being ignored.
+Custom reward handlers should implement rollback when they can change state so
+mixed bundles remain atomic.
+
+### Pokemon Distributions
+
+Bundles, gifts, and Mystery outcomes can use `type: "pokemon"`. Supported
+distribution fields include species and fallback species, level, quantity,
+delivery destination, Egg/form/shiny/gender/nature/ability data, nickname,
+held item, Poke Ball, friendship, moves, exact or ranged IVs, EVs, custom
+types, OT data, origin text, distribution ID/version, duplicate policy,
+evolution policy, and an optional trade lock.
+
+Pokemon granted by Reloaded Mart always bypass player IV Boundaries. Their IVs
+come only from the distribution payload or normal generation when no IV fields
+are supplied. `untradeable: true` requires a stable `distribution_id` and is
+enforced by normal trades, NPC trades, Wonder Trade, and fusions containing the
+distribution. `duplicate_policy` accepts `allow`, `reject`, or `replace`;
+`evolution_policy` accepts `allow` or `block`.
 
 ### PokeVial Grants
 
@@ -326,7 +376,7 @@ Supported aliases include `poke_vial`, `pokevial_charge`, `POKEVIAL_CHARGE`,
 `pokevial_uses`, `POKEVIAL_USES`, `pokevial_refill`, `POKEVIAL_REFILL`,
 `refill_pokevial`, `pokevial_unlock`, and `POKEVIAL_MAX_USES`.
 
-PokeVial rewards are preflighted before money is charged. A single-use charge
+PokeVial rewards are preflighted before the selected currency is charged. A single-use charge
 requires an empty charge slot, a full refill requires the vial to be below max,
 and a max-charge unlock must increase the player's current max.
 
@@ -459,7 +509,9 @@ currency
 display
 ```
 
-Only money is active now, but the model keeps `currency` for future expansion.
+The built-in purchase currencies are `money`, `coins`, `battle_points`,
+`quest_points`, and `cosmetics_money`. A mod-registered currency is also valid
+when it provides a readable and writable wallet through `Reloaded::Rewards`.
 
 ## Transactions
 
@@ -473,16 +525,28 @@ The transaction order is:
 3. validate limits
 4. validate stock
 5. validate handler-specific rules
-6. validate money
-7. simulate bag capacity for every grant
-8. charge money
-9. apply item grants
+6. validate the selected currency wallet
+7. preflight every registered reward and simulate combined Bag capacity
+8. charge the selected currency
+9. atomically apply reward grants
 10. apply handler side effects
 11. record stock, limits, claims, and stats
 12. emit events
 
-If a grant or handler step fails after money moves, the backend rolls back item
-grants where possible and refunds money.
+If a grant or handler step fails after payment moves, the backend rolls back
+reward receipts in reverse order and refunds the same currency. Non-reversible
+reward side effects should be registered as `Reloaded::Rewards` finalizers so
+they run only after the full purchase transaction succeeds.
+
+Catalog grants can use every shared Rewards type, including Pokemon with
+stored custom typings, currencies, TM Vault moves, outfits, registered feature
+unlocks, player choices, and reward groups. Mystery Box outcomes use direct
+`chance` values and reveal the granted leaf rewards rather than the container
+entry.
+
+Random reward pools can use arbitrary relative `weight` values or percentages
+out of 100 through `percentage` or `chance`. A percentage pool must total
+exactly 100 and cannot mix percentages with weights.
 
 Vanilla NPC mart purchases use the REX UI but bypass online catalog stock,
 limits, and economy modifiers.
@@ -568,7 +632,8 @@ Common transaction payload fields:
 - `:details`
 - `:context`
 
-TM Vault observes Reloaded Mart machine grants through direct registration.
+TM Vault observes machine item rewards through the shared Rewards item
+finalizer after the complete purchase transaction succeeds.
 
 ## Save Data
 
@@ -593,6 +658,15 @@ Important saved keys:
 - `seen_catalog_versions`
 - `promo_codes`
 - `daily_featured`
+- `transaction_sequence`
+- `transactions`
+- `pending_deliveries`
+
+The bounded transaction ledger keeps the latest 250 purchase records. Each
+record stores a stable transaction ID, entry ID/version, catalog version,
+currency, price, selected grants, completion status, and delivered
+distribution IDs. This is local correctness metadata and a future multiplayer
+reconciliation boundary; it does not add networking by itself.
 
 Do not store sprites, bitmaps, windows, procs, open files, or scene objects in
 this bucket.
@@ -626,8 +700,8 @@ Before deleting `ReloadedMart-To-Do.md`, verify in game:
 - free purchase succeeds
 - bundle/gift purchase succeeds
 - mystery box hides contents but grants the real items
-- bag-full purchase fails before money moves
-- not-enough-money purchase fails before inventory changes
+- bag-full purchase fails before payment moves
+- insufficient-currency purchase fails before inventory changes
 - stock, save limits, daily limits, and one-time claims update
 - TM/HM purchase registers with TM Vault
 - favorites persist

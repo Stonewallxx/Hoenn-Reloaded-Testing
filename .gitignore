@@ -47,21 +47,40 @@ Mods/Reloaded/Profiles/*
 !Mods/Reloaded/Profiles/.gitkeep
 Mods/Reloaded/SpritepacksInstalled.json
 ModDev/*
-!Modders Tools/
-Modders Tools/_repo_cache/
-Modders Tools/*.tmp
+!ModDev/Windows/
+!ModDev/Windows/**
+!ModDev/Proton/
+!ModDev/Proton/**
+ModDev/*.tmp
+# Generated ModDev check output remains local even though platform tools are tracked.
+ModDev/Windows/*Report.txt
+ModDev/Proton/*Report.txt
+ModDev/Windows/*.tmp
+ModDev/Proton/*.tmp
+ModDev/Windows/*.previous
+ModDev/Proton/*.previous
+ModDev/Windows/*.bak
+ModDev/Proton/*.bak
+Modders Tools/
 Hoenn Reloaded Testing Installer.bat
 Hoenn Reloaded - Testing.lnk
 Admin Tools/
+# Fresh-install release test output is never an implementation source.
+/Pre-Public/
 Developer Tools/
 Developer Tools/Base Game Updater/_upstream_cache/
 Developer Tools/Base Game Updater/LastUpdateReport.txt
 Reloaded/Settings.txt
+Reloaded/Settings.txt.tmp
+Reloaded/Settings.txt.bak
 Reloaded/Logging/*.txt
 Reloaded/Logging/Reports/*
+Reloaded/Cache/RemoteData/
 Reloaded/Documentation/VanillaChanges.md
 Reloaded/Documentation/To-Do.md
 Reloaded/Documentation/ReloadedMart-To-Do.md
+Mods/Reloaded/Profiles/*.tmp
+Mods/Reloaded/Profiles/*.bak
 
 #THE REST
 Data/VERSION
