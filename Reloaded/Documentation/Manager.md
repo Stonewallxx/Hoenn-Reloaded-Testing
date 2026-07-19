@@ -67,9 +67,33 @@ Mod actions:
 The pinned `Hoenn Reloaded` installed-list entry shows `Update` when a public
 update is available, plus `Check Updates` or `Update Status`, `Patch Notes`,
 `File A Bug Report`, and `Open Mods Folder` instead of normal mod actions.
-`Update` confirms, runs `Hoenn Reloaded Installer.bat`, and closes the game
-immediately. `Patch Notes` opens a submenu with `View` and `Open`. `File A Bug
-Report` exports
+`Update` confirms, closes the game, and launches the AIO installer. It uses
+`Hoenn Reloaded Installer.bat` on Windows and `Hoenn Reloaded Installer.sh` on
+Proton. Both frontends install into their own directory and offer:
+
+- `Hoenn Reloaded` or `Hoenn Reloaded Testing`
+- `Core` or `Core + Spritepacks`
+
+Public Core uses a versioned GitHub release with size and SHA-256 verification.
+Testing Core downloads the current `Stonewallxx/Hoenn-Reloaded-Testing`
+repository snapshot directly because Testing does not publish player releases.
+Neither path creates a player-side Git repository or repository cache.
+
+Core and Spritepacks are independent. Core-only leaves installed Spritepacks
+unchanged. Core + Spritepacks reads the shared public Spritepack catalog and
+only downloads the Full Spritepack when its build ID differs. The managed Core
+inventory permits obsolete release files to be removed without scanning or
+deleting saves, mods, settings, profiles, imported sprites, Spritepack updates,
+or unknown user files.
+
+The Full Spritepack is published as multiple GitHub release assets because the
+combined archive is larger than GitHub's per-asset limit. The installer
+manifest presents those assets as one logical package. Every part is
+downloaded and verified independently, then Windows and Proton read the
+volumes as one archive without creating a second full-size temporary copy.
+
+`Patch Notes` opens a submenu with `View` and `Open`. `File A Bug Report`
+exports
 `LatestBugReport.txt` with the same paste upload flow as
 `Tools -> Log Files -> Export`, copies the exported URL as a Discord-ready
 `[Bug Report](url)` link, and opens the Hoenn Reloaded bug-report Discord
@@ -146,8 +170,11 @@ Mod version rows and Spritepack file rows may include:
 
 Spritepack rows use `url` instead of `download_url`. `sha256` and `size` are
 optional, but current Windows and Proton mod publishers add both automatically.
+An oversized Full pack may leave `url` empty and provide an ordered `parts`
+array. Each part requires its original numbered filename, URL, size, and
+SHA-256.
 
-A Full Spritepack and a monthly update are both ordinary single-archive rows:
+A Full Spritepack may use verified split volumes:
 
 ```json
 {
@@ -155,11 +182,27 @@ A Full Spritepack and a monthly update are both ordinary single-archive rows:
   "name": "Full Spritepack (August 2026)",
   "full": true,
   "updated_at": "07-17-26 21:30:00",
-  "url": "https://example.com/full-spritepack.zip",
+  "url": "",
   "size": 123456789,
-  "sha256": "64 hexadecimal characters"
+  "sha256": "SHA-256 of the complete ZIP",
+  "parts": [
+    {
+      "file": "full-spritepack.zip.001",
+      "url": "https://example.com/full-spritepack.zip.001",
+      "size": 100000000,
+      "sha256": "SHA-256 of this part"
+    },
+    {
+      "file": "full-spritepack.zip.002",
+      "url": "https://example.com/full-spritepack.zip.002",
+      "size": 23456789,
+      "sha256": "SHA-256 of this part"
+    }
+  ]
 }
 ```
+
+Monthly updates remain ordinary single-archive rows:
 
 ```json
 {
@@ -176,7 +219,9 @@ A Full Spritepack and a monthly update are both ordinary single-archive rows:
 
 Spritepack archives use resumable `.part` downloads when the host supports
 byte ranges. The older `components` field remains readable for compatibility,
-but new Full releases should use one archive.
+but new Full releases should use one logical archive represented by one URL or
+an ordered set of numbered volumes. Both the in-game downloader and Complete
+Installer support the same `parts` records.
 
 Recommended format:
 
@@ -545,6 +590,19 @@ Manager Editor documentation lives beside the local tool at:
 ```text
 Admin Tools/Manager Editor/ManagerEditor.md
 ```
+
+The private Full Spritepack release publisher is:
+
+```text
+Admin Tools/Spritepack Publisher/Publish Full Spritepack.bat
+```
+
+It independently builds and verifies GitHub-sized release parts, uploads them
+to the `Spritepacks` release, verifies the remote asset sizes, updates the Full
+row, and publishes `Reloaded/Spritepacks.json` without cloning the public
+repository. It never invokes a Core build. The existing Manager Editor
+publisher remains the lightweight JSON-only path for catalog edits that do not
+replace the Full archive.
 
 ## Current Limits
 

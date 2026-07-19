@@ -16,6 +16,7 @@ module Reloaded
     ROOT = File.expand_path(File.join(File.dirname(__FILE__), "..", ".."))
     GAME_ROOT = File.expand_path(File.join(ROOT, ".."))
     SUPPORTED_EXTENSIONS = [".zip", ".rar", ".7z"].freeze
+    SPLIT_ARCHIVE_PATTERN = /\.(?:zip|rar|7z)\.001\z/i
     OVERWRITE_POLICIES = [:overwrite, :skip, :fail].freeze
     DEFAULT_MAX_ENTRIES = 500_000
     DEFAULT_MAX_EXPANDED_BYTES = 40 * 1024 * 1024 * 1024
@@ -176,7 +177,8 @@ module Reloaded
         raise_failure(:archive_missing, "The archive file is missing.") unless File.file?(path)
         raise_failure(:archive_empty, "The archive file is empty.") if File.size(path).to_i <= 0
         extension = File.extname(path).downcase
-        raise_failure(:unsupported_format, "Only ZIP, RAR, and 7Z archives are supported.") unless SUPPORTED_EXTENSIONS.include?(extension)
+        supported = SUPPORTED_EXTENSIONS.include?(extension) || path.match?(SPLIT_ARCHIVE_PATTERN)
+        raise_failure(:unsupported_format, "Only ZIP, RAR, 7Z, and their numbered split volumes are supported.") unless supported
         validate_allowed_path!(path, opts[:allowed_roots], :archive_outside_allowed_roots, "The archive is outside the allowed folders.")
         path
       end
@@ -289,11 +291,27 @@ module Reloaded
           raise_failure(:archive_too_large, "The expanded archive is larger than the allowed limit.") if total > opts[:max_expanded_bytes]
           validate_target_path!(destination, normalized) if destination
         end
-        archive_size = [File.size(archive).to_i, 1].max
+        archive_size = [packed_archive_size(archive), 1].max
         ratio = total.to_f / archive_size.to_f
         raise_failure(:compression_ratio, "The archive compression ratio exceeds the safety limit.") if ratio > opts[:max_ratio]
         validate_collisions!(entries, destination, opts[:overwrite]) if destination
         true
+      end
+
+      def packed_archive_size(archive)
+        return File.size(archive).to_i unless archive.match?(SPLIT_ARCHIVE_PATTERN)
+        prefix = archive.sub(/\.001\z/i, "")
+        total = 0
+        index = 1
+        loop do
+          part = format("%s.%03d", prefix, index)
+          break unless File.file?(part)
+          total += File.size(part).to_i
+          index += 1
+        end
+        total
+      rescue
+        File.size(archive).to_i
       end
 
       def validate_entry_path!(path)

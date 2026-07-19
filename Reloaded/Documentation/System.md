@@ -40,6 +40,9 @@ Hoenn Reloaded currently has these framework systems in place:
   components, loose/mod asset priority, and one-file cache extraction.
 - Shared platform detection and desktop adapters for Windows, Proton, and
   restricted JoiPlay behavior.
+- Shared AIO Installer contract with Public/Testing and Core/Core + Spritepacks
+  choices, direct Windows/Proton installation, progress reporting, and no
+  player-side Git cache.
 - Shared streaming large-file downloads through `Reloaded::Download`, with
   atomic `.part` promotion, cancellation, limits, and optional SHA-256 checks.
 - Shared safe ZIP/RAR/7Z inspection and extraction through
@@ -104,6 +107,77 @@ shell/Python publisher in `ModDev/Proton`; it requires Git, Python 3, and a
 supported desktop terminal. JoiPlay hides external publishing and archive
 tools.
 
+## AIO Installer
+
+The player installer is one logical system with platform-specific frontends:
+
+```text
+Hoenn Reloaded Installer.bat
+Hoenn Reloaded Installer.ps1
+Hoenn Reloaded Installer.sh
+Hoenn Reloaded Installer.py
+```
+
+Windows uses the batch/PowerShell frontend. Proton uses the shell/Python
+frontend. Both install into the directory containing the installer and offer:
+
+```text
+Hoenn Reloaded
+Hoenn Reloaded Testing
+
+Core
+Core + Spritepacks
+```
+
+Public Core reads `Reloaded/InstallerManifest.json` from
+`Stonewallxx/Hoenn-Reloaded` and downloads the versioned release archive with
+size and SHA-256 verification. Testing Core directly downloads the current
+`main` repository snapshot from `Stonewallxx/Hoenn-Reloaded-Testing`; Testing
+does not require or publish a GitHub release.
+
+Full Spritepacks are shared by both channels through the public
+`Reloaded/Spritepacks.json` catalog. Oversized Full Spritepacks use an ordered
+`parts` list. Every part has its own size and SHA-256, while extraction treats
+the verified parts as one logical ZIP without creating another full-size copy.
+Downloads use resumable `.part` files under the operating-system temporary
+directory and are removed after success.
+
+Core and Full Spritepack packages are versioned independently. Routine Core
+updates therefore do not redownload an unchanged Full Spritepack. Monthly
+Spritepack overlays remain managed separately through the Mod Manager.
+
+`Reloaded/InstallerFiles.json` is generated into Core releases. During an
+update, the installer compares the previous and new managed inventories and
+removes only obsolete files that were owned by the previous release. Saves,
+mods, settings, profiles, imported sprites, installed Spritepacks, unknown
+files, and local Git metadata are always protected.
+
+Public Core package generation and publishing live under:
+
+```text
+Admin Tools/Core Builder/
+Admin Tools/Core Publisher/
+```
+
+The Core Builder creates the Public Core ZIP, the reusable Windows/Proton
+installer bootstrap, checksums, and a release manifest. The Core Publisher
+uploads those archives to the versioned public release, verifies the remote
+assets, and publishes `Reloaded/InstallerManifest.json` last. Neither tool is
+used for Testing or Spritepacks.
+
+Full Spritepack release preparation and publishing live under:
+
+```text
+Admin Tools/Spritepack Publisher/
+```
+
+That publisher owns splitting, verification, upload, and the public
+`Reloaded/Spritepacks.json` update. It does not run the Core Builder.
+
+The JoiPlay builder assembles the verified Public Core Builder output and the
+latest Full Spritepack into a complete ready-to-release ZIP. Testing JoiPlay
+packages are not produced.
+
 Platform API:
 
 ```ruby
@@ -137,7 +211,9 @@ network/transport failures; invalid sizes and checksums discard it.
 Runtime archive extraction must use `Reloaded::Archive`, not direct 7-Zip or
 shell commands. The shared API applies entry/path validation, extraction limits,
 progress reporting, sanitized errors, and the Windows/Proton adapter before any
-files are written. JoiPlay keeps archive extraction unavailable.
+files are written. Numbered `.zip.001`, `.rar.001`, and `.7z.001` volumes are
+validated and extracted as one logical archive. JoiPlay keeps archive
+extraction unavailable.
 
 `Reloaded::TempCleanup` runs after Modules have registered their Remote Data
 sources. It removes only recognized Reloaded-owned temporary names after 24

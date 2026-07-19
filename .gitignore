@@ -63,7 +63,6 @@ ModDev/Proton/*.previous
 ModDev/Windows/*.bak
 ModDev/Proton/*.bak
 Modders Tools/
-Hoenn Reloaded Testing Installer.bat
 Hoenn Reloaded - Testing.lnk
 Admin Tools/
 # Fresh-install release test output is never an implementation source.
@@ -78,6 +77,8 @@ Reloaded/Logging/*.txt
 Reloaded/Logging/Reports/*
 Reloaded/Cache/RemoteData/
 Reloaded/Cache/SpritePacks/
+Reloaded/InstallerFiles.json
+Reloaded/InstallerManifest.json
 Reloaded/Documentation/VanillaChanges.md
 Reloaded/Documentation/To-Do.md
 Reloaded/Documentation/ReloadedMart-To-Do.md

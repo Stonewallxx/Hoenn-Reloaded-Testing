@@ -563,6 +563,8 @@ module Reloaded
         return { :success => false, :status => :unsupported, :name => "Spritepack" } if defined?(Reloaded::Platform) && !Reloaded::Platform.supports?(:browser_downloads)
         item = normalize_spritepack_file(file, 0)
         name = item["name"].to_s.empty? ? "Spritepack" : item["name"].to_s
+        parts = Array(item["parts"])
+        return perform_split_spritepack_download(item, parts, task) unless parts.empty?
         components = Array(item["components"])
         return perform_component_spritepack_download(item, components, task) unless components.empty?
         url = item["url"].to_s.strip
@@ -613,6 +615,77 @@ module Reloaded
         File.delete(archive) rescue nil if archive
         Reloaded::Log.exception("Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
         { :success => false, :status => :error, :name => name.to_s, :error => e.message }
+      end
+
+      def perform_split_spritepack_download(item, parts, task = nil)
+        name = item["name"].to_s.empty? ? "Spritepack" : item["name"].to_s
+        archives = []
+        cleanup_archives = false
+        total = parts.length
+        raise "Split Spritepack has no archive parts." if total <= 0
+        expected_prefix = nil
+        parts.each_with_index do |part, index|
+          task.checkpoint! if task
+          url = part["url"].to_s.strip
+          raise "Spritepack part #{index + 1} has no download URL." if url.empty?
+          source_name = part["file"].to_s.strip
+          source_name = File.basename(URI.parse(url).path.to_s) if source_name.empty?
+          source_name = File.basename(source_name)
+          match = source_name.match(/\A(.+\.(?:zip|rar|7z))\.(\d{3})\z/i)
+          raise "Spritepack part #{index + 1} has an invalid numbered filename." unless match
+          expected_prefix ||= match[1].downcase
+          raise "Spritepack parts do not belong to the same archive." unless expected_prefix == match[1].downcase
+          raise "Spritepack parts are not in sequential order." unless match[2].to_i == index + 1
+          filename = "spritepack_#{safe_filename(item['id'])}_#{source_name}"
+          archive = File.join(temp_root, filename)
+          segment_start = 0.05 + (index.to_f / total.to_f) * 0.63
+          segment_end = 0.05 + ((index + 1).to_f / total.to_f) * 0.63
+          result = Reloaded::Download.fetch(
+            url,
+            archive,
+            :task => task,
+            :label => "#{name} part #{index + 1}/#{total}",
+            :min_bytes => 1,
+            :expected_bytes => part["size"],
+            :sha256 => part["sha256"],
+            :resume => true,
+            :progress_range => [segment_start, segment_end]
+          )
+          unless result.success?
+            raise "Part #{index + 1}/#{total}: #{result.error_message}"
+          end
+          archives << archive
+        end
+        destination = spritepack_extract_destination(item)
+        task.checkpoint! if task
+        task.report(0.7, "Extracting #{name}") if task
+        log("Split Spritepack downloaded: name=#{name} parts=#{archives.length} destination=#{relative_game_path(destination)}")
+        extracted = extract_archive(
+          archives.first,
+          destination,
+          :task => task,
+          :overwrite => :overwrite,
+          :progress_range => [0.7, 0.98]
+        )
+        raise "The verified Spritepack parts could not be extracted." unless extracted
+        Reloaded::SpritePacks.clear_index if defined?(Reloaded::SpritePacks)
+        task.report(1.0, "Installed #{name}") if task
+        cleanup_archives = true
+        {
+          :success => true,
+          :status => :ok,
+          :name => name,
+          :destination => destination,
+          :parts => archives.length,
+          :item => item
+        }
+      rescue Reloaded::Task::Cancelled
+        raise
+      rescue Exception => e
+        Reloaded::Log.exception("Split Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
+        { :success => false, :status => :error, :name => name.to_s, :error => e.message }
+      ensure
+        Array(archives).each { |archive| File.delete(archive) rescue nil } if cleanup_archives
       end
 
       def perform_component_spritepack_download(item, components, task = nil)
@@ -1258,9 +1331,23 @@ module Reloaded
           "extract_to" => source["extract_to"].to_s,
           "sha256" => first_string(source["sha256"], source["checksum"]),
           "size" => positive_download_size(source["size"] || source["bytes"]),
+          "parts" => normalize_spritepack_parts(source["parts"]),
           "components" => normalize_spritepack_components(source["components"]),
           "_index" => index.to_i
         }
+      end
+
+      def normalize_spritepack_parts(value)
+        Array(value).each_with_index.map do |part, index|
+          source = part.is_a?(Hash) ? part : {}
+          {
+            "file" => source["file"].to_s.strip,
+            "url" => source["url"].to_s.strip,
+            "sha256" => first_string(source["sha256"], source["checksum"]),
+            "size" => positive_download_size(source["size"] || source["bytes"]),
+            "_index" => index.to_i
+          }
+        end
       end
 
       def normalize_spritepack_components(value)
@@ -1323,6 +1410,7 @@ module Reloaded
           "id" => id,
           "name" => item["name"].to_s,
           "url" => item["url"].to_s,
+          "parts" => Array(item["parts"]),
           "components" => Array(item["components"]),
           "updated_at" => item["updated_at"].to_s,
           "full" => truthy?(item["full"]),
@@ -1347,6 +1435,8 @@ module Reloaded
       def spritepack_install_record_matches?(record, item)
         return false unless record
         return false unless record["updated_at"].to_s == item["updated_at"].to_s
+        parts = Array(item["parts"])
+        return part_signature(record["parts"]) == part_signature(parts) unless parts.empty?
         components = Array(item["components"])
         if components.empty?
           record["url"].to_s == item["url"].to_s
@@ -1355,6 +1445,17 @@ module Reloaded
         end
       rescue
         false
+      end
+
+      def part_signature(value)
+        Array(value).map do |part|
+          [
+            part["file"].to_s,
+            part["url"].to_s,
+            part["sha256"].to_s,
+            part["size"].to_i
+          ].join("|")
+        end
       end
 
       def component_signature(value)

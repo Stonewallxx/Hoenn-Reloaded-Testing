@@ -60,7 +60,10 @@ module Reloaded
 
     FOOTER_BUTTONS = ["Profiles", "Browser", "Tools"].freeze
     BUG_REPORT_THREAD_URL = "https://discord.com/channels/1121345297352753243/1518892862429855794".freeze
-    CORE_UPDATE_INSTALLER = "Hoenn Reloaded Installer.bat".freeze
+    CORE_UPDATE_INSTALLERS = {
+      :windows => "Hoenn Reloaded Installer.bat",
+      :proton => "Hoenn Reloaded Installer.sh"
+    }.freeze
 
     class << self
       def open
@@ -529,8 +532,9 @@ module Reloaded
       def confirm_spritepack_download(file)
         name = file["name"].to_s
         url = file["url"].to_s.strip
+        parts = Array(file["parts"])
         components = Array(file["components"])
-        if url.empty? && components.empty?
+        if url.empty? && parts.empty? && components.empty?
           show_message("No download URL is configured for:\n#{name}\n\nEdit Reloaded/Spritepacks.json.")
           return
         end
@@ -1067,13 +1071,14 @@ module Reloaded
           show_message("Hoenn Reloaded is already up to date.\nCurrent: v#{current}")
           return
         end
+        installer_name = core_update_installer_name
         installer = core_update_installer_path
         unless File.file?(installer)
-          show_message("#{CORE_UPDATE_INSTALLER} was not found in the game folder.")
+          show_message("#{installer_name} was not found in the game folder.")
           return
         end
         choice = show_message(
-          "Update Hoenn Reloaded now?\nCurrent: v#{current}\nLatest: v#{latest}\n\nThis will run #{CORE_UPDATE_INSTALLER} and close the game immediately.",
+          "Update Hoenn Reloaded now?\nCurrent: v#{current}\nLatest: v#{latest}\n\nThis will run #{installer_name} and close the game immediately.",
           ["Update", "Back"]
         )
         return unless choice == 0
@@ -1081,15 +1086,22 @@ module Reloaded
           Reloaded::Log.info("Launched Hoenn Reloaded updater: #{relative_game_path(installer)}", :mods) if defined?(Reloaded::Log)
           close_game_for_core_update
         else
-          show_message("Could not run #{CORE_UPDATE_INSTALLER}.")
+          show_message("Could not run #{installer_name}.")
         end
       rescue Exception => e
         Reloaded::Log.exception("Hoenn Reloaded update failed", e, channel: :mods) if defined?(Reloaded::Log)
         show_message("Could not start Hoenn Reloaded update:\n#{e.message}")
       end
 
+      def core_update_installer_name
+        platform = defined?(Reloaded::Platform) ? Reloaded::Platform.id : :windows
+        CORE_UPDATE_INSTALLERS[platform] || CORE_UPDATE_INSTALLERS[:windows]
+      rescue
+        CORE_UPDATE_INSTALLERS[:windows]
+      end
+
       def core_update_installer_path
-        File.expand_path(File.join(game_root_path, CORE_UPDATE_INSTALLER))
+        File.expand_path(File.join(game_root_path, core_update_installer_name))
       end
 
       def launch_core_update_installer(path)
