@@ -20,6 +20,7 @@ module ReloadedMart
     QUANTITY_ANIMATION_SECONDS = 0.45
     BOX_ANIMATION_SPEED = 2.25
     ROW_BADGE_LIMIT = 6
+    DEFAULT_VIEWPORT_Z = 100_000
     DEFAULT_CATEGORY_NAMES = {
       :featured => "FEATURED",
       :favorites => "FAVORITES",
@@ -73,6 +74,18 @@ module ReloadedMart
         scene = ReloadedMartSellScene.new
         screen = ReloadedMartSellScreen.new(scene, adapter)
         screen.pbSellScreen
+      end
+
+      def viewport_z
+        (@viewport_z_override || DEFAULT_VIEWPORT_Z).to_i
+      end
+
+      def with_viewport_z(value)
+        previous = @viewport_z_override
+        @viewport_z_override = value.to_i
+        yield
+      ensure
+        @viewport_z_override = previous
       end
 
       def banner_text(context = {}, entries = [])
@@ -243,12 +256,6 @@ class ReloadedMartBuyAdapter
     result
   end
 
-  def redeem_promo_code(code)
-    result = ReloadedMart.redeem_promo_code(code)
-    clear_price_cache if result.ok?
-    result
-  end
-
   def service_key(entry)
     raw = entry && entry.raw.is_a?(Hash) ? entry.raw : {}
     display = entry && entry.display.is_a?(Hash) ? entry.display : {}
@@ -264,7 +271,7 @@ class ReloadedMartBuyAdapter
   end
 
   def price(entry)
-    key = "#{entry.id}:#{ReloadedMart.active_coupons.join(",")}"
+    key = entry.id.to_s
     @price_cache[key] ||= ReloadedMart::Pricing.price_for(entry, context)
   end
 
@@ -277,29 +284,13 @@ class ReloadedMartBuyAdapter
   def base_price(entry)
     cached = cached_row_state(entry)
     return cached[:base_price] if cached && cached.key?(:base_price)
-    price(entry).base.to_i
+    price(entry).catalog.to_i
   end
 
   def price_overridden?(entry)
     cached = cached_row_state(entry)
     return cached[:price_overridden] if cached && cached.key?(:price_overridden)
     price(entry).overridden?
-  rescue
-    false
-  end
-
-  def promo_applied?(entry)
-    cached = cached_row_state(entry)
-    return cached[:promo_applied] if cached && cached.key?(:promo_applied)
-    price(entry).modifiers.any? { |modifier| promo_modifier?(modifier) }
-  rescue
-    false
-  end
-
-  def promo_modifier?(modifier)
-    return false unless modifier.is_a?(Hash)
-    return true if [modifier[:id], modifier["id"], modifier[:source], modifier["source"]].any? { |value| value.to_s.start_with?("promo:") }
-    [modifier[:promo_code], modifier["promo_code"]].any? { |value| !value.to_s.empty? }
   rescue
     false
   end
@@ -413,7 +404,7 @@ class ReloadedMartBuyAdapter
     max = ReloadedMart::Limits.max_per_purchase(entry) || ReloadedMart.bag_max_per_slot
     stock = stock_remaining(entry)
     max = [max, stock.to_i].min unless stock.nil?
-    max = [max, 1].min if [:service, :unlock, :coupon].include?(entry.kind)
+    max = [max, 1].min if [:service, :unlock].include?(entry.kind)
     unit = buy_price(entry)
     max = [max, (balance(entry) / unit).floor].min if unit > 0
     max = [max, 1].min if ReloadedMart::Limits.one_time?(entry)
@@ -655,7 +646,7 @@ class ReloadedMartBuyAdapter
   end
 
   def row_state_cache_key(entry)
-    "#{entry.id}:#{ReloadedMart.active_coupons.join(",")}"
+    entry.id.to_s
   rescue
     entry ? entry.id.to_s : ""
   end
@@ -663,7 +654,7 @@ class ReloadedMartBuyAdapter
   def build_row_state(entry)
     result = price(entry)
     final = [result.final.to_i, 0].max
-    base = result.base.to_i
+    base = result.catalog.to_i
     stock = ReloadedMart::Stock.remaining(entry)
     remaining_seconds = ReloadedMart::Stock.restock_seconds(entry, context)
     limited = ReloadedMart::Availability.remaining_time_text(entry, context)
@@ -671,7 +662,6 @@ class ReloadedMartBuyAdapter
     locked = ReloadedMart::Availability.locked?(entry, context)
     maxed = maxed?(entry)
     display = display_name(entry)
-    promo = Array(result.modifiers).any? { |modifier| promo_modifier?(modifier) }
     mystery = begin
       display_data = entry.display.is_a?(Hash) ? entry.display : {}
       value = display_data["mystery_box"] || display_data[:mystery_box] || entry.raw["mystery_box"] rescue false
@@ -686,7 +676,6 @@ class ReloadedMartBuyAdapter
       :base_price => base,
       :price_str => final <= 0 ? "FREE" : ReloadedMart.format_currency(final, result.currency),
       :price_overridden => (result.overridden? rescue false),
-      :promo_applied => promo,
       :free => final <= 0,
       :favorite => favorite,
       :locked => locked,
@@ -795,6 +784,7 @@ class ReloadedMartBuyScene
     @last_my = nil
     @list_state = nil
     @entry_list_key = nil
+    @manual_refresh_pending = false
   end
 
   def pbStartBuyScene(adapter)
@@ -843,15 +833,17 @@ class ReloadedMartBuyScene
         show_hint_popup
         next
       end
+      if mart_refresh_triggered?
+        request_catalog_refresh
+        next
+      end
       return nil if @pockets.empty?
       handle_category_input
       handle_entry_input
       handle_mode_input
       handle_mouse
 
-      if Input.trigger?(Input::SPECIAL)
-        pbPromptPromoCode
-      elsif Input.trigger?(Input::BACK)
+      if Input.trigger?(Input::BACK)
         pbPlayCancelSE rescue nil
         remember_cursor
         return nil
@@ -861,113 +853,6 @@ class ReloadedMartBuyScene
         return entry if entry
       end
     end
-  end
-
-  def pbPromptPromoCode
-    code = promo_code_input_popup(_INTL("Enter promo code."), 32)
-    code = code.to_s.strip
-    return if code.empty?
-    result = @adapter.redeem_promo_code(code)
-    pbDisplayPaused(_INTL(result.message.to_s.empty? ? "Promo code could not be applied." : result.message))
-    if result.ok?
-      rebuild_pockets
-      draw_content
-    end
-  rescue => e
-    ReloadedMart.log_exception("Promo code prompt failed", e)
-    pbDisplayPaused(_INTL("Promo code could not be applied.")) rescue nil
-  end
-
-  def promo_code_input_popup(title, max_length = 32)
-    if defined?(Reloaded) && Reloaded.respond_to?(:code_input)
-      remaining = ReloadedMart.active_promo_code_remaining_text
-      result = Reloaded.code_input(
-        title.to_s,
-        :initial => "",
-        :max_length => max_length.to_i,
-        :size => :compact,
-        :subtitle => (remaining ? "Time Remaining: #{remaining}" : nil)
-      )
-      draw_content rescue nil
-      return result.nil? ? "" : result.to_s
-    end
-    value = ""
-    accepted = false
-    dim = Sprite.new(@viewport)
-    dim.z = 970
-    dim.bitmap = Bitmap.new(SW, SH)
-    dim.bitmap.fill_rect(0, 0, SW, SH, Color.new(0, 0, 0, 90))
-    box_w = 360
-    box_h = 132
-    box_x = (SW - box_w) / 2
-    box_y = (SH - box_h) / 2
-    box = Sprite.new(@viewport)
-    box.z = 971
-    box.x = box_x
-    box.y = box_y
-    box.bitmap = Bitmap.new(box_w, box_h)
-    Input.text_input = true rescue nil
-    redraw = proc do
-      bitmap = box.bitmap
-      bitmap.clear
-      draw_panel(bitmap, 0, 0, box_w, box_h)
-      pbSetSmallFont(bitmap)
-      plain_text(bitmap, 14, 4, box_w - 28, 18, title, WHITE)
-      bitmap.fill_rect(14, 38, box_w - 28, 30, ROW_HOVER)
-      bitmap.fill_rect(14, 38, box_w - 28, 1, PANEL_BORDER)
-      bitmap.fill_rect(14, 67, box_w - 28, 1, PANEL_BORDER)
-      bitmap.fill_rect(14, 38, 1, 30, PANEL_BORDER)
-      bitmap.fill_rect(box_w - 15, 38, 1, 30, PANEL_BORDER)
-      cursor = ((Graphics.frame_count rescue 0) / 20) % 2 == 0 ? "|" : ""
-      shown = trim_text(bitmap, value + cursor, box_w - 44)
-      plain_text(bitmap, 22, 38, box_w - 44, 18, shown, WHITE)
-      bitmap.font.size = 14 rescue nil
-      remaining = ReloadedMart.active_promo_code_remaining_text
-      plain_text(bitmap, 14, box_h - 48, box_w - 28, 16, "Time Remaining: #{remaining}", GOLD, 1) if remaining
-      plain_text(bitmap, 14, box_h - 30, box_w - 28, 16, "Confirm (Enter) Back (B/Esc)", GRAY, 1)
-    end
-    redraw.call
-    loop do
-      Graphics.update
-      Input.update
-      redraw.call if ((Graphics.frame_count rescue 0) % 4 == 0)
-      if promo_key_trigger?(:ESCAPE) || Input.trigger?(Input::BACK) || mouse_right_trigger?
-        accepted = false
-        break
-      end
-      if promo_key_trigger?(:RETURN) || Input.trigger?(Input::USE) || mouse_left_trigger?
-        accepted = true
-        break
-      end
-      old_value = value.dup
-      value = value[0...-1] if (promo_key_trigger?(:BACKSPACE) || promo_key_repeat?(:BACKSPACE)) && !value.empty?
-      value = "" if promo_key_trigger?(:DELETE)
-      Input.gets.to_s.each_char do |char|
-        next if char == "\r" || char == "\n"
-        next unless char =~ /[A-Za-z0-9_\-]/
-        value += char.upcase if value.length < max_length
-      end
-      redraw.call if value != old_value
-    end
-    drain_popup_input
-    accepted ? value.strip : ""
-  ensure
-    Input.text_input = false rescue nil
-    Input.update rescue nil
-    box.bitmap.dispose rescue nil
-    box.dispose rescue nil
-    dim.bitmap.dispose rescue nil
-    dim.dispose rescue nil
-    draw_content rescue nil
-    entry_list_dialog_closed!
-  end
-
-  def promo_key_trigger?(key)
-    Input.triggerex?(key) rescue false
-  end
-
-  def promo_key_repeat?(key)
-    Input.repeatex?(key) rescue false
   end
 
   def pbChooseBuyNumber(entry, maximum)
@@ -1743,7 +1628,7 @@ class ReloadedMartBuyScene
 
   def setup_sprites
     @viewport = Viewport.new(0, 0, SW, SH)
-    @viewport.z = 100_000
+    @viewport.z = ReloadedMart::UI.viewport_z
     @bg_sprite = Sprite.new(@viewport)
     @bg_sprite.bitmap = Bitmap.new(SW, SH)
     @bg_sprite.bitmap.fill_rect(0, 0, SW, SH, BG_COLOR)
@@ -2190,7 +2075,7 @@ class ReloadedMartBuyScene
     x = PAD - @banner_offset.to_i
     width = bitmap.text_size(banner).width + 80
     while x < SW
-      shadow_text(bitmap, x, 6, width, 16, banner, GOLD)
+      no_shadow_text(bitmap, x, 6, width, 16, banner, GOLD)
       x += width
     end
   end
@@ -2252,8 +2137,7 @@ class ReloadedMartBuyScene
     else
       state[:price_str] || @adapter.buy_price_str(entry)
     end
-    promo_applied = !locked && !maxed && (state.key?(:promo_applied) ? state[:promo_applied] : @adapter.promo_applied?(entry))
-    price_badges = !locked && !maxed ? price_side_badges(bitmap, entry, promo_applied, state) : []
+    price_badges = !locked && !maxed ? price_side_badges(bitmap, entry, state) : []
     price_w = bitmap.text_size(price_str).width
     price_badges_w = price_badges.inject(0) { |sum, badge| sum + badge[:width].to_i + 4 }
     price_limit_x = SW - PAD - 10 - price_w - price_badges_w
@@ -2265,7 +2149,7 @@ class ReloadedMartBuyScene
       next if badge_x >= price_limit_x - 6
       badge_x = draw_badge(bitmap, badge_x + 4, y + 5, badge[:label], badge[:color], price_limit_x)
     end
-    price_color = locked ? DIM : (maxed ? BLUE : (promo_applied || free ? GREEN : (selected ? GOLD : GRAY)))
+    price_color = locked ? DIM : (maxed ? BLUE : (free ? GREEN : (selected ? GOLD : GRAY)))
     right = SW - PAD - 4
     price_x = right - price_w
     unless price_badges.empty?
@@ -2275,8 +2159,8 @@ class ReloadedMartBuyScene
         draw_price_change_badge(bitmap, badge_x, y + 5, badge) if badge_x > PAD
         badge_right = badge_x - 4
       end
-      change_badge = price_badges.find { |badge| badge[:label].to_s != "PROMO" }
-      price_color = promo_applied ? GREEN : (change_badge ? change_badge[:color] : price_color)
+      change_badge = price_badges.first
+      price_color = change_badge ? change_badge[:color] : price_color
     end
     shadow_text(bitmap, 0, y, right, ROW_H, price_str, price_color, 2)
   end
@@ -2287,7 +2171,6 @@ class ReloadedMartBuyScene
              when :gift then "[G] "
              when :service then "[S] "
              when :unlock then "[U] "
-             when :coupon then "[C] "
              else ""
     end
     marks = ""
@@ -2362,12 +2245,11 @@ class ReloadedMartBuyScene
     nil
   end
 
-  def price_side_badges(bitmap, entry, promo_applied, state = nil)
+  def price_side_badges(bitmap, entry, state = nil)
     badges = []
     overridden = state && state.key?(:price_overridden) ? state[:price_overridden] : @adapter.price_overridden?(entry)
     change = price_change_badge(bitmap, entry, state) if overridden
     badges << change if change
-    badges << { :label => "PROMO", :color => GREEN, :width => badge_width(bitmap, "PROMO") } if promo_applied
     badges
   rescue
     []
@@ -2410,7 +2292,7 @@ class ReloadedMartBuyScene
     unless entry
       @icon_sprite.item = nil if @icon_sprite
       @special_icon_sprite.visible = false if @special_icon_sprite
-      shadow_text(bitmap, PAD, INFO_H / 2 - 8, SW - PAD * 2, 20, "Nothing to buy here.", DIM)
+      no_shadow_text(bitmap, PAD, INFO_H / 2 - 8, SW - PAD * 2, 20, "Nothing to buy here.", DIM)
       return
     end
     icon_x = SW - PAD - 96
@@ -2421,15 +2303,15 @@ class ReloadedMartBuyScene
     end
     draw_special_icon(entry)
     pbSetSmallFont(bitmap)
-    shadow_text(bitmap, PAD, 4, icon_x - PAD * 2 - 4, 20, @adapter.display_name(entry), WHITE)
+    no_shadow_text(bitmap, PAD, 4, icon_x - PAD * 2 - 4, 20, @adapter.display_name(entry), WHITE)
     time_text = @adapter.limited_time_text(entry)
     if time_text && !time_text.to_s.empty?
       bitmap.font.size = 14
-      shadow_text(bitmap, PAD + 112, 6, icon_x - PAD * 2 - 166, 14, time_text, GOLD, 1)
+      no_shadow_text(bitmap, PAD + 112, 6, icon_x - PAD * 2 - 166, 14, time_text, GOLD, 1)
       pbSetSmallFont(bitmap)
     end
     meta = info_meta(entry)
-    shadow_text(bitmap, PAD, 4, icon_x - PAD - 10, 20, meta, meta_color(entry), 2)
+    no_shadow_text(bitmap, PAD, 4, icon_x - PAD - 10, 20, meta, meta_color(entry), 2)
     bitmap.fill_rect(PAD + 2, 27, icon_x - PAD - 4, 1, SEP)
     draw_info_body(bitmap, entry, icon_x)
   end
@@ -2503,13 +2385,13 @@ class ReloadedMartBuyScene
       lines[@info_scroll, 4].to_a.each do |line|
         locked = details[:locked]
         color = line.start_with?("Stock:") ? GOLD : (locked ? DIM : GRAY)
-        shadow_text(bitmap, x, y, width, 18, line, color)
+        no_shadow_text(bitmap, x, y, width, 18, line, color)
         y += 18
       end
     end
     details = []
     details << "Restock: #{@adapter.restock_text(entry)}" if @adapter.restock_text(entry)
-    shadow_text(bitmap, x, INFO_H - 20, width, 16, details.compact.join("  "), GOLD) unless details.compact.empty?
+    no_shadow_text(bitmap, x, INFO_H - 20, width, 16, details.compact.join("  "), GOLD) unless details.compact.empty?
   end
 
   def info_panel_lines(entry, bitmap, width)
@@ -2548,17 +2430,17 @@ class ReloadedMartBuyScene
     @bundle_scroll = @bundle_scroll.clamp(0, max_scroll)
     draw_info_scroll_arrows(bitmap, x, y + 15, width, @bundle_scroll, max_scroll)
     heading = @adapter.mystery_box?(entry) ? "Possible contents:" : "Will receive:"
-    shadow_text(bitmap, x, y, width, 15, heading, WHITE)
+    no_shadow_text(bitmap, x, y, width, 15, heading, WHITE)
     stock = @adapter.stock_remaining(entry)
-    shadow_text(bitmap, 0, y, x + width, 15, "Stock: #{stock}", DIM, 2) unless stock.nil?
+    no_shadow_text(bitmap, 0, y, x + width, 15, "Stock: #{stock}", DIM, 2) unless stock.nil?
     y += 15
     item_w = width - 118
     owned_x = x + width - 92
     grants[@bundle_scroll, visible_rows].to_a.each do |grant|
       label = grant[:quantity] > 1 ? "#{grant[:quantity]}x #{grant[:name]}" : grant[:name]
       color = grant[:rarity] ? mystery_box_rarity_color(grant[:rarity]) : GRAY
-      shadow_text(bitmap, x + 6, y, item_w, 14, trim_text(bitmap, label, item_w), color)
-      shadow_text(bitmap, owned_x, y, 92, 14, "Owned: #{grant[:owned]}", DIM, 2) unless grant[:owned].nil?
+      no_shadow_text(bitmap, x + 6, y, item_w, 14, trim_text(bitmap, label, item_w), color)
+      no_shadow_text(bitmap, owned_x, y, 92, 14, "Owned: #{grant[:owned]}", DIM, 2) unless grant[:owned].nil?
       y += 14
     end
     # Intentionally no range label; bundle scrolling remains mouse-wheel controlled.
@@ -2648,7 +2530,7 @@ class ReloadedMartBuyScene
     else
       sort_name = sort_label
       quick = @quick_buy ? "On" : "Off"
-      hint = "Buy (C) | Back (B) | Favorite (A) | Promo Code (Z) | Sort: #{sort_name} (L) | Quick Buy: #{quick} (R)"
+      hint = "Buy (C) | Back (B) | Favorite (A) | Refresh (Z) | Sort: #{sort_name} (L) | Quick Buy: #{quick} (R)"
       shadow_text(bitmap, PAD, 2, SW - PAD * 2, FOOTER_H - 2, trim_text(bitmap, hint, SW - PAD * 2), WHITE)
     end
   end
@@ -2660,7 +2542,7 @@ class ReloadedMartBuyScene
       Reloaded::HintText.confirm("Buy"),
       Reloaded::HintText.back,
       Reloaded::HintText.action("Favorite"),
-      Reloaded::HintText.special("Promo Code"),
+      Reloaded::HintText.special("Refresh"),
       Reloaded::HintText.other("Sort: #{sort_name}", :sort),
       Reloaded::HintText.other("Quick Buy: #{quick}", :quick)
     ]
@@ -2671,6 +2553,7 @@ class ReloadedMartBuyScene
   def hint_statuses
     statuses = [Reloaded::HintText.status("Sort: #{sort_label}", BLUE)]
     statuses << Reloaded::HintText.status("Quick-Buy Mode", GREEN) if @quick_buy
+    statuses << Reloaded::HintText.status("Refreshing...", BLUE) if @manual_refresh_pending
     statuses
   rescue
     []
@@ -2780,11 +2663,25 @@ class ReloadedMartBuyScene
   def poll_catalog_refresh
     return unless defined?(ReloadedMart::Source)
     result = ReloadedMart::Source.finish_online_refresh
-    return unless result
+    return if result.nil?
+    manual = @manual_refresh_pending
+    @manual_refresh_pending = false
     source = ReloadedMart::Source.active_source rescue nil
     version = ReloadedMart::Source.active_report.catalog_version rescue nil
-    return unless source == :online_fresh
-    return if @catalog_refresh_source == source && @catalog_refresh_version.to_s == version.to_s
+    unless result && source == :online_fresh
+      if manual
+        if defined?(Reloaded) && Reloaded.respond_to?(:toast_warning)
+          Reloaded.toast_warning("The Reloaded Mart could not be refreshed.")
+        else
+          show_message("The Reloaded Mart could not be refreshed.")
+        end
+        draw_footer
+        return true
+      end
+      return false
+    end
+    unchanged = @catalog_refresh_source == source && @catalog_refresh_version.to_s == version.to_s
+    return false if unchanged && !manual
     @catalog_refresh_source = source
     @catalog_refresh_version = version
     rebuild_pockets
@@ -2794,13 +2691,40 @@ class ReloadedMartBuyScene
     snap_quantity
     draw_all
     if defined?(Reloaded) && Reloaded.respond_to?(:toast_ok)
-      Reloaded.toast_ok("Mart updated.")
+      Reloaded.toast_ok(manual ? "Mart refreshed." : "Mart updated.")
     else
-      show_message("Mart updated.")
+      show_message(manual ? "Mart refreshed." : "Mart updated.")
     end
     true
   rescue Exception => e
     ReloadedMart.log_exception("Reloaded Mart catalog refresh polling failed", e) if defined?(ReloadedMart)
+    false
+  end
+
+  def mart_refresh_triggered?
+    Input.trigger?(Input::SPECIAL)
+  rescue
+    false
+  end
+
+  def request_catalog_refresh
+    return false unless defined?(ReloadedMart::Source)
+    running = ReloadedMart::Source.respond_to?(:refreshing?) && ReloadedMart::Source.refreshing?
+    started = ReloadedMart::Source.start_online_refresh
+    if started || running
+      @manual_refresh_pending = true
+      draw_footer
+      pbPlayDecisionSE rescue nil
+      return true
+    end
+    if defined?(Reloaded) && Reloaded.respond_to?(:toast_warning)
+      Reloaded.toast_warning("The Reloaded Mart refresh could not be started.")
+    else
+      show_message("The Reloaded Mart refresh could not be started.")
+    end
+    false
+  rescue Exception => e
+    ReloadedMart.log_exception("Reloaded Mart manual refresh failed", e) if defined?(ReloadedMart)
     false
   end
 
@@ -2836,6 +2760,11 @@ class ReloadedMartBuyScene
 
   def shadow_text(bitmap, x, y, width, height, text, color, align = 0)
     pbDrawShadowText(bitmap, x, y, width, height, text.to_s, color, SHADOW, align)
+  rescue
+  end
+
+  def no_shadow_text(bitmap, x, y, width, height, text, color, align = 0)
+    pbDrawShadowText(bitmap, x, y, width, height, text.to_s, color, Color.new(0, 0, 0, 0), align)
   rescue
   end
 
@@ -3399,7 +3328,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
     unless item
       @icon_sprite.item = nil if @icon_sprite
       @special_icon_sprite.visible = false if @special_icon_sprite
-      shadow_text(bitmap, PAD, INFO_H / 2 - 8, SW - PAD * 2, 20, "Nothing to sell here.", DIM)
+      no_shadow_text(bitmap, PAD, INFO_H / 2 - 8, SW - PAD * 2, 20, "Nothing to sell here.", DIM)
       return
     end
     icon_x = SW - PAD - 96
@@ -3409,8 +3338,8 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
       @icon_sprite.item = item
     end
     pbSetSmallFont(bitmap)
-    shadow_text(bitmap, PAD, 4, icon_x - PAD * 2 - 4, 20, @adapter.display_name(item), WHITE)
-    shadow_text(bitmap, PAD, 4, icon_x - PAD - 10, 20, "x#{@qty_display.round}", WHITE, 2)
+    no_shadow_text(bitmap, PAD, 4, icon_x - PAD * 2 - 4, 20, @adapter.display_name(item), WHITE)
+    no_shadow_text(bitmap, PAD, 4, icon_x - PAD - 10, 20, "x#{@qty_display.round}", WHITE, 2)
     bitmap.fill_rect(PAD + 2, 27, icon_x - PAD - 4, 1, SEP)
     y = 34
     width = icon_x - PAD * 2 - 4
@@ -3420,7 +3349,7 @@ class ReloadedMartSellScene < ReloadedMartBuyScene
     @info_scroll = @info_scroll.to_i.clamp(0, max_scroll)
     draw_info_scroll_arrows(bitmap, PAD, y, width, @info_scroll, max_scroll)
     lines[@info_scroll, 4].to_a.each do |line|
-      shadow_text(bitmap, PAD, y, width, 18, line, GRAY)
+      no_shadow_text(bitmap, PAD, y, width, 18, line, GRAY)
       y += 18
     end
   end

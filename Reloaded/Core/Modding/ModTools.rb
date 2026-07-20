@@ -261,7 +261,8 @@ module Reloaded
         write_json(File.join(folder, "Settings.json"), template_settings)
         write_text(File.join(folder, "Scripts", "001_Main.rb"), template_script(id))
         write_text(File.join(folder, "Changelog.txt"), "1.0.0\n- Initial template.\n")
-        write_text(File.join(folder, "Documentation", "README.md"), "# #{mod_name}\n\nMod documentation goes here.\n")
+        write_text(File.join(folder, "Documentation", "README.md"), template_readme(mod_name, id))
+        write_text(File.join(folder, "Documentation", "APIExamples.rb"), template_api_examples(id))
         Reloaded::Log.info("Created mod template: #{relative_game_path(folder)}", :mods) if defined?(Reloaded::Log)
         folder
       end
@@ -444,6 +445,115 @@ module Reloaded
         #======================================================
 
         Reloaded::Log.mod("#{mod_id}", "Template script loaded") if defined?(Reloaded::Log)
+        RUBY
+      end
+
+      def template_readme(mod_name, mod_id)
+        <<-MARKDOWN.gsub(/^ {8}/, "")
+        # #{mod_name}
+
+        Starter Hoenn Reloaded mod with ID `#{mod_id}`.
+
+        ## Structure
+
+        - `Scripts/` contains Ruby files loaded in alphabetical order.
+        - `Graphics/`, `Audio/`, and `Fonts/` contain optional asset overrides.
+        - `Settings.json` declares player-configurable mod settings.
+        - `Documentation/APIExamples.rb` contains syntax-checkable examples. It
+          is documentation only and is not loaded by the game.
+
+        ## API Stability
+
+        Use APIs documented in `Reloaded/Documentation/Modding.md`. Stable
+        contracts are supported integration points:
+
+        ```ruby
+        Reloaded::API.public?(:events)
+        Reloaded::API.public?(:rewards)
+        Reloaded::API.contract(:download)
+        ```
+
+        Do not call methods marked `private`, test overrides, scene classes,
+        adapters, mutable registries, or constants documented as internal.
+        `compatibility` contracts exist for older mods; new code should use the
+        documented replacement. `developer` contracts are for local tools and
+        are not guaranteed to exist in player packages.
+
+        Copy only the examples your mod needs into `Scripts/`. Replace example
+        URLs, paths, IDs, checksums, and reward data before shipping.
+        MARKDOWN
+      end
+
+      def template_api_examples(mod_id)
+        <<-RUBY.gsub(/^ {8}/, "")
+        # Documentation-only examples. This file is outside Scripts/ and is not
+        # loaded by Hoenn Reloaded. Copy only the methods your mod needs.
+
+        module ReloadedTemplateExamples
+          MOD_ID = :#{mod_id}
+
+          def self.open_form
+            Reloaded::Form.open(
+              "Example Editor",
+              [
+                { :id => "name", :label => "Name", :type => :text, :required => true },
+                { :id => "count", :label => "Count", :type => :number, :min => 1, :max => 99 }
+              ],
+              { "name" => "Example", "count" => 1 }
+            )
+          end
+
+          def self.register_remote_data
+            Reloaded::RemoteData.register(
+              :#{mod_id}_catalog,
+              :owner => MOD_ID,
+              :format => :json,
+              :url => "https://example.com/catalog.json",
+              :local_path => "Mods/Example Mod/catalog.json",
+              :validator => proc { |value| value.is_a?(Hash) }
+            )
+          end
+
+          def self.refresh_remote_data
+            Reloaded::Task.start(
+              :#{mod_id}_refresh,
+              :owner => MOD_ID,
+              :duplicate => :reuse
+            ) do |task|
+              result = Reloaded::RemoteData.fetch(:#{mod_id}_catalog, :force => true)
+              task.fail!(result.error_message, result.error_code) unless result.ok?
+              result.value
+            end
+          end
+
+          def self.download_archive(url, destination)
+            Reloaded::Download.start(
+              url,
+              destination,
+              :label => "Example Download",
+              :expected_bytes => 12_345_678,
+              :sha256 => ("0" * 64), # Replace with the published file hash.
+              :task_options => { :owner => MOD_ID, :duplicate => :reuse }
+            )
+          end
+
+          def self.extract_archive(archive, destination, task = nil)
+            Reloaded::Archive.extract(
+              archive,
+              destination,
+              :overwrite => :fail,
+              :task => task,
+              :verify => true
+            )
+          end
+
+          def self.grant_item
+            Reloaded.grant_reward(
+              { "type" => "item", "item" => "POTION", "quantity" => 1 },
+              :source => MOD_ID
+            )
+          end
+        end
         RUBY
       end
 

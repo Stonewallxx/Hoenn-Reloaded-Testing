@@ -202,6 +202,10 @@ module Reloaded
         @transport_override = callback
       end
 
+      def parse_json_document(raw)
+        parse_json(raw)
+      end
+
       private
 
       def fetch_transient(format, url, options)
@@ -560,7 +564,8 @@ module Reloaded
         File.open(temp, "wb") { |file| file.write(payload) }
         verified = parse_json(File.read(temp))
         raise "Remote data cache verification failed." unless verified.is_a?(Hash) && verified["remote_data_cache"].to_i == 2
-        raise "Remote data cache body verification failed." unless hex_decode(verified["body_hex"]) == body.to_s
+        verified_body_hex = verified["body_hex"].to_s.downcase
+        raise "Remote data cache body verification failed." unless verified_body_hex == hex_encode(body.to_s)
         File.delete(backup) if File.file?(backup)
         File.rename(path, backup) if File.file?(path)
         File.rename(temp, path)
@@ -617,13 +622,25 @@ module Reloaded
 
       def parse_json(raw)
         raise "JSON parser is not available." unless defined?(JSON)
-        text = raw.to_s.sub("\xEF\xBB\xBF", "")
+        text = strip_utf8_bom(raw)
         begin
           stringify_keys(JSON.parse(text))
         rescue NameError => e
-          raise unless e.message.to_s.include?("`null'")
+          missing_name = e.respond_to?(:name) ? e.name.to_s : ""
+          raise unless missing_name == "null" || e.message.to_s =~ /[`'"]null[`'"]/
           stringify_keys(JSON.parse(rewrite_null_literals(text)))
         end
+      end
+
+      def strip_utf8_bom(raw)
+        text = raw.to_s.dup
+        if text.bytesize >= 3 &&
+           text.getbyte(0) == 0xEF &&
+           text.getbyte(1) == 0xBB &&
+           text.getbyte(2) == 0xBF
+          text = text.byteslice(3, text.bytesize - 3)
+        end
+        text
       end
 
       def rewrite_null_literals(text)

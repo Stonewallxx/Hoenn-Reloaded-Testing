@@ -85,27 +85,47 @@ Each file is a 6-frame horizontal sprite sheet. The expected frame size is
 48x32 pixels, for a total sheet size of 288x32 pixels. If a sheet is missing,
 the UI falls back to the built-in drawn chest animation.
 
-## Online Catalog Loading
+## Catalog Loading
 
-The standalone Reloaded Mart is online-catalog driven.
+The standalone Reloaded Mart has a shipped offline catalog and a separate
+online catalog.
 
 On open:
 
-- The mart opens immediately and refreshes the catalog through `Reloaded::Task`.
+- `Reloaded/ReloadedMartBase.json` loads immediately.
+- The mart opens from that base stock and refreshes through `Reloaded::Task`.
 - Every online fetch uses a cache-busted URL.
-- A valid online response replaces the last-good cache.
-- Curated catalog entries, banners, events, and promo codes are shown only
-  while the current source is a freshly confirmed online response.
-- Cached catalog data is retained for recovery and metadata but never exposes
-  expired curated offers while offline.
-- Locally generated automation, including Daily Featured, remains available
-  offline and uses its built-in defaults until a fresh catalog arrives.
+- Only a valid, freshly confirmed online response replaces the base catalog.
+- Replacement is complete. Base and online entries are never merged.
+- Failed requests and cached RemoteData responses leave the current base
+  catalog active. A failed manual refresh does not discard a fresh catalog
+  that was already confirmed during the current session.
+- Last-good online data is retained for metadata and diagnostics but never
+  exposes expired curated offers while offline.
+- Daily Featured remains available against the active base catalog and uses
+  its built-in defaults until a fresh catalog arrives.
 
 The current online URL is:
 
 ```ruby
 ReloadedMart::ONLINE_CATALOG_URL
 ```
+
+The shipped base path is:
+
+```ruby
+ReloadedMart::BASE_CATALOG_RELATIVE_PATH
+```
+
+The Admin-only Reloaded Mart Editor can switch between `Online Catalog` and
+`Offline Base Stock`. Base stock is saved directly to the shipped JSON and
+cannot be exported or published as the online payload.
+
+Content entries expose `Copy to Online` or `Copy to Offline` based on the
+current catalog. Copying preserves the complete entry and adds any missing
+category definitions. An existing destination entry with the same stable ID
+must be explicitly replaced. Offline copies use `offline_allowed`; online
+copies use `fresh_required`.
 
 ## Catalog Versions
 
@@ -149,9 +169,10 @@ Top-level fields:
   "profile_tuning": {},
   "daily_featured": {
     "enabled": true,
-    "count": 2,
-    "discount_min_percent": 10,
-    "discount_max_percent": 40,
+    "count": 3,
+    "discount_min_percent": 5,
+    "discount_max_percent": 50,
+    "high_discount_limit": 1,
     "category_id": "featured",
     "category_name": "FEATURED",
     "pool": "game_items",
@@ -170,14 +191,45 @@ page-specific banners. Supported keys include `reloaded_buy`, `reloaded_sell`,
 not inherit the top-level Reloaded buy banner. The daily featured item is shown
 as a row badge, not appended to the banner ticker.
 
-`daily_featured` generates deterministic real-day Featured rows from the game's
-item pool. The same `catalog_version` and calendar day produce the same items
-for every player. Key items, TMs/HMs/TRs, important/untossable items, 0-price
-items, the built-in powerful-item blacklist, and any online `blacklist` entries
-are excluded. Each generated item gets its own deterministic discount from the
-online catalog range set by `discount_min_percent` and
-`discount_max_percent`; values are clamped to 10-40% off and there is no player
-option for changing them.
+`daily_featured` generates deterministic Featured rows from the base game's
+item pool. The same `catalog_version` and Eastern calendar day produce the same
+items for every player. The schedule uses disjoint item groups to prevent an
+item from repeating during the previous three days when the eligible pool can
+supply four full rotations.
+
+Key items, TMs/HMs/TRs, important/untossable items, 0-price items, mod-added
+items, the built-in owner blacklist, online `blacklist` entries,
+curated Featured items, and catalog items with an active discount are excluded.
+The runtime identifies additions from Data Patch ownership and by comparing the
+active item registry with the compiled base `Data/items.dat`. Trusted
+Hoenn Reloaded additions can be admitted by adding their item IDs to
+`ADDED_ITEM_ALLOWLIST` near the top of `DailyFeatured.rb`; this does not bypass
+the other eligibility filters. Other mod-added items can still be curated
+explicitly as normal online catalog entries.
+
+Generated discounts are deterministic and configurable from 0-100% off.
+`high_discount_limit` controls how many of the day's generated offers may
+receive a discount of 40% or more. All remaining offers are capped at 39%.
+When a configured minimum is 40 or higher, it applies to the selected 40%+
+offers; remaining offers still use the standard 0-39% range.
+
+A successful online catalog response also supplies the trusted HTTP server
+timestamp used by Daily Featured. The timestamp and its local observation point
+are stored per save. In-session elapsed time uses a monotonic clock, and offline
+time cannot move backward past the last recorded Daily Featured day. A later
+successful online response is authoritative and corrects the clock to current
+server time. Players who have never completed an online catalog fetch use the
+device clock as the offline fallback.
+
+The shipped `DailyFeatured.rb` configuration is the offline authority. A fresh
+online catalog can override `daily_featured`; cached or unavailable online data
+does not expose stale curated offers. There is no catalog-wide Automation
+switch. Daily Featured uses its own `enabled` field, while stock resets,
+economy events, and profile tuning follow their own data.
+
+Press `X` from the Reloaded Mart buy page to request an online catalog refresh.
+The Mart remains open while the fetch runs and rebuilds its displayed content
+when the request completes.
 
 ## Entry Kinds
 
@@ -225,50 +277,15 @@ validation, debit, and refunds.
 Items use the built-in `item` reward type. Mods can register additional grant
 types through `Reloaded::Rewards` before the catalog is opened.
 
-`service` and `unlock` are registry-backed entry kinds. `service` currently
-supports `display.service_key: "instant_hatch"`, which opens the party screen,
-lets the player choose one Egg, and hatches that Egg immediately. Unknown
-service keys remain unavailable until a handler is added.
+`service` currently supports `display.service_key: "instant_hatch"`, which
+opens the party screen, lets the player choose one Egg, and hatches that Egg
+immediately. Unknown service keys remain unavailable until a handler is added.
 
-## Promo Codes
-
-Promo codes are top-level catalog data, not Mart entries. Players enter a code
-with `Promo Code (Z)` on the Reloaded Mart buy page. A valid code activates its
-discount for 5 minutes and is immediately marked used for that save file, so it
-cannot be reactivated later. Only one promo code can be active at a time.
-
-Example:
-
-```json
-{
-  "promo_codes": [
-    {
-      "id": "healing_20",
-      "code": "HEAL20",
-      "label": "20% Healing Discount",
-      "enabled": true,
-      "available_from": "",
-      "available_until": "",
-      "modifier": {
-        "mode": "buy",
-        "type": "percent",
-        "value": -20,
-        "category_ids": ["medicine"],
-        "entry_ids": [],
-        "item_ids": [],
-        "tags": []
-      }
-    }
-  ]
-}
-```
-
-Promo modifiers use the same targeting fields as other price modifiers, such as
-`entry_id`, `entry_ids`, `item_id`, `item_ids`, `category`, `category_id`,
-`category_ids`, `tag`, and `tags`. Leave entry/item/category/tag targets empty
-to let the promo apply wherever the remaining modifier rules match. If the local
-clock moves backward while a promo code is active, active promo codes are
-cleared and already-used codes stay used.
+`unlock` requires a non-empty `display.unlock_key`. A successful purchase sets
+that key in the per-save Mart `unlocks` state. Unlock purchases are limited to
+one at a time, cannot be bought again after activation, and participate in
+transaction rollback if a later purchase step fails. Gameplay and mod code can
+query `ReloadedMart.unlocked?("key")`.
 
 ## Bundles, Gifts, And Mystery Boxes
 
@@ -398,7 +415,7 @@ One-shot next Pokemon rule:
 { "type": "iv_boundary_force_next", "scope": "gift", "perfect_ivs": 3, "quantity": 1 }
 ```
 
-Supported scopes are `wild`, `gift`, `static`, `egg`, and `player`.
+Supported scopes are `wild`, `gift`, `static`, `egg`, `player`, and `trainer`.
 `iv_boundary_boost` expires by real time. `iv_boundary_force_next` is consumed
 by the next matching newly generated Pokemon.
 
@@ -428,6 +445,7 @@ not have those mods installed.
 
 Availability checks support:
 
+- `active`
 - `available_from`
 - `available_until`
 - `hidden`
@@ -445,6 +463,8 @@ Availability checks support:
 - stock remaining
 
 Locked entries show clean player-facing messages. Technical details are logged.
+Set `active` to `false` to disable an entry. It follows the same hidden or
+visible-when-locked display policy as other failed availability checks.
 
 ## Stock And Limits
 
@@ -484,8 +504,7 @@ The price pipeline is:
 4. active catalog economy event modifiers
 5. profile tuning modifiers
 6. daily featured modifier
-7. active promo code modifiers
-8. runtime registered price modifier handlers
+7. runtime registered price modifier handlers
 
 Supported modifier types:
 
@@ -496,7 +515,7 @@ Supported modifier types:
 - `max`
 
 Matching supports mode, entry ID(s), item ID(s), kind, category ID(s), tag,
-promo code, and minimum loyalty spend.
+and minimum loyalty spend.
 
 `PriceResult` exposes:
 
@@ -509,14 +528,18 @@ currency
 display
 ```
 
+The configured catalog price is the normal Reloaded Mart price. `% OFF` and
+`% MORE` badges compare the final price against that catalog price, so simply
+setting a Mart price above or below the vanilla item price does not create a
+price-change badge.
+
 The built-in purchase currencies are `money`, `coins`, `battle_points`,
 `quest_points`, and `cosmetics_money`. A mod-registered currency is also valid
 when it provides a readable and writable wallet through `Reloaded::Rewards`.
 
 ## Transactions
 
-Purchases use one cart path for items, bundles, gifts, services, unlocks, and
-legacy coupon entries.
+Purchases use one cart path for items, bundles, gifts, services, and unlocks.
 
 The transaction order is:
 
@@ -583,7 +606,8 @@ Rows can show:
 - `FEATURED`
 - `LIMITED`
 - locked state
-- price change badges such as `20% OFF` or `15% MORE` when the final price differs from the base price
+- price change badges such as `20% OFF` or `15% MORE` when an active modifier
+  changes the configured Reloaded Mart price
 
 ## REX Sell Controls
 
@@ -656,7 +680,7 @@ Important saved keys:
 - `catalog`
 - `cache`
 - `seen_catalog_versions`
-- `promo_codes`
+- `unlocks`
 - `daily_featured`
 - `transaction_sequence`
 - `transactions`

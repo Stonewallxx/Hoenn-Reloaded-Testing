@@ -486,7 +486,7 @@ Short aliases are available for common input types:
 ```ruby
 name = Reloaded.text_input("Name", :initial => "New Entry")
 notes = Reloaded.multiline_input("Description", :initial => "")
-code = Reloaded.code_input("Promo Code", :max_length => 32)
+code = Reloaded.code_input("Access Code", :max_length => 32)
 url = Reloaded.url_input("Download URL", :initial => "")
 ```
 
@@ -725,23 +725,35 @@ quantity = Reloaded::NumberPicker.quantity(
   :min => 1,
   :max => 99,
   :initial => 1,
-  :step => 1,
-  :large_step => 10,
-  :unit_price => 300,
-  :show_unit_price => true,
-  :currency_formatter => proc { |value| "$#{value}" }
+  :value_prefix => "x",
+  :allow_max_shortcut => true
 )
 ```
 
-`Up/Down` uses `:step`; `Left/Right` uses `:large_step`. Normal steps can
-wrap with `:wrap`, while large steps clamp. Mouse wheel changes one step,
-left-clicking the value confirms, and right-click cancels. Set
-`:allow_max_shortcut => true` to let Action jump to the maximum.
+`Reloaded::NumberPicker.open` uses the Kanto Reloaded digit picker for generic
+editor values:
 
-At the maximum, `:show_max_label => true` displays blue `MAX (number)`.
-`:value_prefix`, `:value_suffix`, `:preview`, `:preview_color`, `:on_change`,
-and `:validator` support non-Mart editors and reward tools. NumberPicker does
-not draw a Controls footer label, but Y still opens its Controls toast.
+- `Left/Right` selects a digit.
+- `Up/Down` changes only the selected digit.
+- Inactive digits are dim and the selected digit pulses white.
+- Every digit in the configured range remains visible.
+- The first Confirm moves selection to `OK`; Confirm on `OK` submits the value.
+- Left or Right from `OK` returns to the digit row.
+
+The mouse wheel changes the selected digit. Clicking a digit selects it,
+clicking `OK` submits, and right-click cancels. Generic editor values are
+nonnegative, matching the Kanto Reloaded picker.
+
+`Reloaded::NumberPicker.quantity` retains the original Reloaded quantity popup
+used by the Mart and Bag. In that popup, `Up/Down` uses `:step`,
+`Left/Right` uses `:large_step`, `:wrap` controls endpoint wrapping, and
+`:allow_max_shortcut => true` lets Action jump to the maximum. Unit-price and
+total-price previews remain available there.
+
+Generic `open` supports `:min`, `:max`, `:initial`, `:digits`, `:label`,
+`:value_prefix`, `:width`, `:theme`, `:show_dim`, `:z`, and `:on_change`.
+Quantity pickers additionally support `:value_suffix`, `:preview`,
+`:preview_color`, `:validator`, and the step options above.
 
 `Reloaded::NumberPicker.confirm` uses the same title, item, quantity,
 unit-price, and total layout with `Yes/No` rows. The quantity picker keeps its
@@ -798,7 +810,9 @@ Supported field types are `:text`, `:multiline`, `:number`, `:toggle`,
 `:enum`, `:list`, `:game_data`, `:custom`, `:readonly`, and `:header`.
 Common properties include `:default`, `:required`, `:description`, `:min`,
 `:max`, `:step`, `:large_step`, `:choices`, `:visible`, `:enabled`,
-`:disabled_reason`, `:normalize`, `:validate`, and `:on_change`.
+`:disabled_reason`, `:empty_label`, `:normalize`, `:validate`, and
+`:on_change`. Use `:empty_label` for a meaningful blank-state label such as
+`"Unlimited"` while retaining `nil` in the returned data.
 
 Conditions and callbacks receive the current draft. Field validation may return
 `true`, an error string, or `{ :level => :warning, :message => "..." }`.
@@ -914,7 +928,11 @@ images, or other large binary files; use `Reloaded::Download` for those.
 
 Use `Reloaded::Download` for large HTTPS files. It streams into a
 same-directory `.part` file, applies configured size and SHA-256 checks, and
-only then atomically promotes the completed file to its destination.
+only then atomically promotes the completed file to its destination. Files of
+at least 24 MiB use up to three simultaneous byte-range connections when the
+server supports them. Unsupported range requests automatically fall back to
+the existing single streaming connection. The three-connection limit is shared
+across the whole process, not granted independently to every active task.
 
 ```ruby
 result = Reloaded::Download.fetch(
@@ -934,8 +952,9 @@ task.fail!(result.error_message, result.error_code) unless result.success?
 `expected_bytes` and `sha256` are optional. When supplied, both must match
 before the destination is replaced. `max_bytes`, `open_timeout`,
 `read_timeout`, `redirect_limit`, `retries`, custom `headers`, and a `label`
-may also be supplied. Redirects remain HTTPS and sensitive headers are removed
-when the origin changes.
+may also be supplied. `connections` can lower the multipart connection count
+from its default and maximum of 3. Redirects remain HTTPS and sensitive
+headers are removed when the origin changes.
 
 `Result` exposes `success?`/`ok?`, `status`, `error_code`, `error_message`,
 sanitized `url`, `final_url`, and `destination`, plus `bytes`,
@@ -962,8 +981,11 @@ remote downloads.
 
 Pass `:resume => true` only for large immutable downloads with an expected size
 and preferably SHA-256. Interrupted network/transport failures preserve the
-`.part` file for a byte-range retry. Validation failures discard it. Full and
-monthly Spritepack archives enable this automatically.
+`.part` file and its `.part.meta.json` range state for a byte-range retry.
+Multipart workers write directly into assigned offsets in one preallocated
+file. ETag/Last-Modified changes, invalid range boundaries, and validation
+failures discard the partial. Full and monthly Spritepack archives enable this
+automatically.
 
 ## Archive API
 
@@ -1373,7 +1395,7 @@ entries = [
   Reloaded::HintText.confirm("Use"),
   Reloaded::HintText.back,
   Reloaded::HintText.action("Favorite"),
-  Reloaded::HintText.special("Promo Code"),
+  Reloaded::HintText.special("Refresh"),
   Reloaded::HintText.other("Sort", :sort)
 ]
 
@@ -2141,6 +2163,12 @@ Egg Moves: Off / On
 `Egg Moves` controls whether the vault's Relearn Moves mode includes egg
 moves. Default value: `On`.
 
+Relearn Moves respects the same Name, Type, Category, Recent, and Level Learned
+sorting modes as the main vault. Level Learned uses the selected Pokemon's
+learnset, with initial moves first, followed by earlier-to-later level-up moves,
+remembered non-level moves, and egg moves. Egg moves are marked with an egg
+icon in the Relearn list.
+
 The Reloaded Pause Menu entry remains available whenever the TM Vault module is
 loaded, regardless of the PokeNav option. TM/HM and tutor moves are registered
 when the player picks up, receives, buys, or is taught the move, and the vault
@@ -2174,7 +2202,7 @@ Check saved data:
 ```ruby
 TMVault.vault             # => registered move IDs
 TMVault.source_for(:CUT)  # => source labels for that move
-TMVault.sort_mode          # => 0 Name, 1 Type, 2 Category, 3 Recent
+TMVault.sort_mode          # => 0 Name, 1 Type, 2 Category, 3 Recent, 4 Level Learned
 TMVault.egg_moves_enabled? # => true/false
 ```
 
@@ -2659,7 +2687,16 @@ defaults, such as missing `id`, `name`, `version`, `authors`, `dependencies`,
 The template generator can create:
 
 - a starter mod folder under `ModDev/` with `mod.json`, `Scripts/`, asset
-  folders, `Settings.json`, `Changelog.txt`, and documentation.
+  folders, `Settings.json`, `Changelog.txt`, and documentation;
+- a syntax-checkable `Documentation/APIExamples.rb` with compact Form,
+  RemoteData, Task, Download, Archive, and Rewards examples.
+
+The examples file is outside `Scripts/` and is never loaded by the game.
+Copy only the integrations a mod needs into its own script files. Generated
+documentation also explains API contract classifications. Only documented
+`stable` APIs are compatibility commitments. Private methods, transport/test
+overrides, scene implementations, adapters, and mutable internal registries
+must not be used by released mods.
 
 Profiles are created through the normal Profiles interface rather than a
 separate template action.

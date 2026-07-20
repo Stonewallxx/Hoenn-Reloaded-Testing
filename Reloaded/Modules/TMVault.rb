@@ -100,6 +100,7 @@ module TMVault
   PARTY_ICO_H  = 64
 
   ICON_PATH = "Reloaded/Graphics/Pokegear/icon_TMVAULT"
+  SORT_NAMES = ["Name", "Type", "Category", "Recent", "Level Learned"].freeze
 
   # -- Data helpers ---------------------------------------------------------
 
@@ -145,11 +146,11 @@ module TMVault
 
   def self.sort_mode
     value = data["sort_mode"] || data[:sort_mode] || 0
-    value.to_i.clamp(0, 3)
+    value.to_i.clamp(0, SORT_NAMES.length - 1)
   end
 
   def self.sort_mode=(value)
-    normalized = value.to_i.clamp(0, 3)
+    normalized = value.to_i.clamp(0, SORT_NAMES.length - 1)
     if defined?(Reloaded::SaveData)
       Reloaded::SaveData.set(:tm_vault, :sort_mode, normalized, section: :systems)
     else
@@ -338,6 +339,14 @@ module TMVault
     type_icons[type_data.id] || type_icons[type_data.id_number]
   end
 
+  def self.egg_icon_bitmap
+    return @egg_icon_bitmap if @egg_icon_bitmap
+    @egg_icon_animated_bitmap = AnimatedBitmap.new("Graphics/Icons/iconEgg") rescue nil
+    @egg_icon_bitmap = @egg_icon_animated_bitmap&.bitmap
+  rescue
+    @egg_icon_bitmap = nil
+  end
+
   # -- PokeNav app ID -------------------------------------------------------
   # PokeNav icon: Reloaded/Graphics/Pokegear/icon_TMVAULT.png
   if defined?(Pokenav) && !Pokenav::AVAILABLE_APPS.key?(:TMVAULT)
@@ -488,8 +497,13 @@ module TMVault
     # -- List building --------------------------------------------------------
     def build_list
       preserve_move = selected_move_id rescue nil
-      full = @move_mode == :relearn ? relearnable_moves_for(@relearn_mon) : sorted_vault_moves
       mon = @filter_mon && $Trainer.party[@filter_mon]
+      full = if @move_mode == :relearn
+        relearnable_moves_for(@relearn_mon)
+      else
+        @relearn_egg_move_ids = []
+        sorted_vault_moves(mon)
+      end
       @list = if mon
         full.select { |id| mon.hasMove?(id) || mon.compatible_with_move?(id) }
       else
@@ -498,9 +512,16 @@ module TMVault
       sync_move_list_state(preserve_move)
     end
 
-    def sorted_vault_moves
+    def sorted_vault_moves(pokemon = nil)
+      sort_moves(TMVault.vault, pokemon)
+    end
+
+    def sort_moves(move_ids, pokemon = nil)
       sort = TMVault.sort_mode
-      TMVault.vault.sort_by do |id|
+      moves = Array(move_ids)
+      positions = {}
+      moves.each_with_index { |id, index| positions[id] ||= index }
+      moves.sort_by do |id|
         md = GameData::Move.try_get(id)
         case sort
         when 1
@@ -508,17 +529,35 @@ module TMVault
         when 2
           [md&.category.to_i, md&.name.to_s.downcase]
         when 3
-          idx = TMVault.vault.index(id) || 0
-          -idx
+          pokemon ? positions[id].to_i : -(positions[id].to_i)
+        when 4
+          level_learned_sort_key(id, pokemon)
         else
           (md&.name || id.to_s).downcase
         end
       end
     end
 
+    def level_learned_sort_key(move_id, pokemon)
+      name = (GameData::Move.try_get(move_id)&.name || move_id.to_s).downcase
+      return [3, 0, name] unless pokemon
+      levels = Array(pokemon.getMoveList).each_with_object([]) do |entry, found|
+        found << entry[0].to_i if entry[1] == move_id
+      end
+      return [0, levels.min, name] unless levels.empty?
+      return [0, 0, name] if Array(pokemon.first_moves).include?(move_id)
+      return [2, 0, name] if relearn_egg_move?(move_id)
+      [1, 0, name]
+    rescue
+      [3, 0, name]
+    end
+
     def relearnable_moves_for(index)
       pkmn = index.nil? ? nil : $Trainer.party[index]
-      return [] unless pkmn && !pkmn.egg? && !pkmn.shadowPokemon?
+      unless pkmn && !pkmn.egg? && !pkmn.shadowPokemon?
+        @relearn_egg_move_ids = []
+        return []
+      end
       moves = []
       pkmn.getMoveList.each do |move_entry|
         next if move_entry[0] > pkmn.level || pkmn.hasMove?(move_entry[1])
@@ -535,13 +574,20 @@ module TMVault
         first_moves << move_id if !pkmn.hasMove?(move_id) && !moves.include?(move_id)
       end
       egg_moves = []
+      egg_move_ids = []
       if TMVault.egg_moves_enabled?
         baby = pbGetBabySpecies(pkmn.species) rescue nil
         Array((pbGetSpeciesEggMoves(baby) rescue [])).each do |move_id|
+          egg_move_ids << move_id unless pkmn.hasMove?(move_id)
           egg_moves << move_id if !pkmn.hasMove?(move_id) && !moves.include?(move_id) && !first_moves.include?(move_id)
         end
       end
-      (first_moves + moves + egg_moves).uniq
+      @relearn_egg_move_ids = egg_move_ids.uniq
+      sort_moves((first_moves + moves + egg_moves).uniq, pkmn)
+    end
+
+    def relearn_egg_move?(move_id)
+      @move_mode == :relearn && Array(@relearn_egg_move_ids).include?(move_id)
     end
 
     def empty_list_message
@@ -731,6 +777,11 @@ module TMVault
               b.blt(LEFT_W - 70, ry - 4, type_bmp, src)
             end
           end
+          if relearn_egg_move?(id) && (egg_bmp = TMVault.egg_icon_bitmap)
+            egg_src = Rect.new(18, 22, 28, 34)
+            egg_dst = Rect.new(LEFT_W - 54, ry + 3, 14, 17)
+            b.stretch_blt(egg_dst, egg_bmp, egg_src) rescue nil
+          end
         end
 
       end
@@ -892,8 +943,7 @@ module TMVault
           hint = "Pick filter (C)   Cancel (B)   #{filter_lbl}"
         end
       else
-        sort_names = ["Name", "Type", "Category", "Recent"]
-        sort_lbl   = sort_names[TMVault.sort_mode] || "Name"
+        sort_lbl   = SORT_NAMES[TMVault.sort_mode] || "Name"
         filter_lbl = @filter_mon ? "Clear filter (A)" : "Filter (A)"
         relearn_lbl = @move_mode == :relearn ? "Vault Moves (L)" : "Relearn Moves (L)"
         hint = "Select (C)   Back (B)   #{filter_lbl}   #{relearn_lbl}   Sort (R): #{sort_lbl}"
@@ -945,8 +995,7 @@ module TMVault
     end
 
     def tm_vault_sort_label
-      sort_names = ["Name", "Type", "Category", "Recent"]
-      sort_names[TMVault.sort_mode] || "Name"
+      SORT_NAMES[TMVault.sort_mode] || "Name"
     rescue
       "Name"
     end
@@ -1034,7 +1083,7 @@ module TMVault
       elsif Input.trigger?(Input::L)
         toggle_relearn_mode
       elsif Input.trigger?(Input::R)
-        next_sort = (TMVault.sort_mode + 1) % 4
+        next_sort = (TMVault.sort_mode + 1) % SORT_NAMES.length
         TMVault.sort_mode = next_sort
         build_list; clamp_scroll; draw_left; draw_footer
       end

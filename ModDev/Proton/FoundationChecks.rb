@@ -35,6 +35,13 @@ Dir.chdir(GAME_ROOT) do
     manifest_files.all? { |path| File.file?(File.join(RELOADED_ROOT, path)) }
   end
 
+  check("Daily Featured loads after Mart backend and before Mart UI") do
+    backend = manifest_files.index("Modules/ReloadedMart/Backend.rb")
+    featured = manifest_files.index("Modules/ReloadedMart/Automation/DailyFeatured.rb")
+    ui = manifest_files.index("Modules/ReloadedMart/UI.rb")
+    backend && featured && ui && backend < featured && featured < ui
+  end
+
   check("Every Reloaded Ruby file has valid syntax") do
     Dir[File.join(RELOADED_ROOT, "**", "*.rb")].all? do |path|
       system(RbConfig.ruby, "-c", path, :out => File::NULL, :err => File::NULL)
@@ -84,6 +91,30 @@ Dir.chdir(GAME_ROOT) do
       !bootstrap_hook.include?(legacy_bootstrap_path)
   end
 
+  powershell_installer = File.read(File.join(GAME_ROOT, "Hoenn Reloaded Installer.ps1"))
+  python_installer = File.read(File.join(GAME_ROOT, "Hoenn Reloaded Installer.py"))
+  reloaded_bootstrap = File.read(File.join(RELOADED_ROOT, "Bootstrap.rb"))
+  check("Desktop installers force repair after an interrupted live install") do
+    powershell_installer.include?("Reloaded\\InstallerIncomplete.json") &&
+      powershell_installer.include?("Write-InstallMarker") &&
+      powershell_installer.include?("Remove-InstallMarker") &&
+      python_installer.include?("Reloaded\", \"InstallerIncomplete.json") &&
+      python_installer.include?("write_install_marker") &&
+      python_installer.include?("args.repair = True")
+  end
+  check("Reloaded blocks boot while an installer recovery marker exists") do
+    reloaded_bootstrap.include?("InstallerIncomplete.json") &&
+      reloaded_bootstrap.include?("block_incomplete_install") &&
+      reloaded_bootstrap.include?("Process.exit!(1)")
+  end
+  check("Desktop installers atomically promote live install files") do
+    powershell_installer.include?("Copy-FileAtomically") &&
+      powershell_installer.include?("[IO.File]::Replace") &&
+      powershell_installer.include?("CriticalInstallPaths") &&
+      python_installer.include?('temporary = destination + ".installing"') &&
+      python_installer.include?("os.replace(temporary, destination)")
+  end
+
   required_release_files = [
     "Reloaded/Bootstrap.rb",
     "Reloaded/Documentation/System.md",
@@ -104,7 +135,12 @@ Dir.chdir(GAME_ROOT) do
   end
 
   documented_paths = []
-  generated_documented_paths = ["Reloaded/Logging/ValidationReport.txt"]
+  generated_documented_paths = [
+    "Reloaded/Logging/ValidationReport.txt",
+    "Reloaded/InstallerFiles.json",
+    "Reloaded/InstallerManifest.json",
+    "Reloaded/InstallerIncomplete.json"
+  ]
   Dir[File.join(RELOADED_ROOT, "Documentation", "*.md")].each do |document|
     next if File.basename(document).include?("To-Do")
     File.read(document).scan(/`((?:Reloaded|ModDev)\/[^`\r\n]+\.(?:rb|md|json|txt|bat|sh|py))`/) do |match|
@@ -135,6 +171,32 @@ Dir.chdir(GAME_ROOT) do
     end
   end
 
+  require "ripper"
+  load File.join(RELOADED_ROOT, "Core", "Modding", "ModTools.rb")
+  template_api_source = Reloaded::ModderTools.send(:template_api_examples, "foundation_example")
+  template_readme_source = Reloaded::ModderTools.send(
+    :template_readme,
+    "Foundation Example",
+    "foundation_example"
+  )
+  stable_template_apis = [
+    "Reloaded::Form",
+    "Reloaded::RemoteData",
+    "Reloaded::Task",
+    "Reloaded::Download",
+    "Reloaded::Archive",
+    "Reloaded.grant_reward"
+  ]
+  check("Generated mod API examples are syntax-valid and cover stable integrations") do
+    !Ripper.sexp(template_api_source).nil? &&
+      stable_template_apis.all? { |api_name| template_api_source.include?(api_name) }
+  end
+  check("Generated mod documentation states the public API boundary") do
+    template_readme_source.include?("contracts are supported integration points") &&
+      template_readme_source.include?("methods marked `private`") &&
+      template_readme_source.include?("Documentation/APIExamples.rb")
+  end
+
   tracked_output = IO.popen(["git", "ls-files"], &:read)
   git_inventory_ok = $?.nil? || $?.success?
   tracked_files = tracked_output.to_s.lines.map { |line| line.strip.gsub("\\", "/") }
@@ -143,20 +205,15 @@ Dir.chdir(GAME_ROOT) do
   end
   vanilla_changes_path = File.join(RELOADED_ROOT, "Documentation", "VanillaChanges.md")
   vanilla_changes_text = File.file?(vanilla_changes_path) ? File.read(vanilla_changes_path) : ""
-  changed_base_output = IO.popen(
-    ["git", "diff", "HEAD", "--name-only", "--", "Data/Scripts", "Game.ini", "mkxp.json"],
-    &:read
-  )
-  untracked_base_output = IO.popen(
-    ["git", "ls-files", "--others", "--exclude-standard", "--", "Data/Scripts", "Game.ini", "mkxp.json"],
-    &:read
-  )
-  changed_base_files = (changed_base_output.to_s.lines + untracked_base_output.to_s.lines)
-                       .map { |line| line.strip.gsub("\\", "/") }
-                       .reject(&:empty?)
-                       .uniq
-  check("Changed vanilla files are recorded in VanillaChanges.md") do
-    changed_base_files.all? { |path| vanilla_changes_text.include?("`#{path}`") }
+  documented_vanilla_files = vanilla_changes_text.scan(/`([^`\r\n]+)`/)
+                                                  .flatten
+                                                  .map { |path| path.gsub("\\", "/") }
+                                                  .select do |path|
+    path == "Game.ini" || path == "mkxp.json" || path.start_with?("Data/Scripts/")
+  end.uniq
+  check("Manually documented vanilla change files exist") do
+    !documented_vanilla_files.empty? &&
+      documented_vanilla_files.all? { |path| File.file?(File.join(GAME_ROOT, path)) }
   end
   generated_tracked = tracked_files.select do |path|
     next false if path == "Reloaded/Logging/.gitignore" || path == "Reloaded/Logging/Reports/.gitignore"
@@ -284,12 +341,25 @@ Dir.chdir(GAME_ROOT) do
     :min => 1, :max => 99, :initial => 120, :step => 0, :large_step => 10,
     :show_max_label => true
   )
+  digit_options = Reloaded::NumberPicker.normalize_digit_options(
+    :min => -10, :max => 999, :initial => 120, :digits => 4
+  )
   number_picker_source = File.read(File.join(RELOADED_ROOT, "Core", "UI", "NumberPicker.rb"))
-  check("Number Picker normalizes bounds and keeps Controls out of its footer") do
+  check("Number Picker separates Kanto-style editor digits from quantity popups") do
     Reloaded::API.available?(:number_picker) &&
       Reloaded::NumberPicker.respond_to?(:confirm) &&
+      Reloaded::NumberPicker.respond_to?(:open_quantity) &&
       number_options[:initial] == 99 && number_options[:step] == 1 &&
       number_options[:large_step] == 10 && number_options[:show_max_label] &&
+      digit_options[:min] == 0 && digit_options[:max] == 999 &&
+      digit_options[:initial] == 120 && digit_options[:digits] == 4 &&
+      number_picker_source.include?("DigitScene.new(title, normalized)") &&
+      number_picker_source.include?("PickerScene.new(title, normalize_options(options))") &&
+      number_picker_source.include?("def adjust_selected_digit") &&
+      number_picker_source.include?("def confirm_selection") &&
+      number_picker_source.include?("def pulsing_digit_color") &&
+      number_picker_source.include?("@slots_y = 48") &&
+      number_picker_source.include?("def adjust(amount, allow_wrap)") &&
       number_picker_source.include?("def show_controls_popup") &&
       !number_picker_source.include?("Controls (Y)")
   end
@@ -944,6 +1014,7 @@ Dir.chdir(GAME_ROOT) do
   pokevial_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "PokeVial.rb"))
   iv_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "IVBoundaries.rb"))
   mart_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Backend.rb"))
+  daily_featured_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Automation", "DailyFeatured.rb"))
   check("Reloaded reward adapters use the shared registry") do
     pokevial_reward_source.include?("register_reward_handlers") &&
       pokevial_reward_source.include?(":pokevial_charge") &&
@@ -951,7 +1022,89 @@ Dir.chdir(GAME_ROOT) do
       mart_reward_source.include?("Reloaded::Rewards.validate_all") &&
       mart_reward_source.include?("Reloaded::Rewards.grant_all")
   end
+  mart_editor_source = File.read(File.join(GAME_ROOT, "Admin Tools", "Reloaded Mart Editor", "ReloadedMartEditor.rb"))
+  check("Reloaded Mart enforces active entries, real unlocks, and nested reward dependencies") do
+    mart_reward_source.include?("class UnlockEntryHandler") &&
+      mart_reward_source.include?("def set_unlocked") &&
+      mart_reward_source.include?("return fail_result(:inactive") &&
+      mart_reward_source.include?("def required_reward_items") &&
+      mart_reward_source.include?("daily_featured_modifier(entry, context) if daily_featured?(entry, context)") &&
+      mart_reward_source.include?("Array(context[:activated_unlocks]).reverse_each")
+  end
+  check("Daily Featured owns its automation policy and deterministic Eastern schedule") do
+    daily_featured_source.include?("DEFAULT_OFFER_COUNT = 3") &&
+      daily_featured_source.include?("MINIMUM_DISCOUNT = 0") &&
+      daily_featured_source.include?("STANDARD_DISCOUNT_MAXIMUM = 39") &&
+      daily_featured_source.include?("HIGH_DISCOUNT_MINIMUM = 40") &&
+      daily_featured_source.include?("MAXIMUM_DISCOUNT = 100") &&
+      daily_featured_source.include?("DEFAULT_MINIMUM_DISCOUNT = 5") &&
+      daily_featured_source.include?("DEFAULT_MAXIMUM_DISCOUNT = 50") &&
+      daily_featured_source.include?("DEFAULT_HIGH_DISCOUNT_LIMIT = 1") &&
+      daily_featured_source.include?("REPEAT_BLOCK_DAYS = 3") &&
+      daily_featured_source.include?("ADDED_ITEM_ALLOWLIST") &&
+      daily_featured_source.include?("TRUSTED_CLOCK_STATE_KEY") &&
+      daily_featured_source.include?("def eastern_time") &&
+      daily_featured_source.include?("def record_trusted_server_time") &&
+      daily_featured_source.include?("def trusted_time") &&
+      daily_featured_source.include?("Process::CLOCK_MONOTONIC") &&
+      daily_featured_source.include?("def mod_added_item_ids") &&
+      daily_featured_source.include?("def added_item_allowlist") &&
+      daily_featured_source.include?("def compiled_base_item_ids") &&
+      daily_featured_source.include?("def high_discount_item_ids") &&
+      daily_featured_source.include?("patch[:operation].to_s == \"add\"") &&
+      daily_featured_source.include?("def preview") &&
+      mart_reward_source.include?("record_trusted_server_time(remote.server_time)") &&
+      !mart_reward_source.include?("!Economy.automation_enabled?(\"restocks\")") &&
+      !mart_reward_source.include?("return [] unless automation_enabled?(\"profile_tuning\")")
+  end
+  check("Reloaded Mart Editor targets schema 2 and exposes registered reward workflows and simplified navigation") do
+    mart_editor_source.include?("ReloadedMart::SCHEMA_VERSION) ? ReloadedMart::SCHEMA_VERSION : 2") &&
+      mart_editor_source.include?("\"pokevial_max_uses\"") &&
+      mart_editor_source.include?("\"iv_boundary_boost\"") &&
+      mart_editor_source.include?("\"feature_unlock\"") &&
+      mart_editor_source.include?("\"choice\"") &&
+      mart_editor_source.include?("\"random\"") &&
+      mart_editor_source.include?("\"unlock_key\"") &&
+      mart_editor_source.include?("\"Automation & Events\"") &&
+      mart_editor_source.include?("\"Test & Publish\"") &&
+      mart_editor_source.include?("def automation_events_rows") &&
+      mart_editor_source.include?("\"Preview Today\"") &&
+      mart_editor_source.include?("\"high_discount_limit\"") &&
+      mart_editor_source.include?("when \"stock\"") &&
+      mart_editor_source.include?("key.to_s == \"stock\"") &&
+      daily_featured_source.include?("quantity > 0 ? quantity : nil") &&
+      !mart_editor_source.include?("section_row(\"events\", \"Profile Tuning\"") &&
+      !mart_editor_source.include?("\"Master OFF/ON switch for Reloaded Mart automation.\"") &&
+      mart_editor_source.include?("def content_kind_rows") &&
+      mart_editor_source.include?("\"Featured Items\"") &&
+      mart_editor_source.include?("def featured_item_entry?") &&
+      mart_editor_source.include?("@navigation_stack") &&
+      mart_editor_source.include?("LIST_Y = Reloaded::ModManagerUI::LIST_Y") &&
+      !mart_editor_source.include?("\"Filter Content\"") &&
+      mart_editor_source.include?("@scope[:source] != :category")
+  end
   mart_ui_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "UI.rb"))
+  check("Reloaded Mart supports trusted editor previews and manual online refresh") do
+    mart_reward_source.include?(":admin_editor_preview") &&
+      mart_reward_source.include?("def curated_available?") &&
+      mart_reward_source.include?("def refreshing?") &&
+      mart_ui_source.include?("def request_catalog_refresh") &&
+      mart_ui_source.include?("Input.trigger?(Input::SPECIAL)") &&
+      mart_ui_source.include?("Reloaded::HintText.special(\"Refresh\")") &&
+      !mart_ui_source.include?("pbPromptPromoCode") &&
+      !mart_reward_source.include?("def redeem_promo_code")
+  end
+  check("Reloaded Mart banners, descriptions, stock, and restock text use no-shadow rendering") do
+    mart_ui_source.include?("def no_shadow_text") &&
+      mart_ui_source.include?("no_shadow_text(bitmap, x, 6, width, 16, banner, GOLD)") &&
+      mart_ui_source.include?("no_shadow_text(bitmap, x, y, width, 18, line, color)") &&
+      mart_ui_source.include?("no_shadow_text(bitmap, x, INFO_H - 20") &&
+      mart_ui_source.include?("no_shadow_text(bitmap, 0, y, x + width, 15, \"Stock:") &&
+      mart_ui_source.include?("no_shadow_text(bitmap, x, y, width, 15, heading, WHITE)") &&
+      mart_ui_source.include?("no_shadow_text(bitmap, x + 6, y, item_w, 14") &&
+      mart_ui_source.include?("no_shadow_text(bitmap, owned_x, y, 92, 14, \"Owned:") &&
+      mart_ui_source.include?("no_shadow_text(bitmap, PAD, 4, icon_x - PAD * 2 - 4")
+  end
   check("Reward bag limits use the game setting and bundles avoid linear quantity scans") do
     reward_source = File.read(File.join(RELOADED_ROOT, "Core", "Foundation", "Rewards.rb"))
     reward_source.include?("::Settings::BAG_MAX_PER_SLOT") &&

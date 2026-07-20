@@ -37,6 +37,7 @@ module Reloaded
     LOG_FILE = File.join(LOG_DIR, "Log.txt")
     VERSION_FILE = File.join(ROOT, "Version.md")
     LOAD_ORDER_FILE = File.join(ROOT, "LoadOrder.rb")
+    INCOMPLETE_INSTALL_FILE = File.join(ROOT, "InstallerIncomplete.json")
     REQUIRED_SYSTEMS = [
       ["Platform", :Platform],
       ["Systems", :Systems],
@@ -61,6 +62,7 @@ module Reloaded
         @failures = []
 
         ensure_log_dir
+        block_incomplete_install
         load_version
         log("Boot start")
         return fail_boot("LoadOrder.rb is unavailable or invalid") unless load_order_manifest
@@ -121,6 +123,20 @@ module Reloaded
       def ensure_log_dir
         Dir.mkdir(LOG_DIR) unless Dir.exist?(LOG_DIR)
       rescue
+      end
+
+      def block_incomplete_install
+        return true unless File.file?(INCOMPLETE_INSTALL_FILE)
+        message = "Hoenn Reloaded did not finish installing.\n\n" \
+                  "Run the Hoenn Reloaded Installer again. Repair mode will " \
+                  "start automatically.\n\nThe game will now close."
+        log("Blocked boot because the previous installation did not complete", "FATAL")
+        begin
+          pbMessage(message) if defined?(pbMessage)
+        rescue
+          console(message, "FATAL")
+        end
+        Process.exit!(1)
       end
 
       def timestamp

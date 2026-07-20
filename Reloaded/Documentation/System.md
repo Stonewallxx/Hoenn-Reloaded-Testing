@@ -139,8 +139,21 @@ Full Spritepacks are shared by both channels through the public
 `Reloaded/Spritepacks.json` catalog. Oversized Full Spritepacks use an ordered
 `parts` list. Every part has its own size and SHA-256, while extraction treats
 the verified parts as one logical ZIP without creating another full-size copy.
-Downloads use resumable `.part` files under the operating-system temporary
-directory and are removed after success.
+Downloads use resumable `.part` files under
+`REQUIRED_BY_INSTALLER_UPDATER/Cache` on the game drive and remove that cache
+after a successful installation. Files of at least 24 MiB use six simultaneous
+HTTP range connections when supported. Each connection writes directly to its
+assigned offset in one preallocated `.part` file. A `.part.meta.json` sidecar
+records each completed range plus the source ETag or Last-Modified value so
+interrupted downloads can resume without separate segment files. A server that
+rejects range requests automatically falls back to the resumable
+single-connection path.
+
+Before downloading or extracting, the installer checks available space on the
+target drive with a safety margin. Network and rate-limit failures retry with
+exponential backoff, jitter, and `Retry-After` support. Schema 3 manifests can
+offer a newer Windows/Proton bootstrap; it is downloaded and SHA-256 verified
+before the newer installer restarts itself. Release signing keys are not used.
 
 Core and Full Spritepack packages are versioned independently. Routine Core
 updates therefore do not redownload an unchanged Full Spritepack. Monthly
@@ -151,6 +164,25 @@ update, the installer compares the previous and new managed inventories and
 removes only obsolete files that were owned by the previous release. Saves,
 mods, settings, profiles, imported sprites, installed Spritepacks, unknown
 files, and local Git metadata are always protected.
+
+Immediately before either desktop installer begins changing live Core or
+Spritepack files, it atomically writes
+`Reloaded/InstallerIncomplete.json`. The marker records the channel, requested
+package, target version, current phase, timestamps, and Spritepack build ID when
+applicable. It is removed only after installed manifests are verified and
+obsolete managed files are finalized.
+
+If installation is interrupted, the next Windows or Proton installer launch
+reuses the marker's original channel and package choice and forces Repair mode.
+Verified Public Core and Spritepack downloads remain in the installer cache for
+reuse; Testing snapshots are refreshed from GitHub. Starting the game while
+this marker exists shows a repair message and closes before Reloaded modules
+load, preventing a partially updated Core from running. The marker is ignored
+by Git, protected from package contents, and never included in a Core
+release. The Proton installer writes every live file through a same-directory
+`.installing` file before atomic replacement. The Windows installer does the
+same for Testing files and atomically promotes the small startup-critical file
+set after the rest of a Public Core archive has extracted.
 
 Public Core package generation and publishing live under:
 
@@ -204,9 +236,14 @@ Large runtime downloads must use `Reloaded::Download`, not scene-local HTTP,
 PowerShell, or engine download helpers. The shared API confines destinations,
 streams into `.part` files, validates expected size and optional SHA-256
 metadata, reports progress, supports cooperative cancellation, and preserves
-the previous destination on failure. Large Spritepack component downloads use
-the opt-in resumable mode. A partial file is preserved only for interrupted
-network/transport failures; invalid sizes and checksums discard it.
+the previous destination on failure. Eligible files use up to three native
+byte-range connections, then fall back to one connection if ranges are not
+supported. The limit is process-wide, so simultaneous tasks cannot each create
+three additional connections. Resumable multipart downloads write directly to
+one preallocated `.part` file and persist per-range progress, source validators,
+and expected boundaries in `.part.meta.json`. A partial file is preserved only
+for interrupted network/transport failures; invalid sizes, source changes, and
+checksums discard it.
 
 Runtime archive extraction must use `Reloaded::Archive`, not direct 7-Zip or
 shell commands. The shared API applies entry/path validation, extraction limits,
@@ -389,7 +426,10 @@ than duplicated in runtime code.
 
 Base-game file edits are tracked locally in
 `Reloaded/Documentation/VanillaChanges.md`. That file is ignored because it is
-developer-local review metadata, not shipped documentation.
+developer-local review metadata, not shipped documentation. Foundation Checks
+validate that the base-game paths manually listed there exist; ordinary
+upstream base-game updates do not need update-import folders or individual
+VanillaChanges entries.
 
 ## Settings
 
@@ -852,7 +892,6 @@ Reloaded Mart stores these main keys under `systems/reloaded_mart`:
 - `catalog`
 - `cache`
 - `seen_catalog_versions`
-- `active_coupons`
 - `daily_featured`
 
 Values must be compatible with Ruby `Marshal.dump`. Avoid storing windows,

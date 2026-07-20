@@ -112,6 +112,7 @@ module Reloaded
           "Modules/PauseMenu.rb",
           "Modules/TMVault.rb",
           "Modules/ReloadedMart/Backend.rb",
+          "Modules/ReloadedMart/Automation/DailyFeatured.rb",
           "Modules/ReloadedMart/UI.rb",
           "Modules/ReloadedMart/Services.rb",
           "Modules/OverworldMenu.rb",

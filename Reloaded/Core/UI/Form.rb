@@ -835,7 +835,7 @@ module Reloaded
         def display_value(field)
           value = value_for(field)
           return truthy?(value) ? _INTL("ON") : _INTL("OFF") if field[:type] == :toggle
-          return _INTL("Not set") if blank?(value)
+          return empty_value_label(field) if blank?(value)
           if value.is_a?(Array)
             return _INTL("{1} selected", value.length) if value.length > 2
             return value.map { |entry| choice_label(field, entry) }.join(", ")
@@ -845,8 +845,17 @@ module Reloaded
 
         def detail_value(field)
           value = value_for(field)
-          return _INTL("Not set") if blank?(value)
+          return empty_value_label(field) if blank?(value)
           value.is_a?(Array) ? value.map { |entry| choice_label(field, entry) }.join(", ") : choice_label(field, value)
+        end
+
+        def empty_value_label(field)
+          label = field[:empty_label]
+          label = label.call(@draft, field) if label.respond_to?(:call)
+          text = label.to_s
+          text.empty? ? _INTL("Not set") : text
+        rescue
+          _INTL("Not set")
         end
 
         def choice_label(field, value)

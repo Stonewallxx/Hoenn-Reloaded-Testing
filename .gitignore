@@ -79,6 +79,8 @@ Reloaded/Cache/RemoteData/
 Reloaded/Cache/SpritePacks/
 Reloaded/InstallerFiles.json
 Reloaded/InstallerManifest.json
+Reloaded/InstallerIncomplete.json
+*.installing
 Reloaded/Documentation/VanillaChanges.md
 Reloaded/Documentation/To-Do.md
 Reloaded/Documentation/ReloadedMart-To-Do.md

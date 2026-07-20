@@ -78,6 +78,13 @@ Public Core uses a versioned GitHub release with size and SHA-256 verification.
 Testing Core downloads the current `Stonewallxx/Hoenn-Reloaded-Testing`
 repository snapshot directly because Testing does not publish player releases.
 Neither path creates a player-side Git repository or repository cache.
+Large remote packages use up to six simultaneous HTTP range connections.
+Servers that do not support ranged downloads automatically use the resumable
+single-connection path instead. Range workers write to one preallocated
+`.part` file, and a metadata sidecar safely resumes each completed range after
+an interruption. The installer checks download and extraction space first,
+retries transient/rate-limit failures with backoff, and can replace itself from
+a newer SHA-256-verified bootstrap listed in the release manifest.
 
 Core and Spritepacks are independent. Core-only leaves installed Spritepacks
 unchanged. Core + Spritepacks reads the shared public Spritepack catalog and
@@ -113,6 +120,8 @@ Spritepack downloads read the public GitHub copy of
 online fetch fails. Downloads use `Reloaded::Download` to stream an archive to
 a temporary `.part` file, validate optional size/SHA-256 metadata, atomically
 finish the archive, then validate and extract it through `Reloaded::Archive`.
+Runtime archives of at least 24 MiB use up to three simultaneous byte-range
+connections when supported, with automatic single-connection fallback.
 Spritepack extraction intentionally uses overwrite mode
 without a second staging copy, while still rejecting unsafe archive entries.
 Successful installs update a local marker at
@@ -135,7 +144,9 @@ update layers without deleting their files.
 Component archives should include the builder-generated `manifest.json`.
 Every per-head `.pak` record in that manifest has an entry count, exact size,
 and SHA-256. The outer Spritepack catalog row should still provide its own
-optional archive `size` and `sha256`, which are checked before extraction.
+optional archive `size`, `installed_size`, and `sha256`. The installer uses
+`installed_size` for extraction-space preflight and checks archive size/hash
+before extraction.
 Downloaded packs and `Reloaded/Cache/SpritePacks` are runtime output and must
 not be committed.
 
@@ -591,25 +602,26 @@ Manager Editor documentation lives beside the local tool at:
 Admin Tools/Manager Editor/ManagerEditor.md
 ```
 
-The private Full Spritepack release publisher is:
+The private Spritepack release publisher is:
 
 ```text
-Admin Tools/Spritepack Publisher/Publish Full Spritepack.bat
+Admin Tools/Spritepack Publisher/Publish Spritepacks.bat
 ```
 
 It independently builds and verifies GitHub-sized release parts, uploads them
 to the `Spritepacks` release, verifies the remote asset sizes, updates the Full
 row, and publishes `Reloaded/Spritepacks.json` without cloning the public
-repository. It never invokes a Core build. The existing Manager Editor
-publisher remains the lightweight JSON-only path for catalog edits that do not
-replace the Full archive.
+repository. It never invokes a Core build. The Manager Editor launches this
+same publisher in Catalog mode for JSON-only catalog edits.
 
 ## Current Limits
 
 - Publisher tools require Git and GitHub credentials or collaborator access.
 - Remote JSON fetches use the engine HTTP helpers.
 - Mod and Spritepack archives use `Reloaded::Download`; incomplete `.part`
-  files never replace completed downloads.
+  files never replace completed downloads. Eligible runtime archives use up to
+  three range connections across the entire game process, independently of the
+  standalone installer's six-connection package downloader.
 - Archive extraction uses `Reloaded::Archive` with the bundled `7z.exe` adapter;
   PowerShell extraction is avoided. ZIP, RAR, and 7Z entries are preflighted for
   traversal, links, encryption, collisions, and configured safety limits.

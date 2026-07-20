@@ -5028,14 +5028,20 @@ module Reloaded
         load mart_editor_file
         catalog_written = Reloaded::MartEditor::Tool.open
         drain_popup_input
+        block_list_state_input
         if catalog_written && defined?(ReloadedMart::Source)
           ReloadedMart::Source.load_for_open(blocking: false)
         end
-        refresh_rows
-        draw_all
+        if @title_sprite && @left_sprite && @right_sprite && @footer_sprite
+          refresh_rows
+          draw_all
+        end
       rescue Exception => e
+        raise if e.is_a?(SystemExit)
         Reloaded::Log.exception("Failed to open Reloaded Mart Editor", e, channel: :mods) if defined?(Reloaded::Log)
         show_message("Could not open Reloaded Mart Editor:\n#{e.message}")
+      ensure
+        block_list_state_input
       end
 
       def admin_tools_dir

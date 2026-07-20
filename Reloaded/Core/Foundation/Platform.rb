@@ -5,6 +5,11 @@
 # Platform detection, capabilities, and desktop adapters.
 #======================================================
 
+begin
+  require "Win32API"
+rescue Exception
+end
+
 module Reloaded
   module Platform
     ROOT = File.expand_path(File.join(File.dirname(__FILE__), "..", ".."))
@@ -183,6 +188,41 @@ module Reloaded
         path = File.expand_path(File.join(root, "HoennReloaded"))
         Dir.mkdir(path) unless Dir.exist?(path)
         path
+      end
+
+      def free_disk_bytes(path)
+        target = File.expand_path(path.to_s)
+        target = File.dirname(target) unless File.directory?(target)
+        if defined?(Win32API)
+          api = Win32API.new("kernel32", "GetDiskFreeSpaceExW", "PPPP", "I")
+          wide_path = (target + "\0").encode("UTF-16LE")
+          available = [0].pack("Q")
+          total = [0].pack("Q")
+          total_free = [0].pack("Q")
+          return available.unpack("Q")[0].to_i if api.call(wide_path, available, total, total_free) != 0
+        end
+        if target =~ /\A([A-Za-z]):/
+          drive = Regexp.last_match(1)
+          system_root = ENV["SystemRoot"].to_s
+          powershell = File.join(system_root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+          powershell = "powershell.exe" unless File.file?(powershell)
+          command = "(New-Object IO.DriveInfo('#{drive}:\\')).AvailableFreeSpace"
+          output = IO.popen([powershell, "-NoProfile", "-NonInteractive", "-Command", command], "r") do |stream|
+            stream.read
+          end
+          value = output.to_s.strip.to_i
+          return value if value > 0
+        end
+        if File.respond_to?(:statvfs)
+          stats = File.statvfs(target)
+          return stats.bavail.to_i * stats.frsize.to_i
+        end
+        output = IO.popen(["df", "-Pk", target], "r") { |stream| stream.read }
+        row = output.to_s.lines.map(&:strip).reject(&:empty?).last.to_s.split(/\s+/)
+        return row[-3].to_i * 1024 if row.length >= 4
+        nil
+      rescue
+        nil
       end
 
       def archive_tool_path
