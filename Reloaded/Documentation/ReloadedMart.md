@@ -16,7 +16,10 @@ Reloaded Mart is implemented in:
 
 ```text
 Reloaded/Modules/ReloadedMart/Backend.rb
+Reloaded/Modules/ReloadedMart/Automation/DailyFeatured.rb
+Reloaded/Modules/ReloadedMart/Automation/EconomyEvents.rb
 Reloaded/Modules/ReloadedMart/UI.rb
+Reloaded/Modules/ReloadedMart/Services.rb
 ```
 
 `Backend.rb` owns catalog loading, validation, pricing, availability,
@@ -98,7 +101,7 @@ On open:
 - Only a valid, freshly confirmed online response replaces the base catalog.
 - Replacement is complete. Base and online entries are never merged.
 - Failed requests and cached RemoteData responses leave the current base
-  catalog active. A failed manual refresh does not discard a fresh catalog
+  catalog active. A failed open-time refresh does not discard a fresh catalog
   that was already confirmed during the current session.
 - Last-good online data is retained for metadata and diagnostics but never
   exposes expired curated offers while offline.
@@ -134,13 +137,50 @@ copies use `fresh_required`.
 `catalog_version` tracks content releases. It is used for cache metadata,
 stock reset rules, transaction stats, and NEW! badge tracking.
 
-Catalog versions should use `MM.DD.YY`, for example `07.04.26`.
+The Mart Editor manages catalog versions automatically. Online versions use
+`MM.DD.YY vN`. The first changed save on a new day becomes that day's `v1`;
+additional changed saves on the same day increment the revision. Offline Base
+Stock uses `base-N`. Saving without a meaningful content change preserves the
+current version while still refreshing `generated_at`.
+
+Each entry also has an automatically managed `entry_version`. New and copied
+entries start at 1. Editing that stable entry's content increments its version;
+reordering unrelated entries or changing another entry does not. Catalog and
+entry version fields are read-only in the normal editor and are corrected
+during save/export even if raw JSON changed them manually.
 
 Supported schema version:
 
 ```ruby
 ReloadedMart::SCHEMA_VERSION
 ```
+
+## Admin Editor Workflow
+
+The Admin-only editor's normal root is:
+
+```text
+Catalog Source
+Content
+Categories
+Automation & Events
+Appearance
+Test & Publish
+```
+
+Create catalog entries only through `Content`. Category pages organize and
+edit assigned entries but do not create duplicates of the creation workflow.
+`Automation & Events` owns Daily Featured, reusable Economy Event templates,
+the shipped Automated pool, and Curated/Themed drafts. Only the active
+Curated/Themed winner is included in an online export.
+
+The normal release flow is `Save Draft`, `Test in Game`, then `Publish
+Catalog`. Publish saves the working catalog, blocks on validation errors,
+writes the runtime-only `ReloadedMartOnline.json`, and launches
+`PublishReloadedMart.bat`. Offline Base Stock can be saved and previewed but
+cannot be exported or published as online data. Advanced Tools is limited to
+metadata, presets, raw JSON, currency reference, export instructions, and
+local file operations.
 
 ## Catalog Schema
 
@@ -149,7 +189,7 @@ Top-level fields:
 ```json
 {
   "schema_version": 2,
-  "catalog_version": "07.04.26",
+  "catalog_version": "07.20.26 v1",
   "generated_at": "2026-07-04T12:00:00Z",
   "stock_epoch": "summer_2026",
   "banner": {
@@ -166,7 +206,6 @@ Top-level fields:
     { "id": "featured", "name": "FEATURED", "tags": ["featured"] }
   ],
   "economy_events": [],
-  "profile_tuning": {},
   "daily_featured": {
     "enabled": true,
     "count": 3,
@@ -184,6 +223,10 @@ Top-level fields:
 
 The loader also migrates the old reference-style mart preset shape into the
 normalized schema.
+
+Promo Codes and Profile Tuning are not part of the current schema or pricing
+pipeline. The editor removes those legacy keys when an older working catalog
+is loaded and saved.
 
 `banner` is the standalone Reloaded Mart buy banner. Use `banners` for
 page-specific banners. Supported keys include `reloaded_buy`, `reloaded_sell`,
@@ -224,12 +267,132 @@ device clock as the offline fallback.
 The shipped `DailyFeatured.rb` configuration is the offline authority. A fresh
 online catalog can override `daily_featured`; cached or unavailable online data
 does not expose stale curated offers. There is no catalog-wide Automation
-switch. Daily Featured uses its own `enabled` field, while stock resets,
-economy events, and profile tuning follow their own data.
+switch. Daily Featured uses its own `enabled` field, while stock resets and
+economy events follow their own data.
 
-Press `X` from the Reloaded Mart buy page to request an online catalog refresh.
-The Mart remains open while the fetch runs and rebuilds its displayed content
-when the request completes.
+Press `Special/Z` from the Reloaded Mart to open the Mart Actions popup. It
+currently contains `View Event` and `Back`, and can accept more actions later.
+View Event uses a centered HR Toast showing the event name, remaining time,
+discount, and two randomly chosen item icons affected by the event.
+The Mart remains open while its automatic open-time refresh runs. Completed
+data is staged until the player returns to the idle browsing loop, so stock and
+pricing never change underneath a quantity picker, confirmation, reward,
+service, or active transaction.
+
+## Economy Events
+
+Economy Events are owned by:
+
+```text
+Reloaded/Modules/ReloadedMart/Automation/EconomyEvents.rb
+```
+
+Only one event can be active globally. Winner order is:
+
+```text
+Curated > Themed > Automated
+```
+
+Events of the same type use their numeric `priority`; higher wins. A stable
+event ID resolves any remaining tie. A losing event is suspended if it can
+resume after the winner ends, or superseded if the winner lasts through its
+deadline.
+
+Curated and Themed events are online-only. The generated online catalog uses
+`economy_events` for the single event active at export time. It needs an ID,
+type, Eastern start/end time, and at least one pricing rule or temporary entry.
+Expired, disabled, future, and lower-priority events remain in the Admin
+library and are not published.
+
+The Mart Editor stores reusable blueprints and all Curated/Themed drafts in:
+
+```text
+Admin Tools/Reloaded Mart Editor/EconomyEventLibrary.json
+```
+
+This file and all `internal_notes` are Admin-only and are never published. A
+blueprint can be copied to Automated, Curated, or Themed Events without
+changing the original. Curated and Themed copies receive a new two-day
+schedule and remain disabled until reviewed.
+
+New editor working catalogs begin with 18 editable built-in blueprints containing 248
+temporary item entries. Every template contains 10-15 offerings. The starting
+library covers evolution supplies, training equipment, competitive held items,
+weather tools, type boosters, Gems, Berries, Poke Balls, medicine, Vitamins,
+Fossils, treasures, breeding, Plates, Mail, exploration, and battle supplies.
+Related themes use one broader template instead of several smaller variants.
+Each built-in price rule is
+tag-scoped to that template's temporary entries, so copying a template does not
+change unrelated Mart prices.
+
+```json
+{
+  "id": "summer_healing",
+  "event_type": "curated",
+  "enabled": true,
+  "label": "Summer Healing",
+  "description": "Healing supplies are discounted.",
+  "priority": 10,
+  "available_from": "2026-07-20 00:00:00",
+  "available_until": "2026-07-22 00:00:00",
+  "pricing_rules": [
+    {
+      "id": "healing_discount",
+      "label": "Healing Sale",
+      "operation": "discount_percent",
+      "value": 25,
+      "mode": "buy",
+      "tags": ["healing"],
+      "exclusions": {
+        "item_ids": ["MAXREVIVE"]
+      }
+    }
+  ],
+  "temporary_entries": [],
+  "display": {
+    "banner_text": "Summer Healing is active!",
+    "description": "Selected healing items are 25% off.",
+    "show_countdown": true
+  }
+}
+```
+
+Supported pricing operations are `discount_percent`, `markup_percent`,
+`subtract_flat`, `add_flat`, `set_price`, `min`, and `max`. A rule can target
+catalog entry IDs, GameData item IDs, categories, content kinds, tags,
+currencies, and buy/sell/both modes. The same selectors can be placed in
+`exclusions`.
+
+`temporary_entries` use the normal catalog-entry schema and transaction
+handlers. They exist only while their winning event is active, then disappear
+without modifying the permanent catalog. Their IDs must not collide with
+permanent entries.
+
+Daily Featured is not suppressed by an event. If an item is both Daily Featured
+and matched by the winning event, the event price is used without compounding
+the Daily Featured discount.
+
+Automated events use the shipped local runtime pool:
+
+```text
+Reloaded/Modules/ReloadedMart/Data/AutomatedEvents.json
+```
+
+They remain available offline and do not increase the online catalog size.
+Starting at `cycle_anchor`, the schedule permanently repeats two Eastern
+calendar days active followed by one day off. A deterministic template is
+selected for each active cycle, and adjacent cycles avoid repeating the same
+template when at least two exist. The Mart Editor exposes this at `Economy
+Events > Automated Events > Cycle Anchor` and writes the local runtime file.
+
+Automated percent changes are clamped to 50%, invalid templates fail closed,
+and positive buy prices cannot be reduced below 1. A valid active Curated or
+Themed event always beats the local Automated event. When the online event
+expires or is unavailable, local automation resumes automatically.
+
+Changing an active Curated/Themed event advances the catalog version when the
+editor saves or publishes it, then takes effect on the next successful Mart
+refresh. Local automation changes ship through a Core update.
 
 ## Entry Kinds
 
@@ -353,10 +516,41 @@ mixed bundles remain atomic.
 
 Bundles, gifts, and Mystery outcomes can use `type: "pokemon"`. Supported
 distribution fields include species and fallback species, level, quantity,
-delivery destination, Egg/form/shiny/gender/nature/ability data, nickname,
-held item, Poke Ball, friendship, moves, exact or ranged IVs, EVs, custom
-types, OT data, origin text, distribution ID/version, duplicate policy,
+delivery destination, Egg/form/shiny/gender/nature/ability data, optional
+nickname, held item, Poke Ball, friendship, moves, exact or ranged IVs, EVs,
+custom types, OT data, origin text, distribution ID/version, duplicate policy,
 evolution policy, and an optional trade lock.
+
+`species_mode` controls the Pokemon source:
+
+- `single` uses `species`. The Mart Editor picker includes every species in the
+  loaded base and Expanded Dex registry.
+- `fusion` builds a fusion from `fusion_head_species` and
+  `fusion_body_species`.
+- `random_type` selects a loaded non-fusion species matching `random_type`.
+- `random_bst` selects a loaded non-fusion species between `bst_min` and
+  `bst_max`, inclusive.
+
+Random and fusion sources resolve once before transaction validation. The same
+resolved species is delivered after payment. `fallback_species` is used if the
+requested species or random pool is unavailable.
+
+```json
+{ "type": "pokemon", "species_mode": "single", "species": "TREECKO", "level": 10 }
+{ "type": "pokemon", "species_mode": "fusion", "fusion_head_species": "TREECKO", "fusion_body_species": "TORCHIC", "level": 10 }
+{ "type": "pokemon", "species_mode": "random_type", "random_type": "GRASS", "level": 10 }
+{ "type": "pokemon", "species_mode": "random_bst", "bst_min": 300, "bst_max": 450, "level": 10 }
+```
+
+New editor-authored rewards default `generate_moves` to `true`, which gives the
+Pokemon the normal level-up moves for its configured level. Set it to `false`
+and provide up to four `moves` for a custom moveset. An omitted or empty
+`types` array keeps the species' native typing. Blank nickname and OT fields
+keep the normal species name and current-player ownership data. If only some OT
+fields are customized, every untouched field still uses the current player's
+normal value. Nature choices
+in the editor show their increased and decreased stats, and forms are selected
+from the chosen species' available form list.
 
 Pokemon granted by Reloaded Mart always bypass player IV Boundaries. Their IVs
 come only from the distribution payload or normal generation when no IV fields
@@ -502,9 +696,8 @@ The price pipeline is:
 2. catalog price or sell price
 3. entry-level modifiers
 4. active catalog economy event modifiers
-5. profile tuning modifiers
-6. daily featured modifier
-7. runtime registered price modifier handlers
+5. daily featured modifier
+6. runtime registered price modifier handlers
 
 Supported modifier types:
 

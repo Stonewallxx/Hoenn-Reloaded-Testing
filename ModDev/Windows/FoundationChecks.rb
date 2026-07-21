@@ -36,11 +36,13 @@ Dir.chdir(GAME_ROOT) do
     manifest_files.all? { |path| File.file?(File.join(RELOADED_ROOT, path)) }
   end
 
-  check("Daily Featured loads after Mart backend and before Mart UI") do
+  check("Mart automations load after the backend and before Mart UI") do
     backend = manifest_files.index("Modules/ReloadedMart/Backend.rb")
     featured = manifest_files.index("Modules/ReloadedMart/Automation/DailyFeatured.rb")
+    events = manifest_files.index("Modules/ReloadedMart/Automation/EconomyEvents.rb")
     ui = manifest_files.index("Modules/ReloadedMart/UI.rb")
-    backend && featured && ui && backend < featured && featured < ui
+    backend && featured && events && ui &&
+      backend < featured && featured < events && events < ui
   end
 
   check("Every Reloaded Ruby file has valid syntax") do
@@ -850,6 +852,13 @@ Dir.chdir(GAME_ROOT) do
   $DEBUG = false
   load File.join(RELOADED_ROOT, "Core", "Foundation", "Task.rb")
   task_main_thread = Thread.current
+  worker_uses_main_thread_transport = nil
+  Thread.new do
+    worker_uses_main_thread_transport = Reloaded::RemoteData.send(:main_thread_transport?)
+  end.join
+  check("RemoteData avoids the engine-native HTTP transport on worker threads") do
+    worker_uses_main_thread_transport == false
+  end
   task_callback = nil
   successful_task = Reloaded::Task.start(
     :foundation_task,
@@ -1162,6 +1171,7 @@ Dir.chdir(GAME_ROOT) do
   iv_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "IVBoundaries.rb"))
   mart_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Backend.rb"))
   daily_featured_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Automation", "DailyFeatured.rb"))
+  economy_event_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Automation", "EconomyEvents.rb"))
   check("Reloaded reward adapters use the shared registry") do
     pokevial_reward_source.include?("register_reward_handlers") &&
       pokevial_reward_source.include?(":pokevial_charge") &&
@@ -1170,6 +1180,15 @@ Dir.chdir(GAME_ROOT) do
       mart_reward_source.include?("Reloaded::Rewards.grant_all")
   end
   mart_editor_source = File.read(File.join(GAME_ROOT, "Admin Tools", "Reloaded Mart Editor", "ReloadedMartEditor.rb"))
+  reward_types_source = File.read(File.join(RELOADED_ROOT, "Core", "Foundation", "RewardTypes.rb"))
+  economy_event_editor_source = File.read(File.join(GAME_ROOT, "Admin Tools", "Reloaded Mart Editor", "EconomyEventEditor.rb"))
+  economy_automation_path = File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Data", "AutomatedEvents.json")
+  economy_automation_data = JSON.parse(File.read(economy_automation_path))
+  economy_event_library_path = File.join(GAME_ROOT, "Admin Tools", "Reloaded Mart Editor", "EconomyEventLibrary.json")
+  economy_event_library = JSON.parse(File.read(economy_event_library_path))
+  economy_template_definition_block = economy_event_editor_source[/ECONOMY_BUILT_IN_TEMPLATE_DEFINITIONS = \[(.*?)\]\.freeze/m, 1].to_s
+  economy_template_definition_count = economy_template_definition_block.scan(/^\s+\["[a-z0-9_]+", "/).length
+  economy_template_item_counts = economy_template_definition_block.scan(/%w\[([A-Z0-9_\s]+)\]\]/).map { |items| items[0].split.length }
   check("Reloaded Mart enforces active entries, real unlocks, and nested reward dependencies") do
     mart_reward_source.include?("class UnlockEntryHandler") &&
       mart_reward_source.include?("def set_unlocked") &&
@@ -1204,6 +1223,13 @@ Dir.chdir(GAME_ROOT) do
       !mart_reward_source.include?("!Economy.automation_enabled?(\"restocks\")") &&
       !mart_reward_source.include?("return [] unless automation_enabled?(\"profile_tuning\")")
   end
+  check("Economy Events validates cycle anchors without the optional Date library") do
+    economy_event_source.include?("def parse_cycle_date") &&
+      economy_event_source.include?("Time.utc(year, month, day)") &&
+      economy_event_source.include?("!parse_cycle_date((value || DEFAULT_CYCLE_ANCHOR).to_s).nil?") &&
+      !economy_event_source.include?("Date.parse((value || DEFAULT_CYCLE_ANCHOR).to_s)") &&
+      economy_event_editor_source.include?("when :cycle_anchor then edit_economy_cycle_anchor(config)")
+  end
   check("Reloaded Mart Editor targets schema 2 and exposes registered reward workflows and simplified navigation") do
     mart_editor_source.include?("ReloadedMart::SCHEMA_VERSION) ? ReloadedMart::SCHEMA_VERSION : 2") &&
       mart_editor_source.include?("\"pokevial_max_uses\"") &&
@@ -1228,26 +1254,109 @@ Dir.chdir(GAME_ROOT) do
       mart_editor_source.include?("@navigation_stack") &&
       mart_editor_source.include?("LIST_Y = Reloaded::ModManagerUI::LIST_Y") &&
       !mart_editor_source.include?("\"Filter Content\"") &&
-      mart_editor_source.include?("@scope[:source] != :category")
+      mart_editor_source.include?("@scope[:source] != :category") &&
+      mart_editor_source.include?("EVENT_LIBRARY_FILE = File.join(TOOL_DIR, \"EconomyEventLibrary.json\")") &&
+      mart_editor_source.include?("def load_economy_support_files") &&
+      mart_editor_source.include?("def save_economy_support_files") &&
+      economy_event_editor_source.include?("def open_economy_event_templates_editor") &&
+      economy_event_editor_source.include?("def copy_economy_template_to_destination") &&
+      economy_event_editor_source.include?(":automated, :curated, :themed") &&
+      economy_event_editor_source.include?("def built_in_economy_event_templates") &&
+      economy_template_definition_count == 18 &&
+      economy_template_item_counts.length == 18 &&
+      economy_template_item_counts.all? { |count| count >= 10 && count <= 15 } &&
+      Array(economy_event_library["templates"]).length == 18
+  end
+  check("Reloaded Mart Pokemon rewards use guided sources and native defaults") do
+    mart_editor_source.include?("def pokemon_species_mode_choices") &&
+      mart_editor_source.include?("def pick_pokemon_form") &&
+      mart_editor_source.include?("def difficulty_choices") &&
+      mart_editor_source.include?("Random by Type") &&
+      mart_editor_source.include?("Random by BST") &&
+      mart_editor_source.include?("Use Level Moves") &&
+      mart_editor_source.include?("Player / Native Default") &&
+      reward_types_source.include?("def resolve_reward_species") &&
+      reward_types_source.include?("def reward_species_candidates") &&
+      reward_types_source.include?("reward[:generate_moves]") &&
+      reward_types_source.include?("pokemon.reset_moves") &&
+      reward_types_source.include?('B#{body.id_number}H#{head.id_number}')
+  end
+  check("Reloaded Mart Editor owns release versions and omits removed economy systems") do
+    mart_editor_source.include?("def apply_automatic_versions") &&
+      mart_editor_source.include?("def synchronize_entry_versions!") &&
+      mart_editor_source.include?("def next_catalog_version") &&
+      mart_editor_source.include?("Managed automatically when this entry's content changes.") &&
+      mart_editor_source.include?("REMOVED_CATALOG_KEYS = %w[profile_tuning promo_codes]") &&
+      !mart_editor_source.include?("def promotions_economy_rows") &&
+      !mart_reward_source.include?("def profile_tuning") &&
+      !economy_event_source.include?("profile_tuning(context)")
+  end
+  mart_publish_source = File.read(File.join(GAME_ROOT, "Admin Tools", "Reloaded Mart Editor", "PublishReloadedMart.bat"))
+  check("Reloaded Mart publishing excludes editor-only catalog data") do
+    mart_editor_source.include?("economy_events economy_event_templates economy_event_automation") &&
+      mart_editor_source.include?("EDITOR_ONLY_NESTED_KEYS = %w[internal_notes]") &&
+      mart_editor_source.include?("def online_catalog_data") &&
+      mart_editor_source.include?("EDITOR_ONLY_CATALOG_KEYS.each { |key| payload.delete(key) }") &&
+      mart_editor_source.include?("active_publishable_economy_event") &&
+      economy_event_editor_source.include?("def active_publishable_economy_event") &&
+      mart_editor_source.include?("name.start_with?(\"__\")") &&
+      mart_editor_source.include?("export_online_json(false, false)") &&
+      mart_publish_source.include?("set \"CATALOG_FILE=%ONLINE_FILE%\"") &&
+      !mart_publish_source.include?("copy /Y \"%CATALOG_FILE%\" \"%ONLINE_FILE%\"")
+  end
+  check("Automated Economy Events use the shipped local pool and remain offline-capable") do
+    File.file?(economy_automation_path) &&
+      economy_event_source.include?("LOCAL_AUTOMATION_FILE") &&
+      economy_event_source.include?("def load_local_automation") &&
+      economy_event_source.include?("result.concat(manual_events) if online_available?") &&
+      economy_event_source.include?("generated = generated_event(context)") &&
+      economy_event_source.include?("MAX_AUTOMATED_PERCENT = 50") &&
+      economy_automation_data["enabled"] == true &&
+      Array(economy_automation_data["templates"]).length > 0 &&
+      Array(economy_automation_data["templates"]).all? do |template|
+        template.is_a?(Hash) &&
+          !template.key?("internal_notes") &&
+          Array(template["temporary_entries"]).length.between?(10, 15)
+      end
   end
   mart_ui_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "UI.rb"))
-  check("Reloaded Mart supports trusted editor previews and manual online refresh") do
+  check("Reloaded Mart supports trusted editor previews and open-time online refresh") do
     mart_reward_source.include?(":admin_editor_preview") &&
       mart_reward_source.include?("def curated_available?") &&
       mart_reward_source.include?("def refreshing?") &&
-      mart_ui_source.include?("def request_catalog_refresh") &&
+      mart_reward_source.include?(":status => :success, :remote => outcome.value") &&
+      mart_reward_source.include?("apply_remote_result(completion[:remote])") &&
+      mart_ui_source.include?("def open_mart_actions") &&
+      mart_ui_source.include?('View Event: #{event_label}') &&
+      mart_ui_source.include?(":start_id => :view_event") &&
+      !mart_ui_source.include?(":id => :refresh") &&
+      !mart_ui_source.include?("def request_catalog_refresh") &&
+      mart_ui_source.include?("def draw_economy_event_toast") &&
+      mart_ui_source.include?('"#{values.max}% OFF"') &&
+      mart_ui_source.include?("item_ids.shuffle.first(2)") &&
+      mart_ui_source.include?("icon_size = 90") &&
+      mart_ui_source.include?(":ok_text_offset_y => -7") &&
+      mart_ui_source.include?("Displayed Economy Event id=") &&
       mart_ui_source.include?("Input.trigger?(Input::SPECIAL)") &&
-      mart_ui_source.include?("Reloaded::HintText.special(\"Refresh\")") &&
+      mart_ui_source.include?("Reloaded::HintText.special(\"Actions\")") &&
       !mart_ui_source.include?("pbPromptPromoCode") &&
       !mart_reward_source.include?("def redeem_promo_code")
+  end
+  check("Reloaded Mart validates remote catalogs on the main thread only") do
+    !mart_reward_source.include?("source: :online_validation") &&
+      mart_reward_source.include?("Catalog.load(raw, source: :online_fresh)") &&
+      mart_reward_source.include?("RemoteData validators run on the worker thread") &&
+      mart_reward_source.include?("registered?(REMOTE_SOURCE_ID)") &&
+      mart_reward_source.include?("version > 0 && version <= SCHEMA_VERSION && entries.is_a?(Array)")
   end
   base_mart_catalog = JSON.parse(File.read(File.join(RELOADED_ROOT, "ReloadedMartBase.json")))
   check("Reloaded Mart ships editable offline stock that fresh online data replaces") do
     base_mart_catalog["schema_version"].to_i == 2 &&
+      !base_mart_catalog.key?("profile_tuning") &&
       Array(base_mart_catalog["entries"]).length >= 10 &&
-      Array(base_mart_catalog["entries"]).all? { |entry| entry["online_policy"].to_s == "offline_allowed" } &&
       mart_reward_source.include?("BASE_CATALOG_RELATIVE_PATH") &&
       mart_reward_source.include?("def load_base_catalog") &&
+      mart_reward_source.include?("source.to_sym == :offline_base ? :offline_allowed : :fresh_required") &&
       mart_reward_source.include?("unless remote.remote_confirmed?") &&
       mart_reward_source.include?("Mart catalog ignored unconfirmed RemoteData cache") &&
       mart_editor_source.include?("BASE_CATALOG_FILE") &&

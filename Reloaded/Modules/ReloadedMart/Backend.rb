@@ -677,7 +677,6 @@ module ReloadedMart
       bucket = data
       defaults.each { |key, value| bucket[key] = value unless bucket.has_key?(key) }
       bucket.delete("active_coupons")
-      bucket.delete("promo_codes")
       bucket["schema_version"] = SCHEMA_VERSION if bucket["schema_version"].to_i < SCHEMA_VERSION
       bucket
     rescue Exception => e
@@ -1083,20 +1082,25 @@ module ReloadedMart
           :duplicate => :reuse,
           :timeout => 30,
           :on_success => proc do |outcome|
-            @fetch_completion = apply_remote_result(outcome.value)
+            @fetch_completion = { :status => :success, :remote => outcome.value }
           end,
           :on_failure => proc do |outcome|
-            load_cached_or_fail(outcome.error_code || :remote_unavailable)
-            @fetch_completion = false
+            @fetch_completion = {
+              :status => :failure,
+              :reason => outcome.error_code || :remote_unavailable
+            }
           end,
-          :on_cancel => proc { |_outcome| @fetch_completion = false }
+          :on_cancel => proc { |_outcome| @fetch_completion = { :status => :cancelled } }
         }) do |task|
+          ReloadedMart.log_debug("Mart catalog worker fetch entered")
           task.report(0.1, "Fetching catalog")
           result = Reloaded::RemoteData.fetch(REMOTE_SOURCE_ID, :force => true)
+          ReloadedMart.log_debug("Mart catalog worker fetch returned status=#{result.status} code=#{result.error_code || :none}")
           task.fail!(result.error_message.to_s.empty? ? "Mart catalog is unavailable." : result.error_message, result.error_code || :remote_unavailable) unless result.ok?
           task.report(1.0, "Catalog ready")
           result
         end
+        ReloadedMart.log_info("Mart catalog background fetch started")
         true
       rescue Exception => e
         ReloadedMart.log_exception("Reloaded Mart online refresh could not start", e)
@@ -1112,10 +1116,19 @@ module ReloadedMart
       def finish_online_refresh
         return nil unless @fetch_task
         return nil if @fetch_task.running?
-        result = @fetch_completion ? current : false
+        completion = @fetch_completion
         @fetch_task = nil
         @fetch_completion = nil
-        result
+        return false unless completion.is_a?(Hash)
+        case completion[:status]
+        when :success
+          apply_remote_result(completion[:remote]) ? current : false
+        when :failure
+          load_cached_or_fail(completion[:reason] || :remote_unavailable)
+          false
+        else
+          false
+        end
       end
 
       def shutdown
@@ -1156,14 +1169,9 @@ module ReloadedMart
           return false
         end
         raw = remote.value
-        validation = Catalog.load(raw, source: :online_validation)
-        unless validation[:report] && validation[:report].ok?
-          ReloadedMart.log_warning("Mart catalog fetch produced invalid catalog")
-          load_cached_or_fail(:invalid_catalog)
-          return false
-        end
-        result = load_raw(raw, source: :online_fresh)
+        result = Catalog.load(raw, source: :online_fresh)
         if result[:report] && result[:report].ok?
+          activate_result(result, raw, :online_fresh)
           if defined?(ReloadedMart::DailyFeatured) && remote.respond_to?(:server_time)
             ReloadedMart::DailyFeatured.record_trusted_server_time(remote.server_time)
           end
@@ -1192,6 +1200,7 @@ module ReloadedMart
       end
 
       def ensure_remote_source
+        return REMOTE_SOURCE_ID if Reloaded::RemoteData.registered?(REMOTE_SOURCE_ID)
         Reloaded::RemoteData.register(REMOTE_SOURCE_ID, {
           :owner => :reloaded_mart,
           :format => :json,
@@ -1199,8 +1208,12 @@ module ReloadedMart
           :timeout => 8,
           :validator => proc do |value|
             next false unless value.is_a?(Hash)
-            check = Catalog.load(value, source: :remote_validation)
-            check[:report] && check[:report].ok?
+            # RemoteData validators run on the worker thread. Keep this check
+            # structural; Catalog.load uses live GameData and belongs on the
+            # main thread in apply_remote_result.
+            version = Catalog.schema_version(value)
+            entries = value["entries"] || value[:entries]
+            version > 0 && version <= SCHEMA_VERSION && entries.is_a?(Array)
           end
         })
       end
@@ -1222,6 +1235,7 @@ module ReloadedMart
           "stock_epoch" => (@active_raw["stock_epoch"] rescue nil),
           "loaded_at" => Time.now.to_i
         })
+        ReloadedMart::EconomyEvents.clear_cache if defined?(ReloadedMart::EconomyEvents)
         log_daily_featured_probe(result[:entries], source)
         result
       end
@@ -1424,16 +1438,6 @@ module ReloadedMart
         []
       end
 
-      def profile_tuning(context = {})
-        return [] unless Source.curated_available?
-        tuning = catalog["profile_tuning"] || catalog[:profile_tuning] || {}
-        return [] unless tuning.is_a?(Hash)
-        key = profile_key(context)
-        Array(tuning[key] || tuning[key.to_s])
-      rescue
-        []
-      end
-
       def matching_price_modifiers(entry, context = {})
         modifiers = []
         events.each do |event|
@@ -1443,11 +1447,6 @@ module ReloadedMart
             next unless modifier_applies?(modifier, entry, context)
             modifiers << normalize_modifier(modifier, event)
           end
-        end
-        profile_tuning(context).each do |modifier|
-          next unless modifier.is_a?(Hash)
-          next unless modifier_applies?(modifier, entry, context)
-          modifiers << normalize_modifier(modifier, { "id" => "profile_tuning" })
         end
         modifiers << daily_featured_modifier(entry, context) if daily_featured?(entry, context)
         modifiers.compact
@@ -1875,14 +1874,6 @@ module ReloadedMart
         end
       rescue
         {}
-      end
-
-      def profile_key(context = {})
-        return context[:profile].to_s if context[:profile]
-        return $Trainer.selected_difficulty.to_s if $Trainer && $Trainer.respond_to?(:selected_difficulty)
-        "default"
-      rescue
-        "default"
       end
 
       def countdowns(context = {})
@@ -2435,9 +2426,10 @@ module ReloadedMart
           source: source
         )
         validate_schema(raw, report)
+        ReloadedMart::EconomyEvents.validate_catalog(raw, report) if defined?(ReloadedMart::EconomyEvents)
         entries = []
         raw_entries(raw).each do |entry_raw|
-          entry = normalize_entry(entry_raw, report)
+          entry = normalize_entry(entry_raw, report, source)
           if entry
             report.accept(entry)
             entries << entry
@@ -2482,7 +2474,7 @@ module ReloadedMart
         legacy
       end
 
-      def normalize_entry(raw, report)
+      def normalize_entry(raw, report, source = :unknown)
         unless raw.is_a?(Hash)
           report.skip("unknown", "entry_not_hash")
           return nil
@@ -2517,7 +2509,8 @@ module ReloadedMart
           :dependencies => raw["dependencies"] || raw[:dependencies] || raw["requires"] || raw[:requires] || {},
           :grants => raw["outcomes"] || raw[:outcomes] || raw["grants"] || raw[:grants] || raw["items"] || raw[:items],
           :entry_version => raw["entry_version"] || raw[:entry_version] || raw["version"] || raw[:version] || 1,
-          :online_policy => raw["online_policy"] || raw[:online_policy] || :fresh_required,
+          :online_policy => raw["online_policy"] || raw[:online_policy] ||
+                            (source.to_sym == :offline_base ? :offline_allowed : :fresh_required),
           :source_type => raw["source_type"] || raw[:source_type] || :curated,
           :raw => raw
         )
@@ -2864,7 +2857,6 @@ module ReloadedMart
         data["schema_version"] ||= SCHEMA_VERSION
         data["catalog_version"] ||= data["version"] || DEFAULT_CATALOG_VERSION
         data["entries"] ||= []
-        data.delete("promo_codes")
         data
       end
 
@@ -3096,10 +3088,13 @@ module ReloadedMart
         entry.price.nil? ? base.to_i : entry.price.to_i
       end
 
-      def apply_modifiers(amount, modifiers, _entry, _context)
-        modifiers.inject(amount.to_i) do |value, modifier|
+      def apply_modifiers(amount, modifiers, _entry, context)
+        result = modifiers.inject(amount.to_i) do |value, modifier|
           apply_modifier(value, modifier)
         end
+        return [result, 0].max if (context[:mode] || :buy).to_sym == :sell
+        return 0 if amount.to_i <= 0
+        [result, 1].max
       end
 
       def apply_modifier(amount, modifier)

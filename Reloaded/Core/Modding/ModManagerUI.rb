@@ -5026,12 +5026,9 @@ module Reloaded
           return
         end
         load mart_editor_file
-        catalog_written = Reloaded::MartEditor::Tool.open
+        Reloaded::MartEditor::Tool.open
         drain_popup_input
         block_list_state_input
-        if catalog_written && defined?(ReloadedMart::Source)
-          ReloadedMart::Source.load_for_open(blocking: false)
-        end
         if @title_sprite && @left_sprite && @right_sprite && @footer_sprite
           refresh_rows
           draw_all

@@ -113,6 +113,7 @@ module Reloaded
           "Modules/TMVault.rb",
           "Modules/ReloadedMart/Backend.rb",
           "Modules/ReloadedMart/Automation/DailyFeatured.rb",
+          "Modules/ReloadedMart/Automation/EconomyEvents.rb",
           "Modules/ReloadedMart/UI.rb",
           "Modules/ReloadedMart/Services.rb",
           "Modules/OverworldMenu.rb",

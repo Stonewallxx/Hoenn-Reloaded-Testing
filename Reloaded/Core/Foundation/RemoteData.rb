@@ -476,7 +476,10 @@ module Reloaded
             :timeout => source[:timeout], :max_bytes => source[:max_bytes]
           }))
         end
-        if defined?(HTTPLite)
+        # HTTPLite is an engine-native transport and is not reliable when
+        # called repeatedly from worker threads. Background RemoteData tasks
+        # use Net::HTTP so a native transport failure cannot terminate MKXP.
+        if defined?(HTTPLite) && main_thread_transport?
           response = HTTPLite.get(url, headers) rescue nil
           normalized = normalize_response(response) if response.is_a?(Hash)
           return normalized if normalized && normalized[:status].to_i > 0
@@ -490,6 +493,13 @@ module Reloaded
         network_response || { :status => 0, :body => "", :headers => {}, :error_code => :network_unavailable, :error_message => "No compatible network transport is available." }
       rescue Exception => e
         { :status => 0, :body => "", :headers => {}, :error_code => :network_error, :error_message => sanitize_error(e.message) }
+      end
+
+      def main_thread_transport?
+        return true unless defined?(Reloaded::Task) && Reloaded::Task.respond_to?(:main_thread?)
+        Reloaded::Task.main_thread?
+      rescue
+        true
       end
 
       def request_with_net_http(url, headers, timeout, max_bytes)

@@ -298,27 +298,39 @@ module Reloaded
       end
 
       def normalize_pokemon_reward(reward)
-        requested_species = reward[:species] || reward[:pokemon] || reward[:id]
+        selection_mode = reward_type_id(reward[:species_mode] || reward[:selection_mode] || :single)
+        selection_mode = :single unless [:single, :fusion, :random_type, :random_bst].include?(selection_mode)
+        requested_species = reward[:resolved_species] || reward[:species] || reward[:pokemon] || reward[:id]
         fallback_species = reward[:fallback_species] || reward[:fallback]
-        species = requested_species
+        species = reward[:resolved_species] || resolve_reward_species(reward, selection_mode)
+        species ||= requested_species
         species_data = defined?(GameData::Species) ? (GameData::Species.try_get(species) rescue nil) : nil
         if !species_data && fallback_species
           species = fallback_species
           species_data = defined?(GameData::Species) ? (GameData::Species.try_get(species) rescue nil) : nil
         end
-        types_specified = reward.key?(:types) || reward.key?(:type1) || reward.key?(:type2)
+        types_specified = (reward.key?(:types) || reward.key?(:type1) || reward.key?(:type2)) &&
+                          !Array(reward[:types] || [reward[:type1], reward[:type2]].compact).empty?
         type_values = reward[:types] || [reward[:type1], reward[:type2]].compact
         types = Array(type_values).map { |value| resolve_type_id(value) }.compact.uniq
+        generate_moves = if reward.key?(:generate_moves)
+                           reward_truthy?(reward[:generate_moves])
+                         else
+                           !reward.key?(:moves)
+                         end
         delivery = reward_type_id(reward[:delivery] || :either)
         is_egg = reward[:egg] == true || reward[:egg].to_s.downcase == "true" || reward[:type].to_s.downcase == "egg"
         reward.merge(
           :species => species_data ? species_data.id : (species.to_sym rescue species),
+          :resolved_species => species_data ? species_data.id : nil,
+          :species_mode => selection_mode,
           :requested_species => (requested_species.to_sym rescue requested_species),
           :fallback_species => (fallback_species.to_sym rescue fallback_species),
           :level => (reward[:level] || 1).to_i,
           :quantity => [(reward[:quantity] || reward[:qty] || 1).to_i, 1].max,
           :delivery => delivery,
           :egg => is_egg,
+          :generate_moves => generate_moves,
           :types => types,
           :types_specified => types_specified,
           :distribution_id => (reward[:distribution_id] || reward[:distribution]).to_s.strip,
@@ -330,6 +342,65 @@ module Reloaded
           :custom_type_policy => normalize_policy_hash(reward[:custom_type_policy] || reward[:type_policy]),
           :origin_label => (reward[:origin_label] || reward[:obtain_text]).to_s
         )
+      end
+
+      def resolve_reward_species(reward, selection_mode)
+        case selection_mode
+        when :fusion
+          head = GameData::Species.try_get(reward[:fusion_head_species] || reward[:head_species]) rescue nil
+          body = GameData::Species.try_get(reward[:fusion_body_species] || reward[:body_species]) rescue nil
+          return nil unless reward_base_species?(head) && reward_base_species?(body)
+          "B#{body.id_number}H#{head.id_number}".to_sym
+        when :random_type
+          type_id = resolve_type_id(reward[:random_type] || reward[:pokemon_type])
+          candidates = reward_species_candidates.select { |data| data.types.include?(type_id) }
+          selected = candidates.empty? ? nil : candidates[rand(candidates.length)]
+          selected && selected.id
+        when :random_bst
+          minimum = (reward[:bst_min] || reward[:minimum_bst] || 0).to_i
+          maximum = (reward[:bst_max] || reward[:maximum_bst] || 9_999).to_i
+          candidates = reward_species_candidates.select do |data|
+            total = reward_species_bst(data)
+            total >= minimum && total <= maximum
+          end
+          selected = candidates.empty? ? nil : candidates[rand(candidates.length)]
+          selected && selected.id
+        else
+          reward[:species] || reward[:pokemon] || reward[:id]
+        end
+      rescue Exception => e
+        extended_log_exception("Pokemon reward species selection failed", e)
+        nil
+      end
+
+      def reward_species_candidates
+        rows = []
+        return rows unless defined?(GameData::Species)
+        GameData::Species.each do |data|
+          rows << data if reward_base_species?(data)
+        end
+        rows
+      rescue
+        []
+      end
+
+      def reward_base_species?(data)
+        return false unless data
+        return false if data.respond_to?(:is_fusion) && data.is_fusion
+        return false if data.respond_to?(:is_triple_fusion) && data.is_triple_fusion
+        return false if data.respond_to?(:form) && data.form.to_i != 0
+        number = data.respond_to?(:id_number) ? data.id_number.to_i : 0
+        maximum = defined?(::Settings::NB_POKEMON) ? ::Settings::NB_POKEMON.to_i : number
+        number > 0 && number <= maximum
+      rescue
+        false
+      end
+
+      def reward_species_bst(data)
+        stats = data && data.respond_to?(:base_stats) ? data.base_stats : {}
+        stats.respond_to?(:values) ? stats.values.inject(0) { |sum, value| sum + value.to_i } : 0
+      rescue
+        0
       end
 
       def validate_pokemon_reward(reward, context)
@@ -352,6 +423,16 @@ module Reloaded
       end
 
       def validate_pokemon_fields(reward)
+        if reward[:species_mode] == :fusion
+          return failure(:missing_fusion_species, "That Pokemon fusion needs a valid head and body.", :reward => reward) unless reward[:resolved_species]
+        elsif reward[:species_mode] == :random_type
+          return failure(:empty_random_type_pool, "No Pokemon match that reward type pool.", :reward => reward) unless reward[:resolved_species]
+        elsif reward[:species_mode] == :random_bst
+          minimum = (reward[:bst_min] || 0).to_i
+          maximum = (reward[:bst_max] || 9_999).to_i
+          return failure(:invalid_bst_range, "That Pokemon reward has an invalid BST range.", :reward => reward) if minimum < 0 || maximum < minimum
+          return failure(:empty_random_bst_pool, "No Pokemon match that reward BST range.", :reward => reward) unless reward[:resolved_species]
+        end
         return failure(:invalid_form, "That Pokemon has an invalid form.", :reward => reward) if reward[:form] && reward[:form].to_i < 0
         return failure(:invalid_gender, "That Pokemon has an invalid gender.", :reward => reward) if reward.key?(:gender) && !random_reward_value?(reward[:gender]) && ![0, 1, 2, :male, :female, :genderless, "male", "female", "genderless"].include?(reward[:gender])
         return failure(:invalid_nature, "That Pokemon has an invalid nature.", :reward => reward) if reward[:nature] && !random_reward_value?(reward[:nature]) && !(GameData::Nature.try_get(reward[:nature]) rescue nil)
@@ -509,10 +590,11 @@ module Reloaded
         gender = reward[:ot_gender] || reward[:original_trainer_gender]
         language = reward[:ot_language] || reward[:language]
         return nil if name.to_s.empty? && id.nil? && gender.nil? && language.nil?
-        owner_name = name.to_s.empty? ? _INTL("Hoenn Reloaded") : name.to_s
-        owner_id = id.nil? ? ($Trainer.make_foreign_ID rescue rand(0xFFFFFFFF)) : id.to_i
-        owner_gender = gender.nil? ? 2 : normalize_gender(gender)
-        owner_language = language.nil? ? 2 : language.to_i
+        default_owner = Pokemon::Owner.new_from_trainer($Trainer)
+        owner_name = name.to_s.empty? ? default_owner.name : name.to_s
+        owner_id = id.nil? ? default_owner.id : id.to_i
+        owner_gender = gender.nil? ? default_owner.gender : normalize_gender(gender)
+        owner_language = language.nil? ? default_owner.language : language.to_i
         Pokemon::Owner.new(owner_id, owner_name, owner_gender, owner_language)
       rescue Exception => e
         extended_log_exception("Pokemon reward owner creation failed", e)
@@ -534,6 +616,10 @@ module Reloaded
       end
 
       def apply_reward_moves(pokemon, reward)
+        if reward[:generate_moves]
+          pokemon.reset_moves
+          return
+        end
         return unless reward.key?(:moves)
         pokemon.moves = []
         Array(reward[:moves]).each { |move| pokemon.learn_move(move) }

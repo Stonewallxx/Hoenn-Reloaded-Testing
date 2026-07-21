@@ -57,6 +57,11 @@ Features
 - Added shared reward support for Mart, Mystery Gift, events, and mods.
 -- Supports items, currencies, PokeVial uses/refills, Pokemon, outfits, TM Vault
    moves, unlocks, choices, weighted rolls, and atomic reward groups.
+- Expanded Reloaded Mart Pokemon rewards and editor guidance.
+-- Pokemon rewards can use any loaded base or Expanded Dex species, authored
+   head/body fusions, or random type/BST pools.
+-- Added guided form, difficulty, and nature choices, optional nicknames,
+   native trainer/type defaults, and normal level-move generation.
 
 Improvement
 -----------
@@ -64,7 +69,50 @@ Improvement
 -- Preserved Reloaded's bootstrap, Sprite Import, expanded economy/Bag limits,
    Options safety guard, and untradeable distribution Pokemon protections.
 - Removed Reloaded Mart Promo Codes and their catalog/editor support.
-- Reloaded Mart manual refresh now uses `Refresh (Z)`.
+- Reloaded Mart Editor now manages catalog versions, entry versions, and
+  generated timestamps automatically.
+-- Changed online saves use date revisions, changed Base Stock saves increment
+   `base-N`, and unchanged entries keep their existing version.
+- Removed obsolete Profile Tuning pricing support and the editor's duplicated
+  legacy Economy maintenance screen.
+- Reloaded Mart `Actions (Z)` now opens a reusable popup with View Event.
+- Simplified the Economy Event toast to a centered event name, gold countdown,
+   green discount, and two randomly selected affected item icons.
+- Adjusted the Economy Event toast's OK label placement.
+- Added local Automated and online Curated/Themed Economy Events to Reloaded Mart.
+-- Only one event can be active at once; Curated beats Themed, Themed beats
+   Automated, and explicit priority resolves events of the same type.
+-- Events support guided price rules, temporary Mart content, banners,
+   countdowns, trusted Eastern scheduling, and sell-side modifiers.
+-- Automated events follow a permanent deterministic two-days-on,
+   one-day-off cycle and can be configured from reusable event templates.
+-- Daily Featured remains active during events, while event pricing takes
+   precedence whenever both systems affect the same item.
+- Added a guided Economy Event workflow to Reloaded Mart Editor.
+-- Supports curated/themed events, schedules, selector-based pricing targets
+   and exclusions, copied or newly created temporary content, display settings,
+   automated templates, previews, duplication, and validation.
+-- Added a separate Economy Event Templates library whose reusable blueprints
+   can be copied into Automated, Curated, or Themed Events without changing the
+   source template.
+-- Added 18 editable starting templates with 248 temporary item offerings.
+   Each contains 10-15 items, and related themes are consolidated into broader
+   events instead of being divided into smaller variants.
+- Moved Automated Economy Event templates into a shipped local pool so the
+  permanent cycle works offline without increasing online catalog size.
+- Moved reusable templates and Curated/Themed drafts into an Admin-only event
+  library. Export and Publish include only the currently active online event.
+- Added fail-closed local event loading, a 50% automated percentage cap, full
+  temporary-content validation, and a minimum positive purchase price.
+- Mart catalog saves now rewrite and back up event-library data only when that
+  data actually changed.
+- Removed a redundant Reloaded Mart catalog validation pass during remote
+  activation to reduce refresh work for large online catalogs.
+- Moved remote Mart catalog normalization and GameData validation off the
+  background worker and onto the main game thread, preventing first-open
+  update crashes while retaining non-blocking downloads.
+- Cached active Economy Event selection during Mart list construction to avoid
+  repeatedly rebuilding the same event for every displayed price.
 - Changed Hidden Power to use each Pokemon's stored type instead of deriving
   its type from IVs; normal battle damage calculations are retained.
 - Made IV Boundaries roll each new IV inside its range rather than clamping an
@@ -128,8 +176,8 @@ Improvement
 - Fixed Daily Featured stock editing to begin at 0 and treat 0 as unlimited,
   removed Profile Tuning from Mart Editor navigation, and made Test in Game
   expose its working catalog.
-- Added manual Reloaded Mart catalog refresh on `X`; the open Mart rebuilds
-  after completion even when the catalog version is unchanged.
+- Removed manual Reloaded Mart refreshes so catalog replacement only begins
+  during the controlled open-time refresh path.
 - Removed the catalog-wide Mart Automation switch so each automated system
   follows its own enabled state or configured data.
 - Made Mod Browser installs resolve dependency chains and report unavailable,
@@ -153,6 +201,21 @@ Improvement
 
 Bugfixes
 -----------
+- Fixed Reloaded Mart's View Event action using an undefined scene context;
+  the action now enables for the winning event and identifies it by name.
+- Fixed open-time Reloaded Mart refreshes unnecessarily rebuilding an unchanged
+  live scene, cleared retained pricing state before genuine refresh rebuilds,
+  and moved background refreshes away from the engine-native HTTP transport.
+- Fixed Curated/Themed Economy Event schedules created during evening hours
+  being rejected because the Eastern-time conversion produced an invalid hour.
+- Fixed leaving Reloaded Mart Editor starting a catalog refresh during the Mod
+  Manager scene transition, which could close the game without a Ruby error.
+- Fixed valid Economy Event cycle anchors being rejected when the runtime Date
+  library was unavailable, and exposed the anchor directly in Automated Events.
+- Reduced Reloaded Mart Editor startup work for large catalogs containing the
+  built-in Economy Event template library.
+- Fixed Reloaded Mart Editor's Publish Catalog action failing to open the
+  publisher batch through the shared platform launcher.
 - Fixed backing out of Reloaded Mart Editor from the standalone Admin Tools
   launcher trying to redraw uninitialized Mod Manager scene sprites.
 - Changed Reloaded Mart Editor item selectors to omit redundant bracketed item

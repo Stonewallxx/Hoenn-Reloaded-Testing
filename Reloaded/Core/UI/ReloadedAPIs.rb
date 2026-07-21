@@ -2434,13 +2434,15 @@ module Reloaded
 
         def draw_ok(bitmap)
           x, y, w, h = ok_bounds
-          PopupWindow.draw_rounded_rect(bitmap, x, y, w, h, 4, pulsing_cursor_fill)
-          bitmap.fill_rect(x, y, w, 1, cursor_border)
-          bitmap.fill_rect(x, y + h - 1, w, 1, cursor_border)
-          bitmap.fill_rect(x, y, 1, h, cursor_border)
-          bitmap.fill_rect(x + w - 1, y, 1, h, cursor_border)
-          bitmap.font.size = 17 rescue nil
-          draw_text(bitmap, "OK", x, y - 1, w, OK_H, WHITE, 1)
+          if respond_to?(:reloaded_draw_rounded_rect)
+            reloaded_draw_rounded_rect(bitmap, x, y, w, h, 4, pulsing_cursor_fill, cursor_border)
+          else
+            PopupWindow.draw_rounded_rect(bitmap, x, y, w, h, 4, cursor_border)
+            PopupWindow.draw_rounded_rect(bitmap, x + 1, y + 1, w - 2, h - 2, 3, pulsing_cursor_fill)
+          end
+          bitmap.font.size = 25 rescue nil
+          text_offset = (@options[:ok_text_offset_y] || -5).to_i
+          draw_text(bitmap, "OK", x, y + text_offset, w, OK_H, WHITE, 1)
         rescue
         end
 

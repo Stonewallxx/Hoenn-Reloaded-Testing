@@ -143,15 +143,17 @@ module Reloaded
         ""
       end
 
-      def launch_script(path, working_directory = nil)
+      def launch_script(path, working_directory = nil, arguments = nil)
         require_capability!(:external_tools)
         script = File.expand_path(path.to_s)
         raise "Tool is missing: #{display_path(script)}" unless File.exist?(script)
         working_directory ||= File.dirname(script)
+        arguments = Array(arguments).compact.map { |argument| argument.to_s }
         if File.extname(script).downcase == ".bat"
-          ok = system("cmd", "/c", "start", "", "/D", working_directory, script)
+          ok = launch_windows_batch(script, working_directory, arguments)
+          ok = system("cmd.exe", "/c", "start", "", "/D", working_directory, script, *arguments) if ok.nil?
         else
-          ok = launch_proton_terminal(script, working_directory)
+          ok = launch_proton_terminal(script, working_directory, arguments)
         end
         raise "The operating system could not launch #{File.basename(script)}." unless ok
         true
@@ -328,11 +330,47 @@ module Reloaded
         path
       end
 
-      def launch_proton_terminal(script, working_directory)
+      def launch_windows_batch(script, working_directory, arguments)
+        return nil unless defined?(Win32API)
+        shell_execute = Win32API.new(
+          "shell32",
+          "ShellExecuteW",
+          ["L", "P", "P", "P", "P", "L"],
+          "L"
+        )
+        parameters = Array(arguments).map { |argument| quote_windows_argument(argument) }.join(" ")
+        result = shell_execute.call(
+          0,
+          windows_wide_string("open"),
+          windows_wide_string(script),
+          parameters.empty? ? nil : windows_wide_string(parameters),
+          windows_wide_string(working_directory),
+          1
+        )
+        code = result.to_i
+        raise "Windows could not open #{File.basename(script)} (ShellExecute code #{code})." unless code > 32
+        true
+      end
+
+      def quote_windows_argument(argument)
+        value = argument.to_s
+        return '""' if value.empty?
+        return value unless value =~ /[\s"]/
+        escaped = value.gsub(/(\\*)\"/) { "#{$1}#{$1}\\\"" }
+        escaped = escaped.sub(/(\\+)\z/) { "#{$1}#{$1}" }
+        "\"#{escaped}\""
+      end
+
+      def windows_wide_string(value)
+        (value.to_s + "\0").encode("UTF-16LE")
+      end
+
+      def launch_proton_terminal(script, working_directory, arguments = nil)
+        arguments = Array(arguments).compact.map { |argument| argument.to_s }
         commands = [
-          ["konsole", "--hold", "-e", "sh", script],
-          ["xterm", "-hold", "-e", "sh", script],
-          ["gnome-terminal", "--", "sh", script]
+          ["konsole", "--hold", "-e", "sh", script, *arguments],
+          ["xterm", "-hold", "-e", "sh", script, *arguments],
+          ["gnome-terminal", "--", "sh", script, *arguments]
         ]
         commands.each do |command|
           begin
@@ -343,8 +381,8 @@ module Reloaded
           end
         end
         if windows_environment?
-          return true if system("cmd", "/c", "start", "", "/unix", script)
-          return true if system("cmd", "/c", "start", "", script)
+          return true if system("cmd", "/c", "start", "", "/unix", script, *arguments)
+          return true if system("cmd", "/c", "start", "", script, *arguments)
         end
         false
       end

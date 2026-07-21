@@ -1,0 +1,4395 @@
+{
+  "enabled": true,
+  "automation_id": "economy",
+  "cycle_anchor": "2026-07-20",
+  "revision": 1,
+  "priority": 0,
+  "templates": [
+    {
+      "id": "evolution_workshop_automated",
+      "label": "Evolution Workshop",
+      "description": "A broad collection of specialized evolution items is temporarily available.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "evolution_workshop_pricing",
+          "label": "Evolution Workshop",
+          "operation": "discount_percent",
+          "value": 15,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:evolution_workshop"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "evolution_workshop:kingsrock",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "KINGSROCK",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:metalcoat",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "METALCOAT",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:dragonscale",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DRAGONSCALE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:upgrade",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "UPGRADE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:dubiousdisc",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DUBIOUSDISC",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:deepseatooth",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DEEPSEATOOTH",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:deepseascale",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DEEPSEASCALE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:razorclaw",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "RAZORCLAW",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:razorfang",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "RAZORFANG",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:electirizer",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ELECTIRIZER",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:magmarizer",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MAGMARIZER",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:protector",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PROTECTOR",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:reapercloth",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "REAPERCLOTH",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:prismscale",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PRISMSCALE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "evolution_workshop:ovalstone",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "OVALSTONE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:evolution_workshop"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Evolution Workshop is active!",
+        "description": "A broad collection of specialized evolution items is temporarily available.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "training_camp_automated",
+      "label": "Training Camp",
+      "description": "EV, experience, move, and ability training supplies are temporarily stocked.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "training_camp_pricing",
+          "label": "Training Camp",
+          "operation": "discount_percent",
+          "value": 15,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:training_camp"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "training_camp:machobrace",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MACHOBRACE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:powerweight",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POWERWEIGHT",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:powerbracer",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POWERBRACER",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:powerbelt",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POWERBELT",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:powerlens",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POWERLENS",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:powerband",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POWERBAND",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:poweranklet",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POWERANKLET",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:luckyegg",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LUCKYEGG",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:rarecandy",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "RARECANDY",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:ppup",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PPUP",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:ppmax",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PPMAX",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:abilitycapsule",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ABILITYCAPSULE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:expshare",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "EXPSHARE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "training_camp:soothebell",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SOOTHEBELL",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:training_camp"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Training Camp is active!",
+        "description": "EV, experience, move, and ability training supplies are temporarily stocked.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "competitive_essentials_automated",
+      "label": "Competitive Essentials",
+      "description": "Popular offensive, defensive, and recovery held items are temporarily stocked.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "competitive_essentials_pricing",
+          "label": "Competitive Essentials",
+          "operation": "discount_percent",
+          "value": 10,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:competitive_essentials"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "competitive_essentials:choiceband",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CHOICEBAND",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:choicespecs",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CHOICESPECS",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:choicescarf",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CHOICESCARF",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:lifeorb",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LIFEORB",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:focussash",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FOCUSSASH",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:eviolite",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "EVIOLITE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:rockyhelmet",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ROCKYHELMET",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:leftovers",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LEFTOVERS",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:blacksludge",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BLACKSLUDGE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:expertbelt",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "EXPERTBELT",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:muscleband",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MUSCLEBAND",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:wiseglasses",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "WISEGLASSES",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:shellbell",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SHELLBELL",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:bigroot",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BIGROOT",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "competitive_essentials:metronome",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "METRONOME",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:competitive_essentials"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Competitive Essentials is active!",
+        "description": "Popular offensive, defensive, and recovery held items are temporarily stocked.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "tactical_battle_tools_automated",
+      "label": "Tactical Battle Tools",
+      "description": "Accuracy, turn-order, trapping, and escape equipment is temporarily stocked.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "tactical_battle_tools_pricing",
+          "label": "Tactical Battle Tools",
+          "operation": "discount_percent",
+          "value": 10,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:tactical_battle_tools"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "tactical_battle_tools:mentalherb",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MENTALHERB",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:focusband",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FOCUSBAND",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:scopelens",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SCOPELENS",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:widelens",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "WIDELENS",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:zoomlens",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ZOOMLENS",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:brightpowder",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BRIGHTPOWDER",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:quickclaw",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "QUICKCLAW",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:laggingtail",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LAGGINGTAIL",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:ironball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "IRONBALL",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:floatstone",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FLOATSTONE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:gripclaw",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "GRIPCLAW",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:bindingband",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BINDINGBAND",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:ringtarget",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "RINGTARGET",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:shedshell",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SHEDSHELL",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "tactical_battle_tools:smokeball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SMOKEBALL",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:tactical_battle_tools"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Tactical Battle Tools is active!",
+        "description": "Accuracy, turn-order, trapping, and escape equipment is temporarily stocked.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "type_booster_market_automated",
+      "label": "Type Booster Market",
+      "description": "A unified selection of held items that strengthen move types is temporarily available.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "type_booster_market_pricing",
+          "label": "Type Booster Market",
+          "operation": "discount_percent",
+          "value": 10,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:type_booster_market"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "type_booster_market:charcoal",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CHARCOAL",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:mysticwater",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MYSTICWATER",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:miracleseed",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MIRACLESEED",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:magnet",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MAGNET",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:nevermeltice",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "NEVERMELTICE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:blackbelt",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BLACKBELT",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:poisonbarb",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POISONBARB",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:softsand",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SOFTSAND",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:sharpbeak",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SHARPBEAK",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:twistedspoon",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "TWISTEDSPOON",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:silverpowder",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SILVERPOWDER",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:hardstone",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "HARDSTONE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:spelltag",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SPELLTAG",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:dragonfang",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DRAGONFANG",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "type_booster_market:blackglasses",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BLACKGLASSES",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:type_booster_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Type Booster Market is active!",
+        "description": "A unified selection of held items that strengthen move types is temporarily available.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "gem_market_automated",
+      "label": "Gem Market",
+      "description": "A broad selection of single-use type Gems is temporarily available.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "gem_market_pricing",
+          "label": "Gem Market",
+          "operation": "discount_percent",
+          "value": 15,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:gem_market"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "gem_market:firegem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FIREGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:watergem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "WATERGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:electricgem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ELECTRICGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:grassgem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "GRASSGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:icegem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ICEGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:fightinggem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FIGHTINGGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:poisongem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POISONGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:groundgem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "GROUNDGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:flyinggem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FLYINGGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:psychicgem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PSYCHICGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:buggem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BUGGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:rockgem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ROCKGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:ghostgem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "GHOSTGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:dragongem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DRAGONGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "gem_market:darkgem",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DARKGEM",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:gem_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Gem Market is active!",
+        "description": "A broad selection of single-use type Gems is temporarily available.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "berry_market_automated",
+      "label": "Berry Market",
+      "description": "Status, recovery, and friendship Berries are temporarily stocked together.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "berry_market_pricing",
+          "label": "Berry Market",
+          "operation": "discount_percent",
+          "value": 20,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:berry_market"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "berry_market:cheriberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CHERIBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:chestoberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CHESTOBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:pechaberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PECHABERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:rawstberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "RAWSTBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:aspearberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ASPEARBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:leppaberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LEPPABERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:persimberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PERSIMBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:lumberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LUMBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:oranberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ORANBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:sitrusberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SITRUSBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:pomegberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POMEGBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:kelpsyberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "KELPSYBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:qualotberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "QUALOTBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:hondewberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "HONDEWBERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "berry_market:grepaberry",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "GREPABERRY",
+          "category": "berries",
+          "category_id": "berries",
+          "category_ids": [
+            "berries"
+          ],
+          "category_name": "BERRIES",
+          "tags": [
+            "economy_event",
+            "event_template:berry_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Berry Market is active!",
+        "description": "Status, recovery, and friendship Berries are temporarily stocked together.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "poke_ball_expo_automated",
+      "label": "Poke Ball Expo",
+      "description": "Specialized and rare Poke Balls are temporarily available.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "poke_ball_expo_pricing",
+          "label": "Poke Ball Expo",
+          "operation": "discount_percent",
+          "value": 15,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:poke_ball_expo"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "poke_ball_expo:safariball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SAFARIBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:sportball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SPORTBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:premierball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PREMIERBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:healball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "HEALBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:fastball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FASTBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:levelball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LEVELBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:lureball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LUREBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:heavyball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "HEAVYBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:loveball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LOVEBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:friendball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FRIENDBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:moonball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MOONBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:dreamball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DREAMBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:genderball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "GENDERBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:tradeball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "TRADEBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "poke_ball_expo:abilityball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ABILITYBALL",
+          "category": "poke_balls",
+          "category_id": "poke_balls",
+          "category_ids": [
+            "poke_balls"
+          ],
+          "category_name": "POKE BALLS",
+          "tags": [
+            "economy_event",
+            "event_template:poke_ball_expo"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Poke Ball Expo is active!",
+        "description": "Specialized and rare Poke Balls are temporarily available.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "medicine_festival_automated",
+      "label": "Medicine Festival",
+      "description": "Traditional remedies, drinks, and regional treats are temporarily stocked.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "medicine_festival_pricing",
+          "label": "Medicine Festival",
+          "operation": "discount_percent",
+          "value": 20,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:medicine_festival"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "medicine_festival:energypowder",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ENERGYPOWDER",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:healpowder",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "HEALPOWDER",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:energyroot",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ENERGYROOT",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:revivalherb",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "REVIVALHERB",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:lavacookie",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LAVACOOKIE",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:oldgateau",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "OLDGATEAU",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:casteliacone",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CASTELIACONE",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:ragecandybar",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "RAGECANDYBAR",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:moomoomilk",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MOOMOOMILK",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:freshwater",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FRESHWATER",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:sodapop",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SODAPOP",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:lemonade",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LEMONADE",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:berryjuice",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BERRYJUICE",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:sweetheart",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SWEETHEART",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "medicine_festival:sacredash",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SACREDASH",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:medicine_festival"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Medicine Festival is active!",
+        "description": "Traditional remedies, drinks, and regional treats are temporarily stocked.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "vitamin_wing_market_automated",
+      "label": "Vitamin and Wing Market",
+      "description": "Stat supplements and training Wings are temporarily available.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "vitamin_wing_market_pricing",
+          "label": "Vitamin and Wing Market",
+          "operation": "discount_percent",
+          "value": 15,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:vitamin_wing_market"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "vitamin_wing_market:hpup",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "HPUP",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:protein",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PROTEIN",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:iron",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "IRON",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:calcium",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CALCIUM",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:zinc",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ZINC",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:carbos",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CARBOS",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:healthwing",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "HEALTHWING",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:musclewing",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MUSCLEWING",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:resistwing",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "RESISTWING",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:geniuswing",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "GENIUSWING",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:cleverwing",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CLEVERWING",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:swiftwing",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SWIFTWING",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "vitamin_wing_market:prettywing",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PRETTYWING",
+          "category": "medicine",
+          "category_id": "medicine",
+          "category_ids": [
+            "medicine"
+          ],
+          "category_name": "MEDICINE",
+          "tags": [
+            "economy_event",
+            "event_template:vitamin_wing_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Vitamin and Wing Market is active!",
+        "description": "Stat supplements and training Wings are temporarily available.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "breeding_friendship_fair_automated",
+      "label": "Breeding and Friendship Fair",
+      "description": "Breeding, friendship, and incense items are temporarily stocked together.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "breeding_friendship_fair_pricing",
+          "label": "Breeding and Friendship Fair",
+          "operation": "discount_percent",
+          "value": 15,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:breeding_friendship_fair"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "breeding_friendship_fair:destinyknot",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DESTINYKNOT",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:soothebell",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SOOTHEBELL",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:ovalstone",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "OVALSTONE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:everstone",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "EVERSTONE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:laxincense",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LAXINCENSE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:fullincense",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FULLINCENSE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:luckincense",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "LUCKINCENSE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:pureincense",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "PUREINCENSE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:seaincense",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SEAINCENSE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:waveincense",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "WAVEINCENSE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:roseincense",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ROSEINCENSE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "breeding_friendship_fair:oddincense",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ODDINCENSE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:breeding_friendship_fair"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Breeding and Friendship Fair is active!",
+        "description": "Breeding, friendship, and incense items are temporarily stocked together.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "plate_collection_automated",
+      "label": "Plate Collection",
+      "description": "A broad collection of type-enhancing Plates is temporarily available.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "plate_collection_pricing",
+          "label": "Plate Collection",
+          "operation": "discount_percent",
+          "value": 15,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:plate_collection"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "plate_collection:flameplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FLAMEPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:splashplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SPLASHPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:zapplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ZAPPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:meadowplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MEADOWPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:icicleplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "ICICLEPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:fistplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FISTPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:toxicplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "TOXICPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:earthplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "EARTHPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:skyplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SKYPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:mindplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "MINDPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:insectplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "INSECTPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:stoneplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "STONEPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:spookyplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SPOOKYPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:dracoplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DRACOPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "plate_collection:dreadplate",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DREADPLATE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:plate_collection"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Plate Collection is active!",
+        "description": "A broad collection of type-enhancing Plates is temporarily available.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "exploration_curio_market_automated",
+      "label": "Exploration and Curio Market",
+      "description": "Encounter tools, Flutes, and collectible Shards are temporarily stocked.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "exploration_curio_market_pricing",
+          "label": "Exploration and Curio Market",
+          "operation": "discount_percent",
+          "value": 15,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:exploration_curio_market"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "exploration_curio_market:pokedoll",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POKEDOLL",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:fluffytail",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "FLUFFYTAIL",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:poketoy",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "POKETOY",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:honey",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "HONEY",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:smokeball",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "SMOKEBALL",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:cleansetag",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "CLEANSETAG",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:blackflute",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BLACKFLUTE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:whiteflute",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "WHITEFLUTE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:blueflute",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BLUEFLUTE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:yellowflute",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "YELLOWFLUTE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:redflute",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "REDFLUTE",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:redshard",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "REDSHARD",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:yellowshard",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "YELLOWSHARD",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:blueshard",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "BLUESHARD",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "exploration_curio_market:greenshard",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "GREENSHARD",
+          "category": "items",
+          "category_id": "items",
+          "category_ids": [
+            "items"
+          ],
+          "category_name": "ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:exploration_curio_market"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Exploration and Curio Market is active!",
+        "description": "Encounter tools, Flutes, and collectible Shards are temporarily stocked.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    },
+    {
+      "id": "battle_stat_supplies_automated",
+      "label": "Battle Stat Supplies",
+      "description": "Temporary in-battle stat boosters are stocked together.",
+      "priority": 0,
+      "pricing_rules": [
+        {
+          "id": "battle_stat_supplies_pricing",
+          "label": "Battle Stat Supplies",
+          "operation": "discount_percent",
+          "value": 20,
+          "priority": 0,
+          "mode": "buy",
+          "tags": [
+            "event_template:battle_stat_supplies"
+          ],
+          "exclusions": {}
+        }
+      ],
+      "temporary_entries": [
+        {
+          "id": "battle_stat_supplies:xattack",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "XATTACK",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "battle_stat_supplies:xdefense",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "XDEFENSE",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "battle_stat_supplies:xspatk",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "XSPATK",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "battle_stat_supplies:xspdef",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "XSPDEF",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "battle_stat_supplies:xspeed",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "XSPEED",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "battle_stat_supplies:xaccuracy",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "XACCURACY",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "battle_stat_supplies:direhit",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "DIREHIT",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "battle_stat_supplies:guardspec",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "GUARDSPEC",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "battle_stat_supplies:xattack2",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "XATTACK2",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        },
+        {
+          "id": "battle_stat_supplies:xdefense2",
+          "entry_version": 1,
+          "kind": "item",
+          "item": "XDEFENSE2",
+          "category": "battle_items",
+          "category_id": "battle_items",
+          "category_ids": [
+            "battle_items"
+          ],
+          "category_name": "BATTLE ITEMS",
+          "tags": [
+            "economy_event",
+            "event_template:battle_stat_supplies"
+          ],
+          "currency": "money",
+          "price": null,
+          "stock": null,
+          "stock_reset": "never"
+        }
+      ],
+      "display": {
+        "banner_text": "Battle Stat Supplies is active!",
+        "description": "Temporary in-battle stat boosters are stocked together.",
+        "show_countdown": true
+      },
+      "event_type": "automated",
+      "enabled": true
+    }
+  ]
+}

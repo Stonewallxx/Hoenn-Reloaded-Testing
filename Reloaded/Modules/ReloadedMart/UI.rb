@@ -89,10 +89,14 @@ module ReloadedMart
       end
 
       def banner_text(context = {}, entries = [])
-        raw = ReloadedMart::Source.curated_available? ? (ReloadedMart::Source.active_raw || {}) : {}
+        raw = ReloadedMart::Source.active_raw || {}
         parts = []
         banner = contextual_banner(raw, context)
         parts << banner unless banner.to_s.empty?
+        if defined?(ReloadedMart::EconomyEvents)
+          event_banner = ReloadedMart::EconomyEvents.banner_text(context)
+          parts << event_banner unless event_banner.to_s.empty?
+        end
         ReloadedMart::Economy.countdowns(context).each do |timer|
           next if timer[:label].to_s.empty?
           parts << "#{timer[:label]}: #{timer[:text]}"
@@ -532,8 +536,9 @@ class ReloadedMartBuyAdapter
   private
 
   def catalog_visible_entries
-    return [] unless ReloadedMart::Source.curated_available?
-    Array(ReloadedMart::Source.active_catalog).select do |entry|
+    rows = Array(ReloadedMart::Source.active_catalog)
+    rows += ReloadedMart::Economy.temporary_entries(context) if ReloadedMart::Economy.respond_to?(:temporary_entries)
+    dedupe_entries(rows).select do |entry|
       entry && entry.purchasable? && !ReloadedMart::Availability.hidden?(entry, context)
     end
   rescue
@@ -562,7 +567,7 @@ class ReloadedMartBuyAdapter
   def ordered_category_ids(rows = nil, daily_rows = nil)
     rows ||= visible_entries
     daily_rows ||= daily_featured_rows(rows)
-    raw = ReloadedMart::Source.curated_available? ? (ReloadedMart::Source.active_raw || {}) : {}
+    raw = ReloadedMart::Source.active_raw || {}
     categories = Array(raw["categories"] || raw[:categories]).select { |cat| cat.is_a?(Hash) }
     known = {}
     result = categories.map do |cat|
@@ -607,7 +612,7 @@ class ReloadedMartBuyAdapter
 
   def category_name_for(entry, category_id)
     return entry.category_name.to_s if entry.category_id.to_s == category_id.to_s && !entry.category_name.to_s.empty?
-    raw = ReloadedMart::Source.curated_available? ? (ReloadedMart::Source.active_raw || {}) : {}
+    raw = ReloadedMart::Source.active_raw || {}
     category = Array(raw["categories"] || raw[:categories]).find do |cat|
       cat.is_a?(Hash) && (cat["id"] || cat[:id]).to_s == category_id.to_s
     end
@@ -784,7 +789,8 @@ class ReloadedMartBuyScene
     @last_my = nil
     @list_state = nil
     @entry_list_key = nil
-    @manual_refresh_pending = false
+    @event_poll_frame = 0
+    @event_state_signature = nil
   end
 
   def pbStartBuyScene(adapter)
@@ -794,9 +800,13 @@ class ReloadedMartBuyScene
     @money_target = adapter.money
     Graphics.freeze
     setup_sprites
+    ReloadedMart.log_debug("Mart initial UI sprites ready") if defined?(ReloadedMart)
     rebuild_pockets
+    ReloadedMart.log_info("Mart initial UI catalog built pockets=#{@pockets.length}") if defined?(ReloadedMart)
     @catalog_refresh_version = (ReloadedMart::Source.active_report.catalog_version rescue nil)
     @catalog_refresh_source = (ReloadedMart::Source.active_source rescue nil)
+    @catalog_refresh_signature = catalog_refresh_signature
+    @event_state_signature = economy_event_signature
     if @pockets.empty?
       draw_all
       Graphics.transition(8)
@@ -828,13 +838,14 @@ class ReloadedMartBuyScene
       tick_qty_anim
       tick_banner
       next if poll_catalog_refresh
+      next if poll_economy_event_change
       tick_cursor
       if hint_triggered?
         show_hint_popup
         next
       end
-      if mart_refresh_triggered?
-        request_catalog_refresh
+      if mart_actions_triggered?
+        open_mart_actions
         next
       end
       return nil if @pockets.empty?
@@ -2530,7 +2541,7 @@ class ReloadedMartBuyScene
     else
       sort_name = sort_label
       quick = @quick_buy ? "On" : "Off"
-      hint = "Buy (C) | Back (B) | Favorite (A) | Refresh (Z) | Sort: #{sort_name} (L) | Quick Buy: #{quick} (R)"
+      hint = "Buy (C) | Back (B) | Favorite (A) | Actions (Z) | Sort: #{sort_name} (L) | Quick Buy: #{quick} (R)"
       shadow_text(bitmap, PAD, 2, SW - PAD * 2, FOOTER_H - 2, trim_text(bitmap, hint, SW - PAD * 2), WHITE)
     end
   end
@@ -2542,7 +2553,7 @@ class ReloadedMartBuyScene
       Reloaded::HintText.confirm("Buy"),
       Reloaded::HintText.back,
       Reloaded::HintText.action("Favorite"),
-      Reloaded::HintText.special("Refresh"),
+      Reloaded::HintText.special("Actions"),
       Reloaded::HintText.other("Sort: #{sort_name}", :sort),
       Reloaded::HintText.other("Quick Buy: #{quick}", :quick)
     ]
@@ -2553,7 +2564,6 @@ class ReloadedMartBuyScene
   def hint_statuses
     statuses = [Reloaded::HintText.status("Sort: #{sort_label}", BLUE)]
     statuses << Reloaded::HintText.status("Quick-Buy Mode", GREEN) if @quick_buy
-    statuses << Reloaded::HintText.status("Refreshing...", BLUE) if @manual_refresh_pending
     statuses
   rescue
     []
@@ -2664,36 +2674,32 @@ class ReloadedMartBuyScene
     return unless defined?(ReloadedMart::Source)
     result = ReloadedMart::Source.finish_online_refresh
     return if result.nil?
-    manual = @manual_refresh_pending
-    @manual_refresh_pending = false
     source = ReloadedMart::Source.active_source rescue nil
     version = ReloadedMart::Source.active_report.catalog_version rescue nil
-    unless result && source == :online_fresh
-      if manual
-        if defined?(Reloaded) && Reloaded.respond_to?(:toast_warning)
-          Reloaded.toast_warning("The Reloaded Mart could not be refreshed.")
-        else
-          show_message("The Reloaded Mart could not be refreshed.")
-        end
-        draw_footer
-        return true
-      end
-      return false
-    end
-    unchanged = @catalog_refresh_source == source && @catalog_refresh_version.to_s == version.to_s
-    return false if unchanged && !manual
+    return false unless result && source == :online_fresh
+    signature = catalog_refresh_signature
+    event_signature = economy_event_signature
+    unchanged = @catalog_refresh_source == source &&
+                @catalog_refresh_version.to_s == version.to_s &&
+                @catalog_refresh_signature == signature &&
+                @event_state_signature == event_signature
+    return false if unchanged
     @catalog_refresh_source = source
     @catalog_refresh_version = version
+    @catalog_refresh_signature = signature
+    @event_state_signature = event_signature
+    @adapter.clear_price_cache if @adapter.respond_to?(:clear_price_cache)
     rebuild_pockets
     @pocket_index = @pocket_index.clamp(0, [@pockets.length - 1, 0].max)
     @entry_index = @entry_index.clamp(0, [current_entries.length - 1, 0].max)
     setup_entry_list_state(@entry_index, entry_list_row_id(selected_entry))
     snap_quantity
     draw_all
+    ReloadedMart.log_info("Mart live scene rebuilt after catalog or event change") if defined?(ReloadedMart)
     if defined?(Reloaded) && Reloaded.respond_to?(:toast_ok)
-      Reloaded.toast_ok(manual ? "Mart refreshed." : "Mart updated.")
+      Reloaded.toast_ok("Mart updated.")
     else
-      show_message(manual ? "Mart refreshed." : "Mart updated.")
+      show_message("Mart updated.")
     end
     true
   rescue Exception => e
@@ -2701,31 +2707,230 @@ class ReloadedMartBuyScene
     false
   end
 
-  def mart_refresh_triggered?
+  def mart_actions_triggered?
     Input.trigger?(Input::SPECIAL)
   rescue
     false
   end
 
-  def request_catalog_refresh
-    return false unless defined?(ReloadedMart::Source)
-    running = ReloadedMart::Source.respond_to?(:refreshing?) && ReloadedMart::Source.refreshing?
-    started = ReloadedMart::Source.start_online_refresh
-    if started || running
-      @manual_refresh_pending = true
-      draw_footer
-      pbPlayDecisionSE rescue nil
-      return true
+  def open_mart_actions
+    return show_active_economy_event unless defined?(Reloaded::ActionMenu)
+    event = ReloadedMart::Economy.active_event(mart_context) rescue nil
+    event_label = event ? ReloadedMart::EconomyEvents.event_label(event) : ""
+    action = Reloaded::ActionMenu.choose(
+      "RLD Mart",
+      [
+        {
+          :id => :view_event,
+          :label => event_label.empty? ? "View Event" : "View Event: #{event_label}",
+          :enabled => !event.nil?,
+          :disabled_reason => "There is no active Economy Event."
+        }
+      ],
+      nil,
+      :start_id => :view_event,
+      :list_state => @list_state,
+      :back_label => "Back"
+    )
+    case action
+    when :view_event
+      show_active_economy_event
     end
-    if defined?(Reloaded) && Reloaded.respond_to?(:toast_warning)
-      Reloaded.toast_warning("The Reloaded Mart refresh could not be started.")
-    else
-      show_message("The Reloaded Mart refresh could not be started.")
-    end
-    false
+    draw_all
+    true
   rescue Exception => e
-    ReloadedMart.log_exception("Reloaded Mart manual refresh failed", e) if defined?(ReloadedMart)
+    ReloadedMart.log_exception("Reloaded Mart actions failed", e) if defined?(ReloadedMart)
     false
+  ensure
+    entry_list_dialog_closed!
+  end
+
+  def show_active_economy_event
+    event = ReloadedMart::Economy.active_event(mart_context) rescue nil
+    return false unless event
+    event_id = ReloadedMart::EconomyEvents.event_id(event)
+    event_label = ReloadedMart::EconomyEvents.event_label(event)
+    countdown = ReloadedMart::EconomyEvents.countdowns(mart_context).first
+    time_text = countdown ? countdown[:text].to_s : "Ending Soon"
+    discount_text = economy_event_discount_text(event)
+    icon_items = economy_event_icon_items(event)
+    shown = if defined?(Reloaded::Toast) && Reloaded::Toast.respond_to?(:custom)
+              Reloaded::Toast.custom(
+                " ",
+                :theme => :hr,
+                :width => 384,
+                :body_height => 130,
+                :ok_text_offset_y => -7
+              ) do |bitmap, rect|
+                draw_economy_event_toast(
+                  bitmap,
+                  rect,
+                  event_label,
+                  time_text,
+                  discount_text,
+                  icon_items
+                )
+              end
+            elsif defined?(Reloaded) && Reloaded.respond_to?(:message)
+              Reloaded.message([event_label, time_text, discount_text].join("\n"))
+            else
+              show_message([event_label, time_text, discount_text].join("\n"))
+            end
+    unless shown
+      show_message([event_label, time_text, discount_text].join("\n"))
+    end
+    ReloadedMart.log_info("Displayed Economy Event id=#{event_id} type=#{ReloadedMart::EconomyEvents.event_type(event)}") if defined?(ReloadedMart)
+    true
+  rescue Exception => e
+    ReloadedMart.log_exception("Economy Event display failed", e) if defined?(ReloadedMart)
+    false
+  ensure
+    entry_list_dialog_closed!
+  end
+
+  def economy_event_discount_text(event)
+    values = []
+    ReloadedMart::EconomyEvents.pricing_rules(event).each do |rule|
+      next unless rule.is_a?(Hash)
+      operation = (rule["operation"] || rule[:operation] || rule["type"] || rule[:type]).to_s
+      value = (rule["value"] || rule[:value]).to_i
+      if operation == "discount_percent"
+        values << value.abs
+      elsif operation == "percent" && value < 0
+        values << value.abs
+      end
+    end
+    return "SPECIAL PRICING" if values.empty?
+    "#{values.max}% OFF"
+  rescue
+    "SPECIAL PRICING"
+  end
+
+  def economy_event_icon_items(event)
+    rows = @adapter && @adapter.respond_to?(:visible_entries) ? @adapter.visible_entries : []
+    discounted = Array(rows).select do |entry|
+      rule = ReloadedMart::EconomyEvents.matching_rule(event, entry, mart_context)
+      economy_event_discount_rule?(rule)
+    end
+    candidates = discounted
+    if candidates.empty?
+      candidates = Array(rows).select do |entry|
+        ReloadedMart::EconomyEvents.matching_rule(event, entry, mart_context)
+      end
+    end
+    candidates = ReloadedMart::EconomyEvents.temporary_entries(mart_context) if candidates.empty?
+    item_ids = candidates.map { |entry| @adapter.icon_item(entry) rescue nil }.compact.uniq
+    item_ids.shuffle.first(2)
+  rescue
+    []
+  end
+
+  def economy_event_discount_rule?(rule)
+    return false unless rule.is_a?(Hash)
+    operation = (rule["operation"] || rule[:operation] || rule["type"] || rule[:type]).to_s
+    value = (rule["value"] || rule[:value]).to_i
+    operation == "discount_percent" || (operation == "percent" && value < 0)
+  rescue
+    false
+  end
+
+  def draw_economy_event_toast(bitmap, rect, event_label, time_text, discount_text, icon_items)
+    line_height = 27
+    group_height = line_height * 3
+    start_y = rect[:y] + ([rect[:height] - group_height, 0].max / 2)
+    content_x = rect[:x]
+    content_w = rect[:width]
+    bitmap.font.size = 25 rescue nil
+    display_label = trim_text(bitmap, event_label, [content_w - 188, 120].max)
+    plain_text(bitmap, content_x, start_y, content_w, line_height, display_label, BLUE, 1)
+    icon_y = start_y + (group_height - 90) / 2
+    draw_economy_event_icons(bitmap, display_label, icon_y, content_x, content_w, icon_items)
+    plain_text(bitmap, content_x, start_y + line_height, content_w, line_height, time_text, GOLD, 1)
+    plain_text(bitmap, content_x, start_y + line_height * 2, content_w, line_height, discount_text, GREEN, 1)
+  rescue Exception => e
+    ReloadedMart.log_exception("Economy Event toast drawing failed", e) if defined?(ReloadedMart)
+  ensure
+    pbSetSmallFont(bitmap) rescue nil
+  end
+
+  def draw_economy_event_icons(bitmap, label, y, x, width, item_ids)
+    ids = Array(item_ids).first(2)
+    return if ids.empty?
+    icon_size = 90
+    gap = 4
+    label_width = bitmap.text_size(label.to_s).width rescue 120
+    center = x + width / 2
+    positions = [center - label_width / 2 - gap - icon_size, center + label_width / 2 + gap]
+    ids.each_with_index do |item_id, index|
+      draw_economy_event_item_icon(bitmap, item_id, positions[index], y, icon_size)
+    end
+  rescue
+  end
+
+  def draw_economy_event_item_icon(bitmap, item_id, x, y, size)
+    path = GameData::Item.icon_filename(item_id) rescue nil
+    return if path.to_s.empty?
+    icon = pbBitmap(path)
+    return unless icon && !icon.disposed? && icon.width > 1 && icon.height > 1
+    source_width = icon.height == 48 && icon.width >= 48 ? 48 : icon.width
+    source_height = icon.height == 48 ? 48 : icon.height
+    bitmap.stretch_blt(
+      Rect.new(x.to_i, y.to_i, size, size),
+      icon,
+      Rect.new(0, 0, source_width, source_height)
+    )
+  rescue
+  end
+
+  def poll_economy_event_change
+    return false unless defined?(ReloadedMart::EconomyEvents)
+    @event_poll_frame = (@event_poll_frame.to_i + 1) % 60
+    return false unless @event_poll_frame == 0
+    signature = economy_event_signature
+    return false if signature == @event_state_signature
+    @event_state_signature = signature
+    @adapter.clear_price_cache if @adapter.respond_to?(:clear_price_cache)
+    rebuild_pockets
+    @pocket_index = @pocket_index.clamp(0, [@pockets.length - 1, 0].max)
+    @entry_index = @entry_index.clamp(0, [current_entries.length - 1, 0].max)
+    setup_entry_list_state(@entry_index, entry_list_row_id(selected_entry))
+    snap_quantity
+    draw_all
+    if defined?(Reloaded) && Reloaded.respond_to?(:toast_ok)
+      Reloaded.toast_ok("Mart event updated.")
+    end
+    true
+  rescue Exception => e
+    ReloadedMart.log_exception("Economy Event rollover failed", e) if defined?(ReloadedMart)
+    false
+  end
+
+  def catalog_refresh_signature
+    raw = ReloadedMart::Source.active_raw rescue nil
+    [ReloadedMart::Source.active_source, raw.hash]
+  rescue
+    nil
+  end
+
+  def economy_event_signature
+    event = ReloadedMart::Economy.active_event(mart_context) rescue nil
+    return :none unless event
+    [
+      ReloadedMart::EconomyEvents.event_id(event),
+      event["available_from"] || event[:available_from],
+      event["available_until"] || event[:available_until],
+      ReloadedMart::EconomyEvents.pricing_rules(event).hash,
+      Array(event["temporary_entries"] || event[:temporary_entries]).hash
+    ]
+  rescue
+    :none
+  end
+
+  def mart_context
+    return @adapter.context if @adapter && @adapter.respond_to?(:context)
+    { :source => :reloaded_mart, :mode => :buy }
+  rescue
+    { :source => :reloaded_mart, :mode => :buy }
   end
 
   def draw_modal_choices(bitmap, choices, selected, x, y, width, line_h)
