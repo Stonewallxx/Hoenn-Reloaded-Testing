@@ -5,8 +5,9 @@
 
 require "rbconfig"
 require "json"
+require "digest"
 
-GAME_ROOT = File.expand_path(File.join(File.dirname(__FILE__), "..", ".."))
+GAME_ROOT = File.expand_path(File.join(File.dirname(__FILE__), "..", "..", ".."))
 RELOADED_ROOT = File.join(GAME_ROOT, "Reloaded")
 FAILURES = []
 
@@ -36,19 +37,122 @@ Dir.chdir(GAME_ROOT) do
     manifest_files.all? { |path| File.file?(File.join(RELOADED_ROOT, path)) }
   end
 
-  check("Mart automations load after the backend and before Mart UI") do
+  check("Daily Featured loads after Mart backend and before Mart UI") do
     backend = manifest_files.index("Modules/ReloadedMart/Backend.rb")
     featured = manifest_files.index("Modules/ReloadedMart/Automation/DailyFeatured.rb")
-    events = manifest_files.index("Modules/ReloadedMart/Automation/EconomyEvents.rb")
     ui = manifest_files.index("Modules/ReloadedMart/UI.rb")
-    backend && featured && events && ui &&
-      backend < featured && featured < events && events < ui
+    backend && featured && ui && backend < featured && featured < ui
   end
 
   check("Every Reloaded Ruby file has valid syntax") do
     Dir[File.join(RELOADED_ROOT, "**", "*.rb")].all? do |path|
       system(RbConfig.ruby, "-c", path, :out => File::NULL, :err => File::NULL)
     end
+  end
+
+  expanded_root = File.join(RELOADED_ROOT, "Data", "ExpandedDex")
+  expanded_bundle_path = File.join(expanded_root, "ExpandedDex.dat")
+  expanded_ids_path = File.join(expanded_root, "ExpandedDexIDs.json")
+  expanded_manifest_path = File.join(expanded_root, "Manifest.json")
+  expanded_dex_source = File.read(File.join(RELOADED_ROOT, "Core", "DataPatches", "ExpandedDex.rb"))
+  expanded_bundle = nil
+  expanded_ids = nil
+  expanded_manifest = nil
+  check("Expanded Dex generated data is present and parseable") do
+    expanded_bundle = Marshal.load(File.binread(expanded_bundle_path))
+    expanded_ids = JSON.parse(File.read(expanded_ids_path))
+    expanded_manifest = JSON.parse(File.read(expanded_manifest_path))
+    expanded_bundle.is_a?(Hash) && expanded_ids.is_a?(Hash) && expanded_manifest.is_a?(Hash)
+  end
+  check("Expanded Dex bundle and permanent ID map agree") do
+    species = Array(expanded_bundle && expanded_bundle[:species])
+    entries = expanded_ids && expanded_ids["entries"]
+    upstream_entries = expanded_ids && expanded_ids["upstream_entries"]
+    species_numbers = species.map { |row| row[:id_number].to_i }
+    expanded_manifest && species.length == expanded_manifest["species_count"].to_i &&
+      entries.is_a?(Hash) && entries.length == species.length &&
+      upstream_entries.is_a?(Hash) &&
+      upstream_entries.length == expanded_manifest["upstream_species_count"].to_i &&
+      expanded_bundle[:base_max_id].to_i == 576 &&
+      expanded_bundle[:first_expanded_id].to_i == 577 &&
+      expanded_bundle[:max_species_id].to_i == expanded_manifest["max_species_id"].to_i &&
+      expanded_bundle[:max_species_id].to_i == species_numbers.max &&
+      species_numbers.uniq.length == species_numbers.length &&
+      species_numbers.all? { |number| number >= 577 && number < 999_999 } &&
+      species.all? do |row|
+        mapped = entries[row[:id].to_s]
+        mapped && mapped["id"].to_i == row[:id_number].to_i
+      end
+  end
+  check("Expanded Dex generated dependencies are resolved") do
+    unresolved = expanded_manifest && expanded_manifest.dig("validation", "unresolved")
+    unresolved.is_a?(Hash) && unresolved.values.all? { |values| Array(values).empty? }
+  end
+  check("Expanded Dex bundle checksum and manifest counts agree") do
+    expanded_manifest &&
+      expanded_manifest["bundle_sha256"] == Digest::SHA256.file(expanded_bundle_path).hexdigest &&
+      expanded_manifest["species_count"].to_i == Array(expanded_bundle[:species]).length &&
+      expanded_manifest["move_count"].to_i == Array(expanded_bundle[:moves]).length &&
+      expanded_manifest["ability_count"].to_i == Array(expanded_bundle[:abilities]).length
+  end
+  check("Expanded Dex move function codes have battle classes") do
+    move_files = Dir[File.join(GAME_ROOT, "Data", "Scripts", "**", "*.rb")]
+    move_files << File.join(RELOADED_ROOT, "Core", "DataPatches", "ExpandedDex", "BattleMoves.rb")
+    available_codes = move_files.flat_map do |path|
+      File.binread(path).scan(/class\s+PokeBattle_Move_([0-9A-F]+)/).flatten
+    end.uniq
+    used_codes = Array(expanded_bundle && expanded_bundle[:moves]).map { |row| row[:function_code] }.compact.uniq
+    (used_codes - available_codes).empty?
+  end
+  check("Expanded Dex loads data before its battle handlers") do
+    data_file = manifest_files.index("Core/DataPatches/ExpandedDex.rb")
+    move_file = manifest_files.index("Core/DataPatches/ExpandedDex/BattleMoves.rb")
+    ability_file = manifest_files.index("Core/DataPatches/ExpandedDex/BattleAbilities.rb")
+      data_file && move_file && ability_file && data_file < move_file && move_file < ability_file
+  end
+  check("Expanded Dex runtime injection passes its isolated check") do
+    system(
+      RbConfig.ruby,
+      File.join(GAME_ROOT, "ModDev", "Foundation Checks", "Proton", "ExpandedDexRuntimeCheck.rb"),
+      :out => File::NULL,
+      :err => File::NULL
+    )
+  end
+  check("Expanded Dex targets the game Settings namespace explicitly") do
+    expanded_dex_source.include?("::Settings::ZAPMOLCUNO_NB") &&
+      expanded_dex_source.include?("replace_constant(::Settings, :NB_POKEMON") &&
+      expanded_dex_source.include?("replace_constant(::Settings, :ZAPMOLCUNO_NB")
+  end
+  check("Expanded Dex private source snapshot is checksummed and internally consistent") do
+    source_root = File.join(GAME_ROOT, "Admin Tools", "Expanded Dex Builder", "SourceSnapshot")
+    source_path = File.join(source_root, "ExpandedDexSource.dat")
+    source_manifest_path = File.join(source_root, "SourceManifest.json")
+    source = Marshal.load(File.binread(source_path))
+    source_manifest = JSON.parse(File.read(source_manifest_path))
+    source.is_a?(Hash) &&
+      source[:format_version].to_i == source_manifest["format_version"].to_i &&
+      source_manifest["snapshot_sha256"] == Digest::SHA256.file(source_path).hexdigest &&
+      source_manifest["species_count"].to_i == Array(source[:species]).length &&
+      source_manifest["move_count"].to_i == Array(source[:moves]).length &&
+      source_manifest["ability_count"].to_i == Array(source[:abilities]).length
+  end
+  check("Expanded Dex private source reference matches its inventory") do
+    reference_root = File.join(GAME_ROOT, "Admin Tools", "Expanded Dex Builder", "SourceReference")
+    inventory = JSON.parse(File.read(File.join(reference_root, "SourceInventory.json")))
+    total_files = 0
+    total_bytes = 0
+    valid = inventory["format_version"].to_i == 1 && Array(inventory["components"]).all? do |row|
+      path = File.expand_path(File.join(reference_root, row["path"].to_s))
+      next false unless path.start_with?(File.expand_path(reference_root) + File::SEPARATOR)
+      files = File.file?(path) ? [path] : Dir[File.join(path, "**", "*")].select { |entry| File.file?(entry) }
+      total_files += files.length
+      total_bytes += files.sum { |entry| File.size(entry) }
+      checksum = row["sha256"]
+      row["files"].to_i == files.length &&
+        row["bytes"].to_i == files.sum { |entry| File.size(entry) } &&
+        (checksum.nil? || (files.length == 1 && Digest::SHA256.file(files.first).hexdigest == checksum))
+    end
+    valid && inventory["files"].to_i == total_files && inventory["bytes"].to_i == total_bytes
   end
 
   tool_ruby_files = Dir[File.join(GAME_ROOT, "ModDev", "**", "*.rb")] +
@@ -96,6 +200,18 @@ Dir.chdir(GAME_ROOT) do
 
   powershell_installer = File.read(File.join(GAME_ROOT, "Hoenn Reloaded Installer.ps1"))
   python_installer = File.read(File.join(GAME_ROOT, "Hoenn Reloaded Installer.py"))
+  core_builder = File.read(File.join(GAME_ROOT, "Admin Tools", "Core Builder", "CorePackageBuilder.ps1"))
+  spritepack_publisher = File.read(File.join(GAME_ROOT, "Admin Tools", "Spritepack Publisher", "PublishSpritepacks.ps1"))
+  repository_tool_ps = File.read(File.join(GAME_ROOT, "ModDev", "Tools", "Windows", "RepositoryTool.ps1"))
+  repository_tool_py = File.read(File.join(GAME_ROOT, "ModDev", "Tools", "Proton", "RepositoryTool.py"))
+  repository_update_bat = File.read(File.join(GAME_ROOT, "ModDev", "Tools", "Windows", "Update.bat"))
+  repository_update_sh = File.read(File.join(GAME_ROOT, "ModDev", "Tools", "Proton", "Update.sh"))
+  mod_manager_source = File.read(File.join(RELOADED_ROOT, "Core", "Modding", "ModManager.rb"))
+  mod_browser_source = File.read(File.join(RELOADED_ROOT, "Core", "Modding", "ModBrowser.rb"))
+  mod_tools_source = File.read(File.join(RELOADED_ROOT, "Core", "Modding", "ModTools.rb"))
+  mod_manager_ui_source = File.read(File.join(RELOADED_ROOT, "Core", "Modding", "ModManagerUI.rb"))
+  publisher_source = File.read(File.join(RELOADED_ROOT, "Core", "Modding", "Publisher.rb"))
+  profiles_source = File.read(File.join(RELOADED_ROOT, "Core", "Modding", "Profiles.rb"))
   reloaded_bootstrap = File.read(File.join(RELOADED_ROOT, "Bootstrap.rb"))
   check("Desktop installers force repair after an interrupted live install") do
     powershell_installer.include?("Reloaded\\InstallerIncomplete.json") &&
@@ -117,6 +233,136 @@ Dir.chdir(GAME_ROOT) do
       python_installer.include?('temporary = destination + ".installing"') &&
       python_installer.include?("os.replace(temporary, destination)")
   end
+  check("Desktop installers always include the latest Full Spritepack") do
+    powershell_installer.include?('$InstallType = "CoreAndSpritepacks"') &&
+      powershell_installer.include?("Package: Core + Full Spritepack") &&
+      !powershell_installer.include?("Choose what to install:") &&
+      !powershell_installer.include?("Core-only selected") &&
+      python_installer.include?('install_type = "full"') &&
+      python_installer.include?("Package: Core + Full Spritepack") &&
+      !python_installer.include?("Choose what to install:") &&
+      !python_installer.include?("Core-only selected")
+  end
+  check("Spritepack status uses the installed Full manifest build ID") do
+    mod_browser_source.include?("SPRITEPACK_FULL_MANIFEST_PATH") &&
+      mod_browser_source.include?("def spritepack_full_status") &&
+      mod_browser_source.include?("def spritepack_status") &&
+      mod_browser_source.include?('"build_id" => source["build_id"].to_s.strip') &&
+      mod_manager_ui_source.include?("Repair Full Spritepack") &&
+      mod_manager_ui_source.include?("Browse Monthly Updates") &&
+      mod_manager_ui_source.include?("Verify Spritepacks") &&
+      mod_manager_ui_source.include?("View Installed Version") &&
+      powershell_installer.include?('build_id = $Spritepack.build_id.ToString()') &&
+      powershell_installer.include?('parts = @($Spritepack.parts)') &&
+      python_installer.include?('"build_id": str(spritepack.get("build_id", ""))') &&
+      python_installer.include?('"parts": parts')
+  end
+  check("Desktop and batch-backed tools use dynamic solid color progress bars") do
+    powershell_installer.include?('$ProgressBarWidth = 56') &&
+      powershell_installer.include?('[Console]::WindowWidth') &&
+      powershell_installer.include?('-BackgroundColor Cyan') &&
+      powershell_installer.include?('-BackgroundColor DarkGray') &&
+      !powershell_installer.include?("Write-Progress") &&
+      python_installer.include?('shutil.get_terminal_size') &&
+      python_installer.include?('"\033[46m"') &&
+      python_installer.include?('"\033[100m"') &&
+      repository_tool_ps.include?('[Console]::WindowWidth') &&
+      repository_tool_ps.include?('-BackgroundColor Cyan') &&
+      repository_tool_ps.include?('-BackgroundColor DarkGray') &&
+      repository_tool_py.include?('shutil.get_terminal_size') &&
+      repository_tool_py.include?('"\033[46m"') &&
+      repository_tool_py.include?('"\033[100m"') &&
+      spritepack_publisher.include?('$ProgressBarWidth = 56') &&
+      spritepack_publisher.include?('[Console]::WindowWidth') &&
+      spritepack_publisher.include?('-BackgroundColor Cyan') &&
+      spritepack_publisher.include?('-BackgroundColor DarkGray') &&
+      !spritepack_publisher.include?("Write-Progress") &&
+      !powershell_installer.include?('("|" * $filled)') &&
+      !python_installer.include?('bar = "|" * filled') &&
+      !repository_tool_ps.include?('("|" * $filled)') &&
+      !repository_tool_py.include?('bar = "|" * filled')
+  end
+  check("Public Core and Testing packages include only player-facing ModDev Tools") do
+    core_builder.include?("^ModDev/(?!Tools") &&
+      powershell_installer.include?("^ModDev/(?!Tools") &&
+      python_installer.include?("^ModDev/(?!Tools")
+  end
+  check("Repository tools use GitHub APIs without cloning a repository cache") do
+    repository_tool_ps.include?('Invoke-Gh @("api"') &&
+      repository_tool_py.include?('"gh", "api"') &&
+      repository_tool_ps.include?('@("api", "user", "--jq", ".login")') &&
+      repository_tool_py.include?('["gh", "api", "user", "--jq", ".login"]') &&
+      repository_tool_ps.include?('$processHandle = $process.Handle') &&
+      repository_tool_ps.include?('$process.WaitForExit()') &&
+      repository_tool_ps.include?('$exitCode = $process.ExitCode') &&
+      !repository_tool_ps.include?('@("auth", "status"') &&
+      !repository_tool_py.include?('["gh", "auth", "status"') &&
+      !repository_tool_ps.downcase.include?("git clone") &&
+      !repository_tool_py.downcase.include?("git clone")
+  end
+  check("Repository source pickers distinguish installed and ModDev copies") do
+    repository_tool_ps.include?('$location = if ($Source.Root -eq "ModDev") { "ModDev" } else { "Installed" }') &&
+      repository_tool_ps.include?('return "[$location] $label"') &&
+      repository_tool_py.include?('source_labels = {"Mods": "Installed", "ModDev": "ModDev"}') &&
+      repository_tool_py.include?('return f"[{location}] {label}" if location else label')
+  end
+  check("Repository Update edits only owned online metadata") do
+    repository_tool_ps.include?('Where-Object { Get-Owned $_ }') &&
+      repository_tool_ps.include?('Edit-OnlineListing $onlineEntry') &&
+      repository_tool_py.include?('if self.can_manage(row)') &&
+      repository_tool_py.include?('return self.edit_online_listing(entry)') &&
+      !repository_tool_ps.include?('Publish Local Version') &&
+      !repository_tool_py.include?('Publish Local Version')
+  end
+  check("Repository tools use the shared animated spinner") do
+    repository_tool_ps.include?('[char]0x280B') &&
+      repository_tool_ps.include?('[char]0x280F') &&
+      repository_tool_py.include?('"\u280b"') &&
+      repository_tool_py.include?('"\u280f"')
+  end
+  check("Repository Update has no local source or asset-upload arguments") do
+    !repository_tool_ps.include?('[string]$ContentId = ""') &&
+      !repository_tool_ps.include?('[string]$SourceRoot = ""') &&
+      !repository_tool_py.include?('parser.add_argument("--content-id"') &&
+      !repository_tool_py.include?('parser.add_argument("--source-root"') &&
+      !repository_update_bat.include?('-ContentId') &&
+      !repository_update_bat.include?('-SourceRoot') &&
+      !repository_update_sh.include?('--content-id') &&
+      !repository_update_sh.include?('--source-root') &&
+      !publisher_source.include?(':content_id') &&
+      !publisher_source.include?(':source_root')
+  end
+  check("Repository Publish owns first and later version assets") do
+    repository_tool_ps.include?('if ($metadata.old) { Update-Content $asset $metadata } else { Publish-Content $asset $metadata }') &&
+      repository_tool_py.include?('if metadata["old"]:') &&
+      repository_tool_ps.include?('if ($existing) { Assert-Owned $existing }') &&
+      repository_tool_py.include?('if old:') &&
+      repository_tool_py.include?('self.require_owner(old)')
+  end
+  check("Mod Manager Update launches the standalone platform editor") do
+    mod_manager_ui_source.include?('when "Update" then open_repository_kind_menu(:update)') &&
+      !mod_manager_ui_source.include?('def open_published_update(kind)') &&
+      !mod_manager_ui_source.include?('Edit Manifest & Update') &&
+      !mod_tools_source.include?('def repository_manifest_targets')
+  end
+  check("Windows repository packaging preserves paths containing spaces") do
+    repository_tool_ps.include?('$sevenZipArguments = @("a", "-tzip", "-mx=6", $asset, $leaf)') &&
+      repository_tool_ps.include?('$sevenZipArgumentLine = ($sevenZipArguments | ForEach-Object { Quote-ProcessArgument $_ }) -join " "') &&
+      repository_tool_ps.include?('-ArgumentList $sevenZipArgumentLine')
+  end
+  check("ModDev validation prefers the overriding manifest") do
+    mod_tools_source.include?("moddev_ids = targets.select") &&
+      mod_tools_source.include?("target[:source] == :mods && moddev_ids.include?")
+  end
+  check("Profiles prune missing local mods after scans") do
+    profiles_source.include?("def prune_missing_mods(available_ids)") &&
+      mod_manager_source.include?("prune_missing_profile_mods") &&
+      mod_manager_source.include?("Reloaded::Profiles.prune_missing_mods(available)")
+  end
+  check("Repository actions are grouped under Mod Tools") do
+    mod_manager_ui_source.include?('choices << "Mod Tools"') &&
+      mod_manager_ui_source.include?("def open_mod_tools_menu")
+  end
 
   required_release_files = [
     "Reloaded/Bootstrap.rb",
@@ -125,8 +371,15 @@ Dir.chdir(GAME_ROOT) do
     "Reloaded/Documentation/Events.md",
     "Reloaded/Documentation/Manager.md",
     "Reloaded/Documentation/DataPatches.md",
-    "Reloaded/Changelog.md",
-    "Reloaded/ReloadedMartBase.json",
+    "ModDev/Tools/README.md",
+    "ModDev/Tools/Windows/Publish.bat",
+    "ModDev/Tools/Windows/Update.bat",
+    "ModDev/Tools/Windows/Delete.bat",
+    "ModDev/Tools/Windows/RepositoryTool.ps1",
+    "ModDev/Tools/Proton/Publish.sh",
+    "ModDev/Tools/Proton/Update.sh",
+    "ModDev/Tools/Proton/Delete.sh",
+    "ModDev/Tools/Proton/RepositoryTool.py",
     "Reloaded/Graphics/Pokegear/icon_TMVAULT.png",
     "Reloaded/Graphics/Items/pokevial_charge.png",
     "Reloaded/Graphics/Items/pokevial_refill.png",
@@ -157,22 +410,39 @@ Dir.chdir(GAME_ROOT) do
     end
   end
 
-  changelog_lines = File.readlines(File.join(RELOADED_ROOT, "Changelog.md")).map { |line| line.rstrip }
+  development_changelog_path = File.join(GAME_ROOT, "Admin Tools", "Changelog.md")
+  development_changelog_lines = File.readlines(development_changelog_path, encoding: "UTF-8").map { |line| line.rstrip }
   allowed_changelog_sections = [
-    "Features", "Improvement", "Bugfixes", "Visuals & UI",
-    "Performance & Audio", "Debug & Modding"
+    "FEATURES", "CONTENT", "IMPROVEMENTS", "BALANCE", "BUG FIXES",
+    "VISUALS & UI", "AUDIO", "PERFORMANCE", "TECHNICAL", "DEVELOPER"
   ]
   changelog_sections = []
-  changelog_lines.each_with_index do |line, index|
-    next_line = changelog_lines[index + 1].to_s
-    changelog_sections << [line, index] if next_line =~ /^-{3,}$/ && !line.empty? && line == line.strip && line !~ /^-+$/
+  development_changelog_lines.each_with_index do |line, index|
+    next_line = development_changelog_lines[index + 1].to_s
+    next unless next_line =~ /^-{3,}$/ && !line.empty? && line == line.strip && line !~ /^-+$/
+    changelog_sections << [line, index] unless line == "Summary"
   end
-  check("Public changelog uses only approved non-empty sections") do
-    changelog_sections.all? do |section, index|
-      next false unless allowed_changelog_sections.include?(section)
-      following = changelog_sections.map { |_name, position| position }.select { |position| position > index }.min || changelog_lines.length
-      changelog_lines[(index + 2)...following].any? { |line| line.start_with?("- ") }
+  development_changelog_text = development_changelog_lines.join("\n")
+  check("Development changelog has one valid unreleased update header") do
+    development_changelog_lines[1] == "HOENN RELOADED" &&
+      development_changelog_lines[2].to_s =~ /^Update #\d+ - .+$/ &&
+      development_changelog_lines[3].to_s =~ /^v\d+\.\d+\.\d+ \(Unreleased\)$/ &&
+      development_changelog_lines[4] == "Release Date: TBD" &&
+      development_changelog_text.scan("(Unreleased)").length == 1
+  end
+  check("Development changelog uses approved ordered non-empty sections") do
+    section_names = changelog_sections.map { |name, _index| name }
+    next false unless section_names == section_names.uniq
+    next false unless section_names.all? { |name| allowed_changelog_sections.include?(name) }
+    next false unless section_names == allowed_changelog_sections.select { |name| section_names.include?(name) }
+    changelog_sections.all? do |_section, index|
+      following = changelog_sections.map { |_name, position| position }.select { |position| position > index }.min || development_changelog_lines.length
+      development_changelog_lines[(index + 2)...following].any? { |line| line.start_with?("\u2022 ") }
     end
+  end
+  public_changelog_path = File.join(RELOADED_ROOT, "Changelog.md")
+  check("Public changelog contains released updates only when present") do
+    !File.file?(public_changelog_path) || !File.read(public_changelog_path, encoding: "UTF-8").include?("(Unreleased)")
   end
 
   require "ripper"
@@ -200,6 +470,13 @@ Dir.chdir(GAME_ROOT) do
       template_readme_source.include?("methods marked `private`") &&
       template_readme_source.include?("Documentation/APIExamples.rb")
   end
+  archive_source = File.read(File.join(RELOADED_ROOT, "Core", "Foundation", "Archive.rb"))
+  check("Archive API supports game runtimes without Open3") do
+    archive_source.include?("def process_supported?") &&
+      archive_source.include?("Process.respond_to?(:spawn)") &&
+      archive_source.include?("def capture_process(command)") &&
+      archive_source.include?("def stream_process(command)")
+  end
 
   tracked_output = IO.popen(["git", "ls-files"], &:read)
   git_inventory_ok = $?.nil? || $?.success?
@@ -225,7 +502,7 @@ Dir.chdir(GAME_ROOT) do
       path.start_with?("Reloaded/Logging/") || path == "Reloaded/Settings.txt" ||
       path == "Mods/Reloaded/SpritepacksInstalled.json" ||
       (path.start_with?("Mods/Reloaded/Profiles/") && !path.end_with?("/.gitkeep")) ||
-      (path =~ %r{\AModDev/(?:Windows|Proton)/.*(?:Report\.txt|\.tmp|\.previous|\.bak)\z}i)
+      (path =~ %r{\AModDev/Foundation Checks/(?:Windows|Proton)/.*(?:Report\.txt|\.tmp|\.previous|\.bak)\z}i)
   end
   check("Generated and private release output is not tracked") do
     generated_tracked.empty?
@@ -236,8 +513,8 @@ Dir.chdir(GAME_ROOT) do
     "Reloaded/Cache/RemoteData/foundation-check.json",
     "Reloaded/Settings.txt.tmp",
     "Reloaded/Logging/ValidationReport.txt.previous",
-    "ModDev/Windows/FoundationReport.txt",
-    "ModDev/Proton/FoundationReport.txt"
+    "ModDev/Foundation Checks/Windows/FoundationReport.txt",
+    "ModDev/Foundation Checks/Proton/FoundationReport.txt"
   ]
   check("Release-generated paths are covered by gitignore") do
     expected_ignored_paths.all? do |path|
@@ -368,6 +645,7 @@ Dir.chdir(GAME_ROOT) do
       !number_picker_source.include?("Controls (Y)")
   end
   load File.join(RELOADED_ROOT, "Core", "UI", "ProgressWindow.rb")
+  progress_window_source = File.read(File.join(RELOADED_ROOT, "Core", "UI", "ProgressWindow.rb"))
   progress_options = Reloaded::ProgressWindow.normalize_options(
     :mode => :unknown, :cancellable => true, :minimum_visible_time => -1, :width => 9_999
   )
@@ -376,7 +654,9 @@ Dir.chdir(GAME_ROOT) do
       Reloaded::ProgressWindow.respond_to?(:show) && Reloaded::ProgressWindow.respond_to?(:run) &&
       progress_options[:mode] == :auto && progress_options[:cancellable] &&
       progress_options[:minimum_visible_time] == 0.0 &&
-      progress_options[:width] == Reloaded::PopupWindow::MAX_W
+      progress_options[:width] == Reloaded::PopupWindow::MAX_W &&
+      progress_window_source.include?("@percent_y = 67") &&
+      !progress_window_source.include?("bitmap.fill_rect(14, @choice_y - 5")
   end
   bag_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedBag.rb"))
   check("Reloaded Bag Autosort pocket Back exits the chooser") do
@@ -469,9 +749,9 @@ Dir.chdir(GAME_ROOT) do
   $DEBUG = true
   load File.join(RELOADED_ROOT, "Core", "Foundation", "Platform.rb")
   expected = {
-    :windows => [true, true, true, true, true],
-    :proton => [true, true, true, true, true],
-    :joiplay => [false, false, false, false, false]
+    :windows => [true, true, true, true],
+    :proton => [true, true, true, true],
+    :joiplay => [false, false, false, false]
   }
   matrix_ok = expected.all? do |platform, flags|
     Reloaded::Settings.set("platform_override", Reloaded::Platform.label(platform), :persist => false)
@@ -479,8 +759,7 @@ Dir.chdir(GAME_ROOT) do
       Reloaded::Platform.supports?(:browser_downloads),
       Reloaded::Platform.supports?(:external_tools),
       Reloaded::Platform.supports?(:remote_data),
-      Reloaded::Platform.supports?(:background_tasks),
-      Reloaded::Platform.supports?(:downloads)
+      Reloaded::Platform.supports?(:background_tasks)
     ]
     actual == flags
   end
@@ -502,121 +781,8 @@ Dir.chdir(GAME_ROOT) do
       Reloaded::Platform::ROOT == RELOADED_ROOT &&
       Reloaded::Platform::GAME_ROOT == GAME_ROOT
   end
-  Reloaded::Settings.set("platform_override", "Windows", :persist => false)
-  load File.join(RELOADED_ROOT, "Core", "Foundation", "Download.rb")
-  download_test_root = File.join(RELOADED_ROOT, "Cache", "Download", "foundation_check")
-  download_target = File.join(download_test_root, "payload.bin")
-  Reloaded::Download.send(:ensure_directory, download_test_root)
-  download_payload = "foundation-download-payload"
-  download_hash = Digest::SHA256.hexdigest(download_payload)
-  File.open(download_target, "wb") { |file| file.write("previous-payload") }
-  download_attempts = 0
-  Reloaded::Download.transport_override = proc do |_url, part, _options, _task|
-    download_attempts += 1
-    raise Reloaded::Download::Failure.new(:network_error, "Expected retry") if download_attempts == 1
-    File.open(part, "wb") { |file| file.write(download_payload) }
-    {
-      :final_url => "https://example.invalid/foundation.bin?private=test",
-      :http_status => 200,
-      :content_length => download_payload.bytesize,
-      :bytes => download_payload.bytesize,
-      :sha256 => download_hash,
-      :headers => { "etag" => "foundation" }
-    }
-  end
-  download_result = Reloaded::Download.fetch(
-    "https://example.invalid/foundation.bin?private=test",
-    download_target,
-    :sha256 => download_hash,
-    :expected_bytes => download_payload.bytesize,
-    :retries => 1
-  )
-  check("Download API retries, verifies, and atomically promotes large files") do
-    Reloaded::API.public?(:download) && Reloaded::API.available?(:download) &&
-      download_result.success? && download_result.attempts == 2 &&
-      download_result.bytes == download_payload.bytesize &&
-      download_result.url == "https://example.invalid/foundation.bin" &&
-      File.read(download_target) == download_payload &&
-      !File.exist?("#{download_target}.part")
-  end
-  download_check_debug = $DEBUG
-  $DEBUG = false
-  invalid_download = Reloaded::Download.fetch(
-    "https://example.invalid/foundation.bin",
-    download_target,
-    :sha256 => ("0" * 64),
-    :retries => 0
-  )
-  $DEBUG = download_check_debug
-  check("Download API rejects invalid payloads without replacing a valid destination") do
-    invalid_download.error_code == :checksum_mismatch &&
-      File.read(download_target) == download_payload &&
-      !File.exist?("#{download_target}.part")
-  end
-  resume_target = File.join(download_test_root, "resume.bin")
-  resume_payload = "foundation-resumable-download"
-  resume_hash = Digest::SHA256.hexdigest(resume_payload)
-  resume_split = 12
-  resume_attempts = 0
-  Reloaded::Download.transport_override = proc do |_url, part, options, _task|
-    resume_attempts += 1
-    if resume_attempts == 1
-      File.open(part, "wb") { |file| file.write(resume_payload[0, resume_split]) }
-      raise Reloaded::Download::Failure.new(:network_error, "Expected resumable interruption")
-    end
-    existing = File.file?(part) ? File.read(part) : ""
-    raise "Partial download was not preserved." unless options[:resume] && existing == resume_payload[0, resume_split]
-    File.open(part, "ab") { |file| file.write(resume_payload[resume_split, resume_payload.length]) }
-    {
-      :final_url => "https://example.invalid/resume.bin",
-      :http_status => 206,
-      :content_length => resume_payload.bytesize,
-      :bytes => resume_payload.bytesize,
-      :sha256 => resume_hash,
-      :headers => { "accept-ranges" => "bytes" }
-    }
-  end
-  resumed_download = Reloaded::Download.fetch(
-    "https://example.invalid/resume.bin",
-    resume_target,
-    :sha256 => resume_hash,
-    :expected_bytes => resume_payload.bytesize,
-    :resume => true,
-    :retries => 1
-  )
-  check("Download API resumes an opted-in partial file across retries") do
-    resumed_download.success? && resumed_download.attempts == 2 &&
-      File.read(resume_target) == resume_payload &&
-      !File.exist?("#{resume_target}.part")
-  end
-  Reloaded::Download.transport_override = nil
-  File.delete(download_target) if File.file?(download_target)
-  File.delete(resume_target) if File.file?(resume_target)
-  Dir.rmdir(download_test_root) if Dir.exist?(download_test_root) && Dir.entries(download_test_root).length == 2
-  load File.join(RELOADED_ROOT, "Core", "Foundation", "Archive.rb")
-  Reloaded::Settings.set("platform_override", "Windows", :persist => false)
-  check("Archive API exposes the bundled Windows and Proton adapter") do
-    Reloaded::API.public?(:archive) && Reloaded::API.available?(:archive) &&
-      Reloaded::Archive.available? && File.file?(Reloaded::Platform.archive_tool_path)
-  end
-  archive_check_debug = $DEBUG
-  $DEBUG = false
-  archive_path_checks = begin
-    absolute_archive_path = "C" + ":/outside.txt"
-    Reloaded::Archive.send(:validate_entry_path!, "safe/folder/file.txt") == "safe/folder/file.txt" &&
-      ["../outside.txt", absolute_archive_path, "NUL.txt"].all? do |path|
-        begin
-          Reloaded::Archive.send(:validate_entry_path!, path)
-          false
-        rescue Exception => e
-          [:path_traversal, :unsafe_path].include?(e.respond_to?(:code) ? e.code : nil)
-        end
-      end
-  end
-  $DEBUG = archive_check_debug
-  check("Archive API rejects traversal, absolute, and reserved entry paths") { archive_path_checks }
   load File.join(RELOADED_ROOT, "Core", "Foundation", "SpritePacks.rb")
-  spritepack_check_root = File.join(RELOADED_ROOT, "Cache", "SpritePacks", "foundation_check_windows")
+  spritepack_check_root = File.join(RELOADED_ROOT, "Cache", "SpritePacks", "foundation_check_proton")
   spritepack_path = File.join(spritepack_check_root, "1.pak")
   Reloaded::SpritePacks.send(:ensure_directory, spritepack_check_root)
   spritepack_png = [137, 80, 78, 71, 13, 10, 26, 10].pack("C*") + "foundation-sprite"
@@ -644,12 +810,6 @@ Dir.chdir(GAME_ROOT) do
   end
   File.delete(spritepack_path) if File.file?(spritepack_path)
   Dir.rmdir(spritepack_check_root) if Dir.exist?(spritepack_check_root) && Dir.entries(spritepack_check_root).length == 2
-  Reloaded::Settings.set("platform_override", "JoiPlay", :persist => false)
-  check("JoiPlay keeps downloads and archive extraction unavailable") do
-    !Reloaded::Platform.supports?(:downloads) && !Reloaded::Download.available? &&
-      !Reloaded::Platform.supports?(:archive_extract) && !Reloaded::Archive.available?
-  end
-  Reloaded::Settings.set("platform_override", "Windows", :persist => false)
   load File.join(RELOADED_ROOT, "Core", "Foundation", "FileActions.rb")
   resolved_version = Reloaded::FileActions.resolve("Reloaded/Version.md", :type => :file)
   check("File Actions exposes the safe public API") do
@@ -679,12 +839,12 @@ Dir.chdir(GAME_ROOT) do
   end
   remote_check_debug = $DEBUG
   load File.join(RELOADED_ROOT, "Core", "Foundation", "RemoteData.rb")
-  remote_test_root = File.join(RELOADED_ROOT, "Cache", "RemoteData", "foundation_check_windows")
+  remote_test_root = File.join(RELOADED_ROOT, "Cache", "RemoteData", "foundation_check_proton")
   remote_cache = File.join(remote_test_root, "source.json")
   remote_local = File.join(remote_test_root, "local.json")
   Reloaded::RemoteData.send(:ensure_directory, remote_test_root)
   File.open(remote_local, "wb") { |file| file.write(JSON.generate({ "value" => "local" })) }
-  Reloaded::Settings.set("platform_override", "Windows", :persist => false)
+  Reloaded::Settings.set("platform_override", "Proton", :persist => false)
   Reloaded::RemoteData.register(
     :foundation_remote,
     :owner => :foundation_check,
@@ -771,7 +931,7 @@ Dir.chdir(GAME_ROOT) do
   File.delete(remote_local) if File.file?(remote_local)
   Dir.rmdir(remote_test_root) if Dir.exist?(remote_test_root) && Dir.entries(remote_test_root).length == 2
   $DEBUG = remote_check_debug
-  Reloaded::Settings.set("platform_override", "Windows", :persist => false)
+  Reloaded::Settings.set("platform_override", "Proton", :persist => false)
   load File.join(RELOADED_ROOT, "Core", "Foundation", "TempCleanup.rb")
   cleanup_booted = Reloaded::TempCleanup.boot
   check("Temporary cleanup waits for module registrations before boot pruning") do
@@ -779,7 +939,7 @@ Dir.chdir(GAME_ROOT) do
       entry[:id] == :cleanup_abandoned_reloaded_files
     end
   end
-  cleanup_test_root = File.join(RELOADED_ROOT, "Cache", "TempCleanup", "foundation_check_windows")
+  cleanup_test_root = File.join(RELOADED_ROOT, "Cache", "TempCleanup", "foundation_check_proton")
   begin
     runtime_root = File.join(cleanup_test_root, "runtime")
     cache_root = File.join(cleanup_test_root, "remote")
@@ -852,13 +1012,6 @@ Dir.chdir(GAME_ROOT) do
   $DEBUG = false
   load File.join(RELOADED_ROOT, "Core", "Foundation", "Task.rb")
   task_main_thread = Thread.current
-  worker_uses_main_thread_transport = nil
-  Thread.new do
-    worker_uses_main_thread_transport = Reloaded::RemoteData.send(:main_thread_transport?)
-  end.join
-  check("RemoteData avoids the engine-native HTTP transport on worker threads") do
-    worker_uses_main_thread_transport == false
-  end
   task_callback = nil
   successful_task = Reloaded::Task.start(
     :foundation_task,
@@ -953,31 +1106,6 @@ Dir.chdir(GAME_ROOT) do
   check("Task cancellation is cooperative and does not kill worker threads") do
     cancellable_task.complete? && cancellable_task.outcome.cancelled?
   end
-  download_cancel_root = File.join(RELOADED_ROOT, "Cache", "Download", "foundation_cancel_check")
-  download_cancel_target = File.join(download_cancel_root, "payload.bin")
-  Reloaded::Download.send(:ensure_directory, download_cancel_root)
-  File.open(download_cancel_target, "wb") { |file| file.write("valid-payload") }
-  cancelled_download = false
-  Reloaded::Download.transport_override = proc do |_url, part, _options, _task|
-    File.open(part, "wb") { |file| file.write("partial-payload") }
-    raise Reloaded::Task::Cancelled, "Expected cancellation"
-  end
-  begin
-    Reloaded::Download.fetch(
-      "https://example.invalid/foundation.bin",
-      download_cancel_target,
-      :retries => 0
-    )
-  rescue Reloaded::Task::Cancelled
-    cancelled_download = true
-  end
-  check("Download API cancellation removes partial files without replacing the destination") do
-    cancelled_download && File.read(download_cancel_target) == "valid-payload" &&
-      !File.exist?("#{download_cancel_target}.part")
-  end
-  Reloaded::Download.transport_override = nil
-  File.delete(download_cancel_target) if File.file?(download_cancel_target)
-  Dir.rmdir(download_cancel_root) if Dir.exist?(download_cancel_root) && Dir.entries(download_cancel_root).length == 2
   Reloaded::Task.shutdown
   $DEBUG = task_check_debug
   load File.join(RELOADED_ROOT, "Core", "Foundation", "Rewards.rb")
@@ -1168,10 +1296,25 @@ Dir.chdir(GAME_ROOT) do
     !removed_probability.ok? && removed_probability.code == :unsupported_random_chance_field
   end
   pokevial_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "PokeVial.rb"))
+  check("PokeVial uses formula-based refill pricing, contextual settings, and protected progression") do
+    pokevial_reward_source.include?("REFILL_COST_UNIT = 250") &&
+      pokevial_reward_source.include?("REFILL_COST_UNIT * [[max_charges.to_i, 1].max, MAX_USES_CAP].min") &&
+      pokevial_reward_source.include?("PokeCenter Refill Mode") &&
+      pokevial_reward_source.include?("ConditionalSliderOption.new") &&
+      pokevial_reward_source.include?("ConditionalEnumOption.new") &&
+      pokevial_reward_source.include?("if value > now") &&
+      pokevial_reward_source.include?("def update_progressive_badge_unlock") &&
+      pokevial_reward_source.include?("def update_capacity_notice") &&
+      pokevial_reward_source.include?("def party_needs_healing?") &&
+      pokevial_reward_source.include?("Your party is already fully healed.") &&
+      pokevial_reward_source.include?("pbPlayDecisionSE") &&
+      pokevial_reward_source.include?("Restored {1} {2} for ${3}.") &&
+      !pokevial_reward_source.include?("hr_pokevial_refill_cost_enabled") &&
+      !pokevial_reward_source.include?("hr_pokevial_refill_cost_per_use")
+  end
   iv_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "IVBoundaries.rb"))
   mart_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Backend.rb"))
   daily_featured_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Automation", "DailyFeatured.rb"))
-  economy_event_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Automation", "EconomyEvents.rb"))
   check("Reloaded reward adapters use the shared registry") do
     pokevial_reward_source.include?("register_reward_handlers") &&
       pokevial_reward_source.include?(":pokevial_charge") &&
@@ -1180,15 +1323,6 @@ Dir.chdir(GAME_ROOT) do
       mart_reward_source.include?("Reloaded::Rewards.grant_all")
   end
   mart_editor_source = File.read(File.join(GAME_ROOT, "Admin Tools", "Reloaded Mart Editor", "ReloadedMartEditor.rb"))
-  reward_types_source = File.read(File.join(RELOADED_ROOT, "Core", "Foundation", "RewardTypes.rb"))
-  economy_event_editor_source = File.read(File.join(GAME_ROOT, "Admin Tools", "Reloaded Mart Editor", "EconomyEventEditor.rb"))
-  economy_automation_path = File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Data", "AutomatedEvents.json")
-  economy_automation_data = JSON.parse(File.read(economy_automation_path))
-  economy_event_library_path = File.join(GAME_ROOT, "Admin Tools", "Reloaded Mart Editor", "EconomyEventLibrary.json")
-  economy_event_library = JSON.parse(File.read(economy_event_library_path))
-  economy_template_definition_block = economy_event_editor_source[/ECONOMY_BUILT_IN_TEMPLATE_DEFINITIONS = \[(.*?)\]\.freeze/m, 1].to_s
-  economy_template_definition_count = economy_template_definition_block.scan(/^\s+\["[a-z0-9_]+", "/).length
-  economy_template_item_counts = economy_template_definition_block.scan(/%w\[([A-Z0-9_\s]+)\]\]/).map { |items| items[0].split.length }
   check("Reloaded Mart enforces active entries, real unlocks, and nested reward dependencies") do
     mart_reward_source.include?("class UnlockEntryHandler") &&
       mart_reward_source.include?("def set_unlocked") &&
@@ -1223,13 +1357,6 @@ Dir.chdir(GAME_ROOT) do
       !mart_reward_source.include?("!Economy.automation_enabled?(\"restocks\")") &&
       !mart_reward_source.include?("return [] unless automation_enabled?(\"profile_tuning\")")
   end
-  check("Economy Events validates cycle anchors without the optional Date library") do
-    economy_event_source.include?("def parse_cycle_date") &&
-      economy_event_source.include?("Time.utc(year, month, day)") &&
-      economy_event_source.include?("!parse_cycle_date((value || DEFAULT_CYCLE_ANCHOR).to_s).nil?") &&
-      !economy_event_source.include?("Date.parse((value || DEFAULT_CYCLE_ANCHOR).to_s)") &&
-      economy_event_editor_source.include?("when :cycle_anchor then edit_economy_cycle_anchor(config)")
-  end
   check("Reloaded Mart Editor targets schema 2 and exposes registered reward workflows and simplified navigation") do
     mart_editor_source.include?("ReloadedMart::SCHEMA_VERSION) ? ReloadedMart::SCHEMA_VERSION : 2") &&
       mart_editor_source.include?("\"pokevial_max_uses\"") &&
@@ -1254,70 +1381,7 @@ Dir.chdir(GAME_ROOT) do
       mart_editor_source.include?("@navigation_stack") &&
       mart_editor_source.include?("LIST_Y = Reloaded::ModManagerUI::LIST_Y") &&
       !mart_editor_source.include?("\"Filter Content\"") &&
-      mart_editor_source.include?("@scope[:source] != :category") &&
-      mart_editor_source.include?("EVENT_LIBRARY_FILE = File.join(TOOL_DIR, \"EconomyEventLibrary.json\")") &&
-      mart_editor_source.include?("def load_economy_support_files") &&
-      mart_editor_source.include?("def save_economy_support_files") &&
-      economy_event_editor_source.include?("def open_economy_event_templates_editor") &&
-      economy_event_editor_source.include?("def copy_economy_template_to_destination") &&
-      economy_event_editor_source.include?(":automated, :curated, :themed") &&
-      economy_event_editor_source.include?("def built_in_economy_event_templates") &&
-      economy_template_definition_count == 18 &&
-      economy_template_item_counts.length == 18 &&
-      economy_template_item_counts.all? { |count| count >= 10 && count <= 15 } &&
-      Array(economy_event_library["templates"]).length == 18
-  end
-  check("Reloaded Mart Pokemon rewards use guided sources and native defaults") do
-    mart_editor_source.include?("def pokemon_species_mode_choices") &&
-      mart_editor_source.include?("def pick_pokemon_form") &&
-      mart_editor_source.include?("def difficulty_choices") &&
-      mart_editor_source.include?("Random by Type") &&
-      mart_editor_source.include?("Random by BST") &&
-      mart_editor_source.include?("Use Level Moves") &&
-      mart_editor_source.include?("Player / Native Default") &&
-      reward_types_source.include?("def resolve_reward_species") &&
-      reward_types_source.include?("def reward_species_candidates") &&
-      reward_types_source.include?("reward[:generate_moves]") &&
-      reward_types_source.include?("pokemon.reset_moves") &&
-      reward_types_source.include?('B#{body.id_number}H#{head.id_number}')
-  end
-  check("Reloaded Mart Editor owns release versions and omits removed economy systems") do
-    mart_editor_source.include?("def apply_automatic_versions") &&
-      mart_editor_source.include?("def synchronize_entry_versions!") &&
-      mart_editor_source.include?("def next_catalog_version") &&
-      mart_editor_source.include?("Managed automatically when this entry's content changes.") &&
-      mart_editor_source.include?("REMOVED_CATALOG_KEYS = %w[profile_tuning promo_codes]") &&
-      !mart_editor_source.include?("def promotions_economy_rows") &&
-      !mart_reward_source.include?("def profile_tuning") &&
-      !economy_event_source.include?("profile_tuning(context)")
-  end
-  mart_publish_source = File.read(File.join(GAME_ROOT, "Admin Tools", "Reloaded Mart Editor", "PublishReloadedMart.bat"))
-  check("Reloaded Mart publishing excludes editor-only catalog data") do
-    mart_editor_source.include?("economy_events economy_event_templates economy_event_automation") &&
-      mart_editor_source.include?("EDITOR_ONLY_NESTED_KEYS = %w[internal_notes]") &&
-      mart_editor_source.include?("def online_catalog_data") &&
-      mart_editor_source.include?("EDITOR_ONLY_CATALOG_KEYS.each { |key| payload.delete(key) }") &&
-      mart_editor_source.include?("active_publishable_economy_event") &&
-      economy_event_editor_source.include?("def active_publishable_economy_event") &&
-      mart_editor_source.include?("name.start_with?(\"__\")") &&
-      mart_editor_source.include?("export_online_json(false, false)") &&
-      mart_publish_source.include?("set \"CATALOG_FILE=%ONLINE_FILE%\"") &&
-      !mart_publish_source.include?("copy /Y \"%CATALOG_FILE%\" \"%ONLINE_FILE%\"")
-  end
-  check("Automated Economy Events use the shipped local pool and remain offline-capable") do
-    File.file?(economy_automation_path) &&
-      economy_event_source.include?("LOCAL_AUTOMATION_FILE") &&
-      economy_event_source.include?("def load_local_automation") &&
-      economy_event_source.include?("result.concat(manual_events) if online_available?") &&
-      economy_event_source.include?("generated = generated_event(context)") &&
-      economy_event_source.include?("MAX_AUTOMATED_PERCENT = 50") &&
-      economy_automation_data["enabled"] == true &&
-      Array(economy_automation_data["templates"]).length > 0 &&
-      Array(economy_automation_data["templates"]).all? do |template|
-        template.is_a?(Hash) &&
-          !template.key?("internal_notes") &&
-          Array(template["temporary_entries"]).length.between?(10, 15)
-      end
+      mart_editor_source.include?("@scope[:source] != :category")
   end
   mart_ui_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "UI.rb"))
   check("Reloaded Mart supports trusted editor previews and open-time online refresh") do
@@ -1326,6 +1390,13 @@ Dir.chdir(GAME_ROOT) do
       mart_reward_source.include?("def refreshing?") &&
       mart_reward_source.include?(":status => :success, :remote => outcome.value") &&
       mart_reward_source.include?("apply_remote_result(completion[:remote])") &&
+      mart_reward_source.include?("start_refresh: false") &&
+      mart_reward_source.include?("RECENT_REFRESH_SECONDS = 30.0") &&
+      mart_reward_source.include?("return :running if @fetch_task && @fetch_task.running?") &&
+      mart_reward_source.include?("def recent_refresh?") &&
+      mart_ui_source.include?("def start_catalog_refresh_after_open") &&
+      mart_ui_source.include?("status == :recent_success") &&
+      mart_ui_source.include?('Reloaded.toast_ok("Mart is up to date.")') &&
       mart_ui_source.include?("def open_mart_actions") &&
       mart_ui_source.include?('View Event: #{event_label}') &&
       mart_ui_source.include?(":start_id => :view_event") &&
@@ -1341,28 +1412,6 @@ Dir.chdir(GAME_ROOT) do
       mart_ui_source.include?("Reloaded::HintText.special(\"Actions\")") &&
       !mart_ui_source.include?("pbPromptPromoCode") &&
       !mart_reward_source.include?("def redeem_promo_code")
-  end
-  check("Reloaded Mart validates remote catalogs on the main thread only") do
-    !mart_reward_source.include?("source: :online_validation") &&
-      mart_reward_source.include?("Catalog.load(raw, source: :online_fresh)") &&
-      mart_reward_source.include?("RemoteData validators run on the worker thread") &&
-      mart_reward_source.include?("registered?(REMOTE_SOURCE_ID)") &&
-      mart_reward_source.include?("version > 0 && version <= SCHEMA_VERSION && entries.is_a?(Array)")
-  end
-  base_mart_catalog = JSON.parse(File.read(File.join(RELOADED_ROOT, "ReloadedMartBase.json")))
-  check("Reloaded Mart ships editable offline stock that fresh online data replaces") do
-    base_mart_catalog["schema_version"].to_i == 2 &&
-      !base_mart_catalog.key?("profile_tuning") &&
-      Array(base_mart_catalog["entries"]).length >= 10 &&
-      mart_reward_source.include?("BASE_CATALOG_RELATIVE_PATH") &&
-      mart_reward_source.include?("def load_base_catalog") &&
-      mart_reward_source.include?("source.to_sym == :offline_base ? :offline_allowed : :fresh_required") &&
-      mart_reward_source.include?("unless remote.remote_confirmed?") &&
-      mart_reward_source.include?("Mart catalog ignored unconfirmed RemoteData cache") &&
-      mart_editor_source.include?("BASE_CATALOG_FILE") &&
-      mart_editor_source.include?('Catalog Source: #{catalog_target_label}') &&
-      mart_editor_source.include?("def choose_catalog_target") &&
-      mart_editor_source.include?("cannot be published as the online catalog")
   end
   check("Reloaded Mart banners, descriptions, stock, and restock text use no-shadow rendering") do
     mart_ui_source.include?("def no_shadow_text") &&

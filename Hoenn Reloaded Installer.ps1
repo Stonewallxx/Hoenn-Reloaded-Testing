@@ -29,7 +29,9 @@ $SegmentedDownloadMinimum = 24MB
 $DownloadRetries = 3
 $DownloadRetryDelay = 1.0
 $DiskSpaceMargin = 64MB
-$InstallerVersion = "4.1.0"
+$ProgressBarWidth = 56
+$InstallerVersion = "4.2.0"
+$InstallType = "CoreAndSpritepacks"
 $ManagedManifestPath = Join-Path $GameRoot "Reloaded\InstallerFiles.json"
 $IncompleteInstallPath = Join-Path $GameRoot "Reloaded\InstallerIncomplete.json"
 $SpriteStatePath = Join-Path $GameRoot "Mods\Reloaded\SpritepacksInstalled.json"
@@ -62,7 +64,8 @@ $ProtectedPrefixes = @(
 
 $TestingExcludedPatterns = @(
   '^(?:\.agents|\.codex|\.git|\.github|\.vscode)/',
-  '^(?:Admin Tools|Developer Tools|ModDev)/',
+  '^(?:Admin Tools|Developer Tools)/',
+  '^ModDev/(?!Tools(?:/|$))',
   '^REQUIRED_BY_INSTALLER_UPDATER/',
   '^Mods/',
   '^Graphics/SpritePacks/',
@@ -81,6 +84,63 @@ $TestingExcludedPatterns = @(
 function Write-Phase([int]$Step, [int]$Total, [string]$Message) {
   Write-Host ""
   Write-Host ("[{0}/{1}] {2}" -f $Step, $Total, $Message) -ForegroundColor Cyan
+}
+
+function Get-ConsoleProgressWidth([int]$ReservedWidth) {
+  $consoleWidth = $ProgressBarWidth + $ReservedWidth + 1
+  try {
+    if ([Console]::WindowWidth -gt 0) { $consoleWidth = [Console]::WindowWidth }
+  } catch {
+  }
+  return [Math]::Max(16, $consoleWidth - $ReservedWidth - 1)
+}
+
+function Write-ConsoleFillBar([int]$Width, [int]$Filled) {
+  if ($Filled -gt 0) {
+    Write-Host (" " * $Filled) -NoNewline -BackgroundColor Cyan
+  }
+  $remaining = $Width - $Filled
+  if ($remaining -gt 0) {
+    Write-Host (" " * $remaining) -NoNewline -BackgroundColor DarkGray
+  }
+}
+
+$script:InstallerProgressLineLength = 0
+function Write-InstallerProgress(
+  [string]$Activity,
+  [string]$Status = "",
+  [int]$Percent = -1,
+  [switch]$Completed
+) {
+  if ($Completed) {
+    if ($script:InstallerProgressLineLength -gt 0) {
+      Write-Host ("`r" + (" " * $script:InstallerProgressLineLength) + "`r") -NoNewline
+      $script:InstallerProgressLineLength = 0
+    }
+    return
+  }
+
+  $detail = if ($Status) { " $Status" } else { "" }
+  if ($Percent -ge 0) {
+    $clamped = [Math]::Max(0, [Math]::Min(100, $Percent))
+    $prefix = "$Activity ["
+    $suffix = ("] {0,3}%{1}" -f $clamped, $detail)
+    $barWidth = Get-ConsoleProgressWidth ($prefix.Length + $suffix.Length)
+    $filled = [int][Math]::Floor(($barWidth * $clamped) / 100.0)
+    $textLength = $prefix.Length + $barWidth + $suffix.Length
+    $clearWidth = [Math]::Max($script:InstallerProgressLineLength, $textLength)
+    Write-Host ("`r" + (" " * $clearWidth) + "`r") -NoNewline
+    Write-Host $prefix -NoNewline
+    Write-ConsoleFillBar $barWidth $filled
+    Write-Host $suffix -NoNewline
+    $script:InstallerProgressLineLength = $textLength
+    return
+  } else {
+    $text = "$Activity$detail"
+  }
+  $width = [Math]::Max($script:InstallerProgressLineLength, $text.Length)
+  Write-Host ("`r" + $text.PadRight($width)) -NoNewline
+  $script:InstallerProgressLineLength = $text.Length
 }
 
 function Write-JsonFile([object]$Value, [string]$Path, [int]$Depth = 12) {
@@ -166,12 +226,11 @@ function Write-InstallMarker(
     (Get-Date).ToUniversalTime().ToString("o")
   }
   $channelValue = $Channel.ToString().ToLowerInvariant()
-  $installTypeValue = if ($InstallType -eq "CoreAndSpritepacks") { "full" } else { "core" }
   Write-JsonFile ([ordered]@{
     schema = 1
     state = "incomplete"
     channel = $channelValue
-    install_type = $installTypeValue
+    install_type = "full"
     version = $Version
     phase = $Phase
     spritepack_build_id = $SpritepackBuildId
@@ -188,15 +247,18 @@ function Copy-FileAtomically([string]$Source, [string]$Destination) {
   $parent = Split-Path -Parent $Destination
   New-Item -ItemType Directory -Force -Path $parent | Out-Null
   $temporary = "$Destination.installing"
+  $backup = "$Destination.installing.backup"
   try {
     Copy-Item -LiteralPath $Source -Destination $temporary -Force
     if (Test-Path -LiteralPath $Destination -PathType Leaf) {
-      [IO.File]::Replace($temporary, $Destination, $null, $true)
+      Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+      [IO.File]::Replace($temporary, $Destination, $backup, $true)
     } else {
       [IO.File]::Move($temporary, $Destination)
     }
   } finally {
     Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
   }
 }
 
@@ -211,14 +273,14 @@ function Get-Sha256WithProgress([string]$Path) {
       $hash.TransformBlock($buffer, 0, $read, $buffer, 0) | Out-Null
       $complete += $read
       $percent = if ($length -gt 0) { [int](($complete * 100L) / $length) } else { 100 }
-      Write-Progress -Activity "Verifying $(Split-Path -Leaf $Path)" -Status ("{0:N1} MB / {1:N1} MB" -f ($complete / 1MB), ($length / 1MB)) -PercentComplete $percent
+      Write-InstallerProgress "Verifying $(Split-Path -Leaf $Path)" ("{0:N1} MB / {1:N1} MB" -f ($complete / 1MB), ($length / 1MB)) $percent
     }
     $hash.TransformFinalBlock((New-Object byte[] 0), 0, 0) | Out-Null
     return ([BitConverter]::ToString($hash.Hash)).Replace("-", "").ToLowerInvariant()
   } finally {
     $hash.Dispose()
     $stream.Dispose()
-    Write-Progress -Activity "Verifying $(Split-Path -Leaf $Path)" -Completed
+    Write-InstallerProgress "Verifying $(Split-Path -Leaf $Path)" -Completed
   }
 }
 
@@ -441,9 +503,9 @@ function Invoke-SingleHttpDownload(
           if (($now - $lastProgress) -ge 250) {
             if ($total -gt 0) {
               $percent = [Math]::Min(100, [int](($received * 100L) / $total))
-              Write-Progress -Activity "Downloading $Label" -Status ("{0:N1} MB / {1:N1} MB" -f ($received / 1MB), ($total / 1MB)) -PercentComplete $percent
+              Write-InstallerProgress "Downloading $Label" ("{0:N1} MB / {1:N1} MB" -f ($received / 1MB), ($total / 1MB)) $percent
             } else {
-              Write-Progress -Activity "Downloading $Label" -Status ("{0:N1} MB" -f ($received / 1MB))
+              Write-InstallerProgress "Downloading $Label" ("{0:N1} MB" -f ($received / 1MB))
             }
             $lastProgress = $now
             Write-JsonFile $state $metaPath
@@ -458,7 +520,7 @@ function Invoke-SingleHttpDownload(
     }
   } finally {
     $response.Close()
-    Write-Progress -Activity "Downloading $Label" -Completed
+    Write-InstallerProgress "Downloading $Label" -Completed
   }
 }
 
@@ -604,7 +666,7 @@ function Invoke-SegmentedHttpDownload(
       }
       Write-JsonFile $state $metaPath
       $percent = [Math]::Min(100, [int](($receivedTotal * 100L) / $TotalSize))
-      Write-Progress -Activity "Downloading $Label ($DownloadConnections connections)" -Status ("{0:N1} MB / {1:N1} MB" -f ($receivedTotal / 1MB), ($TotalSize / 1MB)) -PercentComplete $percent
+      Write-InstallerProgress "Downloading $Label ($DownloadConnections connections)" ("{0:N1} MB / {1:N1} MB" -f ($receivedTotal / 1MB), ($TotalSize / 1MB)) $percent
       Start-Sleep -Milliseconds 250
     }
     foreach ($task in $copyTasks) {
@@ -629,7 +691,7 @@ function Invoke-SegmentedHttpDownload(
     foreach ($request in $requests) { if ($request) { $request.Dispose() } }
     if ($client) { $client.Dispose() }
     if ($handler) { $handler.Dispose() }
-    Write-Progress -Activity "Downloading $Label ($DownloadConnections connections)" -Completed
+    Write-InstallerProgress "Downloading $Label ($DownloadConnections connections)" -Completed
   }
   Remove-Item -LiteralPath $metaPath -Force -ErrorAction SilentlyContinue
   return $true
@@ -675,12 +737,12 @@ function Invoke-Download(
         $output.Write($buffer, 0, $read)
         $copied += $read
         $percent = if ($total -gt 0) { [int](($copied * 100L) / $total) } else { 100 }
-        Write-Progress -Activity "Copying $Label" -Status ("{0:N1} MB / {1:N1} MB" -f ($copied / 1MB), ($total / 1MB)) -PercentComplete $percent
+        Write-InstallerProgress "Copying $Label" ("{0:N1} MB / {1:N1} MB" -f ($copied / 1MB), ($total / 1MB)) $percent
       }
     } finally {
       $input.Dispose()
       $output.Dispose()
-      Write-Progress -Activity "Copying $Label" -Completed
+      Write-InstallerProgress "Copying $Label" -Completed
     }
     Move-Item -LiteralPath $part -Destination $Destination -Force
     if (-not (Test-DownloadedFile $Destination $ExpectedSize $ExpectedSha256)) {
@@ -943,9 +1005,9 @@ function Install-TestingSnapshot([string]$Archive) {
     $managed.Add($relative)
     $copied++
     $percent = if ($files.Count -gt 0) { [int](($copied * 100) / $files.Count) } else { 100 }
-    Write-Progress -Activity "Installing Hoenn Reloaded Testing" -Status "$copied files copied" -PercentComplete ([Math]::Min(100, $percent))
+    Write-InstallerProgress "Installing Hoenn Reloaded Testing" "$copied files copied" ([Math]::Min(100, $percent))
   }
-  Write-Progress -Activity "Installing Hoenn Reloaded Testing" -Completed
+  Write-InstallerProgress "Installing Hoenn Reloaded Testing" -Completed
   $managed.Add("Reloaded/InstallerFiles.json")
   $managedFiles = @($managed | Sort-Object -Unique)
   $versionPath = Join-Path $sourceRoot "Reloaded\Version.md"
@@ -1003,6 +1065,8 @@ function Write-SpritepackInstallState($Spritepack) {
     id = $id
     name = $Spritepack.name.ToString()
     url = $sourceUrl
+    build_id = $Spritepack.build_id.ToString()
+    parts = @($Spritepack.parts)
     components = @()
     updated_at = $Spritepack.updated_at.ToString()
     full = $true
@@ -1038,9 +1102,6 @@ try {
     if ($incomplete -and $incomplete.channel -match '\A(?:public|testing)\z') {
       $Channel = if ($incomplete.channel -eq "testing") { "Testing" } else { "Public" }
     }
-    if ($incomplete -and $incomplete.install_type -match '\A(?:core|full)\z') {
-      $InstallType = if ($incomplete.install_type -eq "full") { "CoreAndSpritepacks" } else { "Core" }
-    }
     Write-Host ""
     Write-Host "An interrupted installation was detected." -ForegroundColor Yellow
     Write-Host "Repair mode is required and has been enabled." -ForegroundColor Yellow
@@ -1057,21 +1118,11 @@ try {
     throw "Channel must be Public or Testing."
   }
 
-  if (-not $InstallType) {
-    $selected = Select-InstallerOption "Choose what to install:" @(
-      "Core",
-      "Core + Spritepacks"
-    )
-    $InstallType = if ($selected -eq 1) { "Core" } else { "CoreAndSpritepacks" }
-  }
-  if ($InstallType -notmatch '\A(?:Core|CoreAndSpritepacks)\z') {
-    throw "InstallType must be Core or CoreAndSpritepacks."
-  }
-  $includeSpritepacks = $InstallType -eq "CoreAndSpritepacks"
+  $InstallType = "CoreAndSpritepacks"
 
   Write-Host ""
   Write-Host " Channel: $Channel"
-  Write-Host (" Package: {0}" -f $(if ($includeSpritepacks) { "Core + Spritepacks" } else { "Core" }))
+  Write-Host " Package: Core + Full Spritepack"
   Write-Host " Existing saves, mods, settings, profiles, and imports are preserved."
 
   Write-Phase 1 5 "Checking source"
@@ -1137,8 +1188,7 @@ try {
   }
 
   $spriteArchives = @()
-  Write-Phase 4 5 $(if ($includeSpritepacks) { "Checking Spritepacks" } else { "Preserving Spritepacks" })
-  if ($includeSpritepacks) {
+  Write-Phase 4 5 "Checking Full Spritepack"
     $catalogUrl = if ($publicManifest -and $publicManifest.spritepack_catalog_url) {
       $publicManifest.spritepack_catalog_url.ToString()
     } else {
@@ -1149,7 +1199,7 @@ try {
     $wantedSpritepackId = $spritepack.build_id.ToString()
     $installedSpritepackId = Get-InstalledSpritepackId
     if ($Repair -or -not $installedSpritepackId -or $installedSpritepackId -ne $wantedSpritepackId) {
-      $parts = @($spritepack.parts)
+      $parts = @($spritepack.parts | Where-Object { $_ })
       if ($parts.Count -gt 0) {
         $partNumber = 0
         foreach ($part in $parts) {
@@ -1186,12 +1236,9 @@ try {
     } else {
       Write-Host "Full Spritepack $installedSpritepackId is already installed."
     }
-  } else {
-    Write-Host "Core-only selected. Existing Spritepacks were not changed."
-  }
 
   Write-Phase 5 5 "Finalizing installation"
-  Write-InstallMarker "finalizing" $version $(if ($includeSpritepacks) { $wantedSpritepackId } else { "" })
+  Write-InstallMarker "finalizing" $version $wantedSpritepackId
   Remove-ObsoleteManagedFiles $oldManagedFiles $newManagedFiles
   Remove-Item -LiteralPath $PreviousManagedManifestPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $TestingStageRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -1208,7 +1255,7 @@ try {
   Write-Host "Hoenn Reloaded $Channel ($version) is installed." -ForegroundColor Green
   exit 0
 } catch {
-  Write-Progress -Activity "Hoenn Reloaded installation" -Completed
+  Write-InstallerProgress "Hoenn Reloaded installation" -Completed
   Write-Host ""
   Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
   Write-Host "Rerun the installer to resume or repair the installation."

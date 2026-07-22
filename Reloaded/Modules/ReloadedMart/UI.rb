@@ -810,6 +810,7 @@ class ReloadedMartBuyScene
     if @pockets.empty?
       draw_all
       Graphics.transition(8)
+      start_catalog_refresh_after_open
       show_message("The Reloaded Mart has nothing in stock right now.")
       pbEndBuyScene
       return false
@@ -820,6 +821,7 @@ class ReloadedMartBuyScene
     snap_quantity
     draw_all
     Graphics.transition(8)
+    start_catalog_refresh_after_open
     true
   end
 
@@ -1636,6 +1638,31 @@ class ReloadedMartBuyScene
   end
 
   private
+
+  def start_catalog_refresh_after_open
+    source = @adapter.context[:source] rescue nil
+    return false unless source.to_sym == :reloaded_mart
+    ReloadedMart.log_debug("Mart initial UI presented; starting background catalog refresh") if defined?(ReloadedMart)
+    status = ReloadedMart::Source.start_online_refresh
+    if status == :recent_success
+      if defined?(Reloaded) && Reloaded.respond_to?(:toast_ok)
+        Reloaded.toast_ok("Mart is up to date.")
+      else
+        show_message("Mart is up to date.")
+      end
+    elsif status == :recent_failure
+      message = "Mart refresh is unavailable. Using saved stock."
+      if defined?(Reloaded) && Reloaded.respond_to?(:toast_warning)
+        Reloaded.toast_warning(message)
+      else
+        show_message(message)
+      end
+    end
+    status
+  rescue Exception => e
+    ReloadedMart.log_exception("Mart post-open catalog refresh failed", e) if defined?(ReloadedMart)
+    false
+  end
 
   def setup_sprites
     @viewport = Viewport.new(0, 0, SW, SH)
@@ -2683,7 +2710,14 @@ class ReloadedMartBuyScene
                 @catalog_refresh_version.to_s == version.to_s &&
                 @catalog_refresh_signature == signature &&
                 @event_state_signature == event_signature
-    return false if unchanged
+    if unchanged
+      if defined?(Reloaded) && Reloaded.respond_to?(:toast_ok)
+        Reloaded.toast_ok("Mart is up to date.")
+      else
+        show_message("Mart is up to date.")
+      end
+      return true
+    end
     @catalog_refresh_source = source
     @catalog_refresh_version = version
     @catalog_refresh_signature = signature

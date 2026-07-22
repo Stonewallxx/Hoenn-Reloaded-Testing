@@ -42,6 +42,7 @@ module Reloaded
     SPRITEPACK_CONFIG_URL = "https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/main/Reloaded/Spritepacks.json"
     SPRITEPACK_CONFIG_PATH = File.join(ROOT, "Spritepacks.json")
     SPRITEPACK_INSTALL_STATE_PATH = File.join(GAME_ROOT, "Mods", "Reloaded", "SpritepacksInstalled.json")
+    SPRITEPACK_FULL_MANIFEST_PATH = File.join(GAME_ROOT, "Graphics", "SpritePacks", "manifest.json")
     CORE_VERSION_REMOTE_ID = :hoenn_reloaded_version
     SPRITEPACK_REMOTE_ID = :hoenn_reloaded_spritepacks
     NETWORK_TIMEOUT_SECONDS = 8
@@ -806,14 +807,95 @@ module Reloaded
         item = normalize_spritepack_file(file, 0)
         id = item["id"].to_s
         return false if id.empty?
+        if truthy?(item["full"])
+          return spritepack_full_status(item)[:state] == :installed
+        end
         records = spritepack_install_records
         record = records[id]
         return true if spritepack_install_record_matches?(record, item)
-        return false if truthy?(item["full"])
-        installed_full = records.values.find { |candidate| truthy?(candidate["full"]) }
-        spritepack_full_contains_pack?(installed_full, item)
+        spritepack_monthly_included_in_full?(item)
       rescue
         false
+      end
+
+      def spritepack_full_status(file = nil)
+        item = normalize_spritepack_file(file || spritepack_full_file, 0)
+        expected_build_id = item["build_id"].to_s
+        result = {
+          :state => :repair_needed,
+          :label => "Repair Needed",
+          :expected_build_id => expected_build_id,
+          :installed_build_id => "",
+          :reason => "The Full Spritepack manifest is missing."
+        }
+        return result unless File.file?(SPRITEPACK_FULL_MANIFEST_PATH)
+
+        manifest = parse_json_file(SPRITEPACK_FULL_MANIFEST_PATH)
+        unless spritepack_full_manifest_valid?(manifest)
+          result[:reason] = "The Full Spritepack manifest or a component manifest is invalid."
+          return result
+        end
+
+        installed_build_id = manifest["build_id"].to_s
+        result[:installed_build_id] = installed_build_id
+        result[:includes_updates_through] = manifest["includes_updates_through"].to_s
+        if expected_build_id.empty? || installed_build_id == expected_build_id
+          result[:state] = :installed
+          result[:label] = "Installed"
+          result[:reason] = ""
+        else
+          result[:state] = :update_available
+          result[:label] = "Update Available"
+          result[:reason] = "A newer Full Spritepack is available."
+        end
+        result
+      rescue Exception => e
+        {
+          :state => :repair_needed,
+          :label => "Repair Needed",
+          :expected_build_id => (item && item["build_id"].to_s) || "",
+          :installed_build_id => "",
+          :reason => "The Full Spritepack manifest could not be read."
+        }
+      end
+
+      def spritepack_status
+        full = spritepack_full_file
+        latest = spritepack_latest_file
+        full_status = spritepack_full_status(full)
+        latest_installed = latest ? spritepack_installed?(latest) : false
+        state = full_status[:state]
+        label = full_status[:label]
+        if state == :installed
+          if latest && !latest_installed
+            state = :monthly_available
+            label = "Monthly Update"
+          else
+            state = :up_to_date
+            label = "Up to Date"
+          end
+        end
+        full_status.merge(
+          :state => state,
+          :label => label,
+          :full_state => full_status[:state],
+          :full => full,
+          :latest => latest,
+          :latest_installed => latest_installed,
+          :monthly_available => !!(latest && !latest_installed)
+        )
+      rescue
+        {
+          :state => :repair_needed,
+          :label => "Repair Needed",
+          :expected_build_id => "",
+          :installed_build_id => "",
+          :full_state => :repair_needed,
+          :full => nil,
+          :latest => nil,
+          :latest_installed => false,
+          :monthly_available => false
+        }
       end
 
       def version_sort_key(version)
@@ -1166,12 +1248,17 @@ module Reloaded
         files = default_spritepack_files if files.empty?
         latest = spritepack_latest_file
         full = spritepack_full_file
+        display_version = if full
+                            full["build_id"].to_s.empty? ? full["name"].to_s : full["build_id"].to_s
+                          else
+                            ""
+                          end
         {
           "id" => SPRITEPACK_ENTRY_ID,
           "kind" => "mod",
           "name" => "Spritepacks",
-          "version" => latest ? latest["name"].to_s : "",
-          "latest_version" => latest ? latest["name"].to_s : "",
+          "version" => display_version,
+          "latest_version" => display_version,
           "authors" => ["Hoenn Reloaded"],
           "description" => config["description"].to_s,
           "tags" => ["Spritepacks"],
@@ -1213,6 +1300,10 @@ module Reloaded
           "versions" => versions,
           "homepage_url" => source["homepage_url"].to_s,
           "changelogurl" => first_string(source["changelogurl"], source["changelog_url"], selected_version["changelogurl"], selected_version["changelog_url"]),
+          "release_url" => source["release_url"].to_s,
+          "publisher_login" => source["publisher_login"].to_s,
+          "published_at" => source["published_at"].to_s,
+          "updated_at" => source["updated_at"].to_s,
           "source_id" => source_id.to_s,
           "featured" => truthy?(source["featured"]),
           "special_entry" => truthy?(source["special_entry"] || source["special"])
@@ -1222,23 +1313,33 @@ module Reloaded
       def normalize_profile_entry(entry, source_id)
         source = entry.is_a?(Hash) ? entry : {}
         id = normalize_mod_id(source["id"] || source["uid"] || source["profile_id"])
-        mods = normalize_profile_mods(source["mods"])
+        versions = normalize_profile_versions(source)
+        selected_version = selected_version_entry(source, versions)
+        mods = normalize_profile_mods(selected_version["mods"] || source["mods"])
         tags = (display_tags(source["tags"]) + profile_tags_from_mods(mods)).reject { |tag| tag_key(tag) == "profile" }.uniq
         tags.unshift("Profile")
         {
           "id" => id,
           "kind" => "profile",
           "name" => source["name"].to_s.empty? ? id : source["name"].to_s,
-          "version" => source["version"].to_s,
+          "version" => selected_version["version"].to_s,
+          "latest_version" => (source["latest_version"] || selected_version["version"]).to_s,
           "authors" => normalize_authors(source["authors"] || source["author"]),
           "description" => source["description"].is_a?(Array) ? source["description"].join("\n") : source["description"].to_s,
           "tags" => tags,
           "mods" => mods,
-          "profile_code" => source["profile_code"].to_s,
-          "profile_url" => source["profile_url"].to_s.empty? ? source["url"].to_s : source["profile_url"].to_s,
-          "reloaded_version" => source["reloaded_version"].to_s,
+          "profile_code" => selected_version["profile_code"].to_s.empty? ? source["profile_code"].to_s : selected_version["profile_code"].to_s,
+          "profile_url" => first_string(selected_version["profile_url"], source["profile_url"], source["url"]),
+          "sha256" => first_string(selected_version["sha256"], source["sha256"], source["checksum"]),
+          "size" => positive_download_size(selected_version["size"] || source["size"] || source["bytes"]),
+          "versions" => versions,
+          "reloaded_version" => first_string(selected_version["reloaded_version"], source["reloaded_version"]),
           "homepage_url" => source["homepage_url"].to_s,
           "changelogurl" => first_string(source["changelogurl"], source["changelog_url"]),
+          "release_url" => source["release_url"].to_s,
+          "publisher_login" => source["publisher_login"].to_s,
+          "published_at" => source["published_at"].to_s,
+          "updated_at" => source["updated_at"].to_s,
           "source_id" => source_id.to_s,
           "featured" => truthy?(source["featured"]),
           "special_entry" => truthy?(source["special_entry"] || source["special"])
@@ -1322,6 +1423,7 @@ module Reloaded
           "id" => id,
           "name" => name.empty? ? id : name,
           "url" => source["url"].to_s.strip,
+          "build_id" => source["build_id"].to_s.strip,
           "full" => truthy?(source["full"]),
           "monthly" => truthy?(source["monthly"]) || source["type"].to_s.downcase == "monthly",
           "latest" => truthy?(source["latest"]),
@@ -1410,6 +1512,7 @@ module Reloaded
           "id" => id,
           "name" => item["name"].to_s,
           "url" => item["url"].to_s,
+          "build_id" => item["build_id"].to_s,
           "parts" => Array(item["parts"]),
           "components" => Array(item["components"]),
           "updated_at" => item["updated_at"].to_s,
@@ -1434,6 +1537,9 @@ module Reloaded
 
       def spritepack_install_record_matches?(record, item)
         return false unless record
+        expected_build_id = item["build_id"].to_s
+        recorded_build_id = record["build_id"].to_s
+        return recorded_build_id == expected_build_id unless expected_build_id.empty? || recorded_build_id.empty?
         return false unless record["updated_at"].to_s == item["updated_at"].to_s
         parts = Array(item["parts"])
         return part_signature(record["parts"]) == part_signature(parts) unless parts.empty?
@@ -1483,6 +1589,56 @@ module Reloaded
         numbers.any? { |number| haystack.match?(/(?:\D|\A)#{Regexp.escape(number)}(?:\D|\z)/) }
       rescue
         false
+      end
+
+      def spritepack_full_manifest_valid?(manifest)
+        return false unless manifest.is_a?(Hash)
+        return false if manifest["build_id"].to_s.empty?
+        components = Array(manifest["components"])
+        return false if components.empty?
+        root = File.expand_path(File.dirname(SPRITEPACK_FULL_MANIFEST_PATH))
+        components.all? do |component|
+          next false unless component.is_a?(Hash)
+          relative = component["path"].to_s.tr("\\", "/")
+          next false unless spritepack_manifest_relative_path?(relative)
+          path = File.expand_path(File.join(root, *relative.split("/")))
+          normalized_root = normalize_path(root)
+          normalized_path = normalize_path(path)
+          (normalized_path == normalized_root || normalized_path.start_with?(normalized_root + "/")) && File.file?(path)
+        end
+      rescue
+        false
+      end
+
+      def spritepack_manifest_relative_path?(value)
+        return false if value.empty? || value.start_with?("/") || value =~ /\A[A-Za-z]:/
+        parts = value.split("/")
+        return false if parts.any? { |part| part.empty? || part == "." || part == ".." }
+        value.downcase.end_with?("/manifest.json")
+      end
+
+      def spritepack_monthly_included_in_full?(item)
+        return false unless item && !truthy?(item["full"])
+        status = spritepack_full_status
+        return false unless status[:state] == :installed
+        cutoff = status[:includes_updates_through].to_s
+        updated = item["updated_at"].to_s
+        return false if cutoff.empty? || updated.empty?
+        updated_value = spritepack_timestamp_sort_value(updated)
+        cutoff_value = spritepack_timestamp_sort_value(cutoff)
+        return false if updated_value <= 0 || cutoff_value <= 0
+        updated_value <= cutoff_value
+      rescue
+        false
+      end
+
+      def spritepack_timestamp_sort_value(value)
+        text = value.to_s.strip
+        iso = text.match(/\A(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/)
+        if iso
+          return (((((iso[1].to_i * 100 + iso[2].to_i) * 100 + iso[3].to_i) * 100 + iso[4].to_i) * 100 + iso[5].to_i) * 100 + iso[6].to_i)
+        end
+        spritepack_date_sort_value(text)
       end
 
       def spritepack_identity_numbers(file)
@@ -1857,6 +2013,37 @@ module Reloaded
             "changelog" => source["changelog"].to_s,
             "changelogurl" => first_string(source["changelogurl"], source["changelog_url"]),
             "dependencies" => normalize_dependencies(source["dependencies"])
+          }
+        end
+        versions.sort_by { |entry| version_sort_key(entry["version"]) }.reverse
+      end
+
+      def normalize_profile_versions(source)
+        versions = []
+        Array(source["versions"]).each do |entry|
+          next unless entry.is_a?(Hash)
+          version = entry["version"].to_s
+          profile_url = first_string(entry["profile_url"], entry["download_url"], entry["url"])
+          next if version.empty? && profile_url.empty?
+          versions << {
+            "version" => version,
+            "profile_url" => profile_url,
+            "profile_code" => entry["profile_code"].to_s,
+            "sha256" => first_string(entry["sha256"], entry["checksum"]),
+            "size" => positive_download_size(entry["size"] || entry["bytes"]),
+            "reloaded_version" => (entry["reloaded_version"] || entry["minimum_reloaded_version"]).to_s,
+            "mods" => normalize_profile_mods(entry["mods"])
+          }
+        end
+        if versions.empty?
+          versions << {
+            "version" => (source["version"] || source["latest_version"]).to_s,
+            "profile_url" => first_string(source["profile_url"], source["download_url"], source["url"]),
+            "profile_code" => source["profile_code"].to_s,
+            "sha256" => first_string(source["sha256"], source["checksum"]),
+            "size" => positive_download_size(source["size"] || source["bytes"]),
+            "reloaded_version" => (source["reloaded_version"] || source["minimum_reloaded_version"]).to_s,
+            "mods" => normalize_profile_mods(source["mods"])
           }
         end
         versions.sort_by { |entry| version_sort_key(entry["version"]) }.reverse

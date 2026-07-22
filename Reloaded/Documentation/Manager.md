@@ -72,7 +72,8 @@ update is available, plus `Check Updates` or `Update Status`, `Patch Notes`,
 Proton. Both frontends install into their own directory and offer:
 
 - `Hoenn Reloaded` or `Hoenn Reloaded Testing`
-- `Core` or `Core + Spritepacks`
+
+The selected channel always installs Core and the latest Full Spritepack.
 
 Public Core uses a versioned GitHub release with size and SHA-256 verification.
 Testing Core downloads the current `Stonewallxx/Hoenn-Reloaded-Testing`
@@ -86,12 +87,12 @@ an interruption. The installer checks download and extraction space first,
 retries transient/rate-limit failures with backoff, and can replace itself from
 a newer SHA-256-verified bootstrap listed in the release manifest.
 
-Core and Spritepacks are independent. Core-only leaves installed Spritepacks
-unchanged. Core + Spritepacks reads the shared public Spritepack catalog and
-only downloads the Full Spritepack when its build ID differs. The managed Core
-inventory permits obsolete release files to be removed without scanning or
-deleting saves, mods, settings, profiles, imported sprites, Spritepack updates,
-or unknown user files.
+Core and Spritepacks remain independently versioned release artifacts. The
+installer reads the shared public Spritepack catalog and downloads the Full
+Spritepack only when its build ID differs. The managed Core inventory permits
+obsolete release files to be removed without scanning or deleting saves, mods,
+settings, profiles, imported sprites, Spritepack updates, or unknown user
+files.
 
 The Full Spritepack is published as multiple GitHub release assets because the
 combined archive is larger than GitHub's per-asset limit. The installer
@@ -106,14 +107,20 @@ exports
 `[Bug Report](url)` link, and opens the Hoenn Reloaded bug-report Discord
 thread.
 
-The pinned `Spritepacks` installed-list entry opens a downloader menu:
+The pinned `Spritepacks` installed-list entry is the update and repair hub for
+the installed packs. It compares the latest catalog `build_id` with
+`Graphics/SpritePacks/manifest.json` and reports one of these states:
 
-- `Latest`
-  - `Full Spritepack`
-  - latest monthly Spritepack update
-- `All Files`
-  - `Full Spritepack`
-  - all configured monthly updates, newest first
+- `Up to Date` when the installed Full build matches and no monthly update is pending.
+- `Monthly Update` when the Full build matches but a newer monthly overlay is available.
+- `Update Available` when the installed Full build differs from the catalog build.
+- `Repair Needed` when the Full manifest is missing, invalid, or points to a missing component manifest.
+
+Its action menu only offers `Update Full Spritepack` or `Repair Full
+Spritepack` when that work is needed. It also provides `Browse Monthly
+Updates`, `Verify Spritepacks`, and `View Installed Version`. Full verification
+checks the component manifests, listed pack files, sizes, hashes, and pack
+structure; it is deliberately run only when selected because it can take time.
 
 Spritepack downloads read the public GitHub copy of
 `Reloaded/Spritepacks.json` first, then fall back to the local file if the
@@ -124,10 +131,12 @@ Runtime archives of at least 24 MiB use up to three simultaneous byte-range
 connections when supported, with automatic single-connection fallback.
 Spritepack extraction intentionally uses overwrite mode
 without a second staging copy, while still rejecting unsafe archive entries.
-Successful installs update a local marker at
-`Mods/Reloaded/SpritepacksInstalled.json`, which lets the protected installed
-list entry show whether the current Full Spritepack and latest monthly update
-are installed.
+The Full manifest is the source of truth for the installed Full build.
+Successful installs also update
+`Mods/Reloaded/SpritepacksInstalled.json` with the build ID and catalog record.
+That history file remains the source for manually installed monthly overlays;
+it is not allowed to claim that a missing or mismatched Full manifest is
+current.
 
 The Full Spritepack is one player-facing archive containing internal Base and
 Expanded components under `Graphics/SpritePacks`. Base wins duplicate logical
@@ -191,6 +200,7 @@ A Full Spritepack may use verified split volumes:
 {
   "id": "full_spritepack_2026_08",
   "name": "Full Spritepack (August 2026)",
+  "build_id": "20260801-120000",
   "full": true,
   "updated_at": "07-17-26 21:30:00",
   "url": "",
@@ -265,7 +275,9 @@ Recommended format:
           "changelogurl": "https://example.com/Old%20Versions/example_mod_1.0.0_changelog.txt"
         }
       ],
-      "homepage_url": "https://example.com/example_mod"
+      "homepage_url": "https://example.com/example_mod",
+      "publisher_login": "github_author",
+      "release_url": "https://github.com/Stonewallxx/Hoenn-Reloaded-Mods/releases/tag/mod-example_mod"
     }
   ],
   "profiles": [
@@ -277,8 +289,17 @@ Recommended format:
       "description": "A curated set of difficulty mods.",
       "tags": ["difficulty", "gameplay"],
       "reloaded_version": "0.5.0",
-      "profile_code": "RLD-code-...",
+      "latest_version": "1.0.0",
       "changelogurl": "https://example.com/challenge_profile_changelog.txt",
+      "release_url": "https://github.com/Stonewallxx/Hoenn-Reloaded-Mods/releases/tag/profile-challenge_profile",
+      "publisher_login": "github_author",
+      "profile_url": "https://github.com/Stonewallxx/Hoenn-Reloaded-Mods/releases/download/profile-challenge_profile/challenge_profile-1.0.0.json",
+      "versions": [
+        {
+          "version": "1.0.0",
+          "profile_url": "https://github.com/Stonewallxx/Hoenn-Reloaded-Mods/releases/download/profile-challenge_profile/challenge_profile-1.0.0.json"
+        }
+      ],
       "mods": [
         { "id": "example_mod", "version": "1.1.0" }
       ]
@@ -324,16 +345,15 @@ files, then browser index metadata.
 
 If `versions` is present, `latest_version` decides the default download. Older
 versions are kept in the same entry so the browser can expose them later without
-guessing from GitHub folder names. The archive files may still physically live
-in an `Old Versions` folder on GitHub.
+guessing from GitHub folder names. Mod and Profile version assets remain under
+their one persistent GitHub release.
 
 The in-game version picker labels versions as `Latest`, `Installed`, or
 `Newer` when that context is known. Installing an older version over a newer
 installed version requires an extra confirmation.
 
-Published profiles are listed under `profiles`. These replace traditional
-modpacks internally. The UI may still call them modpacks for players, but the
-backend treats them as profile imports.
+Published profiles are listed under `profiles`. The UI and backend both call
+them Profiles and treat them as profile imports.
 
 Profiles can be marked with `featured` or `special_entry` in the GitHub index.
 Those labels are admin-controlled index metadata, not normal mod tags. Featured
@@ -433,7 +453,8 @@ Loading rules:
 - Mods listed in `disabled_mods` are always disabled.
 - `load_order` controls player-preferred ordering.
 - Dependencies still load before dependents.
-- Missing mod references are logged.
+- Missing mod references are removed from every local profile after a mod scan.
+- Stale enabled, disabled, load-order, and mod-settings entries are pruned together.
 - Enabled mods with disabled, missing, or too-old dependencies are skipped.
 
 Profile management API:
@@ -492,6 +513,7 @@ Reloaded::Profiles.exists?("Default")
 Reloaded::Profiles.summary
 Reloaded::Profiles.missing_mod_ids(["example_mod"])
 Reloaded::Profiles.remove_mod("example_mod")
+Reloaded::Profiles.prune_missing_mods(["example_mod", "library_mod"])
 ```
 
 ## RLD Profile Codes
@@ -568,24 +590,39 @@ Reloaded::ModBrowser.import_published_profile("challenge_profile")
 
 ## Publishing
 
-Publishing is handled by:
+Repository actions are handled by fixed-action launchers:
 
 ```text
-ModDev/Windows/Publish to GitHub.bat
-ModDev/Proton/Publish to GitHub.sh
+ModDev/Tools/Windows/Publish.bat
+ModDev/Tools/Windows/Update.bat
+ModDev/Tools/Windows/Delete.bat
+ModDev/Tools/Proton/Publish.sh
+ModDev/Tools/Proton/Update.sh
+ModDev/Tools/Proton/Delete.sh
 ```
 
-The in-game Mod Manager `Tools -> Publish` menu launches the publisher.
+The in-game Mod Manager Tools page groups Create, Update, Publish, and Delete
+under `Mod Tools`. Each action selects Mod or Profile before launching its
+fixed-action platform tool. Validate, ModDev, Backup Mods, and Log Files remain
+on the main Tools page without requiring ModDev loading to be enabled.
 
 The Browser, updater, backup, publishing, folder-opening, and other desktop
 actions are capability-gated through `Reloaded::Platform`. JoiPlay keeps the
 installed mod/profile manager but hides unsupported desktop and download
 actions. Proton uses the same player-facing manager features as Windows.
 
-The platform publisher selects the mod or profile, validates it before
-uploading, uses a sparse Git checkout for only the index and selected target
-folder, updates the GitHub index, packages mods, writes profile payloads,
-commits, and pushes to:
+Publish validates and packages local content, creates a first release or adds
+and replaces versioned assets, and updates the public `index.json` through
+GitHub's Contents API. Update is metadata-only: it lists owned online entries
+and edits their public listing fields and release page without reading local
+content or uploading an asset. The tools never clone the repository or retain
+a repository cache. Each entry uses one stable release tag, stores all versions
+as assets, and records its publisher login, release URL, checksums, sizes, and
+timestamps in the index. Only the original publisher or repository owner can
+publish another version, Update, or Delete an entry. Authentication is verified
+through the GitHub user API. An expired credential must be replaced with
+`gh auth login --hostname github.com --web`.
+The repository is:
 
 ```text
 Stonewallxx/Hoenn-Reloaded-Mods
@@ -616,7 +653,7 @@ same publisher in Catalog mode for JSON-only catalog edits.
 
 ## Current Limits
 
-- Publisher tools require Git and GitHub credentials or collaborator access.
+- Publisher tools require GitHub CLI authentication and repository access.
 - Remote JSON fetches use the engine HTTP helpers.
 - Mod and Spritepack archives use `Reloaded::Download`; incomplete `.part`
   files never replace completed downloads. Eligible runtime archives use up to

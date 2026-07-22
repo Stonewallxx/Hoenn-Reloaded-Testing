@@ -80,20 +80,13 @@ module Reloaded
             @hr_pokevial_cooldown_seconds = value.to_i
           end
 
-          def hr_pokevial_refill_cost_enabled
-            @hr_pokevial_refill_cost_enabled.nil? ? 0 : @hr_pokevial_refill_cost_enabled.to_i
+          def hr_pokevial_refill_mode
+            value = @hr_pokevial_refill_mode.nil? ? ReloadedPokeVial::REFILL_MODE_ASK : @hr_pokevial_refill_mode.to_i
+            [[value, ReloadedPokeVial::REFILL_MODE_ASK].max, ReloadedPokeVial::REFILL_MODE_NEVER].min
           end
 
-          def hr_pokevial_refill_cost_enabled=(value)
-            @hr_pokevial_refill_cost_enabled = value.to_i
-          end
-
-          def hr_pokevial_refill_cost_per_use
-            @hr_pokevial_refill_cost_per_use.nil? ? ReloadedPokeVial::DEFAULT_REFILL_COST_PER_USE : @hr_pokevial_refill_cost_per_use.to_i
-          end
-
-          def hr_pokevial_refill_cost_per_use=(value)
-            @hr_pokevial_refill_cost_per_use = value.to_i
+          def hr_pokevial_refill_mode=(value)
+            @hr_pokevial_refill_mode = [[value.to_i, ReloadedPokeVial::REFILL_MODE_ASK].max, ReloadedPokeVial::REFILL_MODE_NEVER].min
           end
         end
       end
@@ -119,7 +112,10 @@ module ReloadedPokeVial
 
   DEFAULT_MAX_USES = 3
   DEFAULT_COOLDOWN_SECONDS = 5 * 60
-  DEFAULT_REFILL_COST_PER_USE = 500
+  REFILL_COST_UNIT = 250
+  REFILL_MODE_ASK = 0
+  REFILL_MODE_AUTOMATIC = 1
+  REFILL_MODE_NEVER = 2
 
   # Add map IDs here if PokeVial access should be blocked somewhere later.
   BLOCKED_MAP_IDS = [].freeze
@@ -157,6 +153,7 @@ module ReloadedPokeVial
   @item_patches_registered = false
   @healing_from_vial = false
   @pokecenter_heal_depth = 0
+  @capacity_notice_frames = nil
 
   class << self
     def enabled?
@@ -184,16 +181,21 @@ module ReloadedPokeVial
       ($PokemonSystem.hr_pokevial_cooldown_enabled rescue 0).to_i == 1
     end
 
-    def refill_cost_enabled?
-      ($PokemonSystem.hr_pokevial_refill_cost_enabled rescue 0).to_i == 1
+    def pokecenter_refill_mode
+      value = ($PokemonSystem.hr_pokevial_refill_mode rescue REFILL_MODE_ASK).to_i
+      [:ask, :automatic, :never][[value, REFILL_MODE_ASK].max] || :never
     end
 
     def cooldown_seconds
       [($PokemonSystem.hr_pokevial_cooldown_seconds rescue DEFAULT_COOLDOWN_SECONDS).to_i, 0].max
     end
 
-    def refill_cost_per_use
-      [($PokemonSystem.hr_pokevial_refill_cost_per_use rescue DEFAULT_REFILL_COST_PER_USE).to_i, 0].max
+    def refill_cost_per_charge(max_charges = configured_max_uses)
+      REFILL_COST_UNIT * [[max_charges.to_i, 1].max, MAX_USES_CAP].min
+    end
+
+    def pokecenter_refill_cost(missing_charges = uses_needed_for_refill)
+      [missing_charges.to_i, 0].max * refill_cost_per_charge(configured_max_uses)
     end
 
     def configured_max_uses
@@ -245,6 +247,71 @@ module ReloadedPokeVial
       value
     rescue
       1
+    end
+
+    def update_progressive_badge_unlock
+      current_badge_max = [[badge_progression_max_uses, 1].max, MAX_USES_CAP].min
+      observed = state_get(:observed_badge_max_uses, nil)
+      if observed.nil?
+        state_set(:observed_badge_max_uses, current_badge_max)
+        return false
+      end
+      observed = [[observed.to_i, 1].max, MAX_USES_CAP].min
+      unless progressive_enabled?
+        state_set(:observed_badge_max_uses, current_badge_max) if observed != current_badge_max
+        return false
+      end
+      if current_badge_max > observed
+        prior_max = [observed, saved_unlocked_max_uses, switch_progression_max_uses,
+                     variable_progression_max_uses].max
+        prior_max = [[prior_max, 1].max, MAX_USES_CAP].min
+        current_max = configured_max_uses
+        if current_max > prior_max
+          added_capacity = current_max - prior_max
+          set_uses([uses + added_capacity, current_max].min)
+          queue_capacity_notice(current_max, added_capacity)
+        end
+      end
+      state_set(:observed_badge_max_uses, current_badge_max) if observed != current_badge_max
+      true
+    rescue Exception => e
+      log_exception("PokeVial badge progression update failed", e)
+      false
+    end
+
+    def queue_capacity_notice(max_uses, added_charges)
+      state_set(:pending_capacity_notice, {
+        "max_uses" => max_uses.to_i,
+        "added_charges" => added_charges.to_i
+      })
+      @capacity_notice_frames = 15
+      true
+    end
+
+    def update_capacity_notice
+      notice = state_get(:pending_capacity_notice, nil)
+      return false unless notice.is_a?(Hash)
+      return false if event_or_transition_busy?
+      @capacity_notice_frames = 15 if @capacity_notice_frames.nil?
+      @capacity_notice_frames -= 1
+      return false if @capacity_notice_frames > 0
+      max_uses = (notice["max_uses"] || notice[:max_uses]).to_i
+      added = (notice["added_charges"] || notice[:added_charges]).to_i
+      label = added == 1 ? _INTL("charge") : _INTL("charges")
+      notify(:success, _INTL("PokeVial capacity increased to {1}. The new {2} {3} ready.",
+                             max_uses, label, added == 1 ? _INTL("is") : _INTL("are")))
+      state_set(:pending_capacity_notice, nil)
+      @capacity_notice_frames = nil
+      true
+    rescue Exception => e
+      @capacity_notice_frames = nil
+      log_exception("PokeVial capacity notice failed", e)
+      false
+    end
+
+    def update_overworld
+      update_progressive_badge_unlock
+      update_capacity_notice
     end
 
     def state_get(key, default = nil)
@@ -302,7 +369,7 @@ module ReloadedPokeVial
       refill ? refill() : clamp_uses_to_max
       if after > before
         log_info("PokeVial max uses unlocked source=#{source} max=#{after}")
-        pbMessage(_INTL("PokeVial max charges increased to {1}.", after)) if notify
+        notify(:success, _INTL("PokeVial max charges increased to {1}.", after)) if notify
       end
       after > before
     rescue Exception => e
@@ -336,7 +403,7 @@ module ReloadedPokeVial
       ctx[:uses_after] = uses
       ctx[:restored] = ctx[:uses_after].to_i - before
       run_callbacks(:after_refill, ctx)
-      pbMessage(_INTL("PokeVial refilled. Charges: {1}.", uses)) if notify
+      notify(:success, _INTL("PokeVial refilled. Charges: {1}.", uses)) if notify
       true
     rescue Exception => e
       log_exception("PokeVial refill failed", e)
@@ -359,7 +426,7 @@ module ReloadedPokeVial
       return false unless refill_with_hooks(source: source, notify: false)
       restored = uses - before
       log_info("PokeVial full refill granted source=#{source} restored=#{restored} uses=#{uses}/#{configured_max_uses}")
-      pbMessage(_INTL("PokeVial was fully refilled. Charges: {1}.", uses)) if notify
+      notify(:success, _INTL("PokeVial was fully refilled. Charges: {1}.", uses)) if notify
       true
     rescue Exception => e
       log_exception("PokeVial full refill failed", e)
@@ -385,7 +452,7 @@ module ReloadedPokeVial
       added = uses - before
       if added > 0
         log_info("PokeVial uses granted amount=#{added} source=#{source} uses=#{uses}/#{configured_max_uses}")
-        pbMessage(_INTL("Received {1} PokeVial charge(s). Charges: {2}.", added, uses)) if notify
+        notify(:success, _INTL("Received {1} PokeVial charge(s). Charges: {2}.", added, uses)) if notify
       end
       added
     rescue Exception => e
@@ -421,7 +488,20 @@ module ReloadedPokeVial
     end
 
     def last_use_time
-      state_get(:last_use_time, 0).to_i
+      value = state_get(:last_use_time, 0).to_i
+      now = Time.now.to_i
+      if value <= 0
+        state_set(:last_use_time, 0) if value != 0
+        return 0
+      end
+      if value > now
+        state_set(:last_use_time, now)
+        return now
+      end
+      value
+    rescue
+      state_set(:last_use_time, 0) rescue nil
+      0
     end
 
     def record_use_time
@@ -472,6 +552,22 @@ module ReloadedPokeVial
       Color.new(120, 230, 150)
     rescue
       Color.new(120, 230, 150)
+    end
+
+    def notify(kind, message)
+      if defined?(Reloaded)
+        case kind.to_sym
+        when :success
+          return Reloaded.toast_success(message.to_s) if Reloaded.respond_to?(:toast_success)
+        when :error
+          return Reloaded.toast_error(message.to_s) if Reloaded.respond_to?(:toast_error)
+        else
+          return Reloaded.toast_warning(message.to_s) if Reloaded.respond_to?(:toast_warning)
+        end
+      end
+      pbMessage(message.to_s) rescue nil
+    rescue
+      pbMessage(message.to_s) rescue nil
     end
 
     def current_map_id
@@ -529,6 +625,29 @@ module ReloadedPokeVial
       false
     end
 
+    def pokemon_needs_healing?(pkmn)
+      return false unless pkmn
+      return false if pkmn.respond_to?(:egg?) && pkmn.egg?
+      if pkmn.respond_to?(:fainted?) && pkmn.fainted? && ($PokemonSystem.no_reviving rescue false)
+        return false
+      end
+      return true if pkmn.hp.to_i < pkmn.totalhp.to_i
+      return false if hp_only?
+      return true if (pkmn.status rescue :NONE) != :NONE
+      Array(pkmn.moves).any? do |move|
+        move && move.total_pp.to_i > 0 && move.pp.to_i < move.total_pp.to_i
+      end
+    rescue
+      false
+    end
+
+    def party_needs_healing?
+      return false unless party_ready?
+      $Trainer.party.any? { |pkmn| pokemon_needs_healing?(pkmn) }
+    rescue
+      false
+    end
+
     def selectable?
       return false unless enabled?
       return false unless party_ready?
@@ -549,18 +668,19 @@ module ReloadedPokeVial
       "The PokeVial cannot be used right now."
     end
 
-    def deny(message, popup: nil)
+    def deny(message, popup: nil, severity: :warning)
       pbPlayBuzzerSE rescue nil
       if popup
         popup.call(message)
       else
-        pbMessage(message) rescue nil
+        notify(severity, message)
       end
       false
     end
 
     def use_from_menu(source = :repm, popup: nil)
       return deny(lock_reason, popup: popup) unless selectable?
+      return deny(_INTL("Your party is already fully healed."), popup: popup) unless party_needs_healing?
       return deny(_INTL("The PokeVial is EMPTY. Visit a PokeCenter to replenish it."), popup: popup) if uses <= 0
       remaining = cooldown_remaining_seconds
       if remaining > 0
@@ -585,12 +705,12 @@ module ReloadedPokeVial
       run_callbacks(:after_use, ctx)
       pbPlayDecisionSE rescue nil
       message = _INTL("Your party was healed. Charges: {1}.", uses)
-      popup ? popup.call(message) : (pbMessage(message) rescue nil)
+      popup ? popup.call(message) : notify(:success, message)
       true
     rescue Exception => e
       @healing_from_vial = false
       log_exception("PokeVial use failed", e)
-      deny(_INTL("The PokeVial cannot be used right now."), popup: popup)
+      deny(_INTL("The PokeVial cannot be used right now."), popup: popup, severity: :error)
     end
 
     def use_from_overworld_menu(screen)
@@ -600,9 +720,7 @@ module ReloadedPokeVial
       elsif !pbConfirmMessage(_INTL("Use the PokeVial?"))
         return false
       end
-      use_from_menu(:overworld_menu, popup: proc { |message|
-        screen.show_popup("POKEVIAL", [message]) if screen
-      })
+      use_from_menu(:overworld_menu)
     end
 
     def heal_party
@@ -644,11 +762,15 @@ module ReloadedPokeVial
     def refill_from_pokecenter
       needed = uses_needed_for_refill
       return false if needed <= 0
+      mode = pokecenter_refill_mode
+      return false if mode == :never
       current = uses
       max = configured_max_uses
-      cost = refill_cost_enabled? ? needed * refill_cost_per_use : 0
-      prompt = _INTL("Refill PokeVial?\nCost: ${1}\nCharges: {2} -> {3}", cost.to_s_formatted, current, max)
-      return false unless pbConfirmMessage(prompt)
+      cost = pokecenter_refill_cost(needed)
+      if mode == :ask
+        prompt = _INTL("Refill PokeVial?\nCost: ${1}\nCharges: {2} -> {3}", cost.to_s_formatted, current, max)
+        return false unless pbConfirmMessage(prompt)
+      end
       ctx = {
         :source => :pokecenter,
         :uses_before => current,
@@ -659,25 +781,28 @@ module ReloadedPokeVial
         :charges_before => current,
         :charges_after => max
       }
-      return false unless run_callbacks(:before_refill, ctx)
-      if cost > 0
-        money = ($Trainer.money rescue 0).to_i
-        unless money >= cost
-          pbMessage(_INTL("You don't have enough money to refill PokeVial. Need ${1}.", cost.to_s_formatted)) rescue nil
-          return false
-        end
-        $Trainer.money -= cost
-        pbSEPlay("Mart buy item") rescue nil
+      unless run_callbacks(:before_refill, ctx)
+        notify(:warning, ctx[:message] || _INTL("The PokeVial could not be refilled right now."))
+        return false
       end
+      money = ($Trainer.money rescue 0).to_i
+      unless money >= cost
+        notify(:warning, _INTL("You don't have enough money to refill PokeVial. Need ${1}.", cost.to_s_formatted))
+        return false
+      end
+      $Trainer.money -= cost
+      pbSEPlay("Mart buy item") rescue nil
       refill
       ctx[:uses_after] = uses
       ctx[:charges_after] = uses
       run_callbacks(:after_refill, ctx)
       log_info("PokeVial refilled at PokeCenter uses=#{uses}/#{configured_max_uses} cost=#{cost}")
-      pbMessage(_INTL("PokeVial refilled. Charges: {1}.", uses)) rescue nil
+      charge_label = needed == 1 ? _INTL("charge") : _INTL("charges")
+      notify(:success, _INTL("Restored {1} {2} for ${3}.", needed, charge_label, cost.to_s_formatted))
       true
     rescue Exception => e
       log_exception("PokeVial PokeCenter refill failed", e)
+      notify(:error, _INTL("The PokeVial could not be refilled right now."))
       false
     end
 
@@ -896,30 +1021,30 @@ module ReloadedPokeVial
 
     def use_charge_item
       unless can_add_uses?(1)
-        pbMessage(_INTL("The PokeVial has no empty charge slots.")) rescue nil
+        notify(:warning, _INTL("The PokeVial has no empty charge slots."))
         return 0
       end
       added = add_uses(1, source: :item, notify: false)
       return 0 if added <= 0
-      pbMessage(_INTL("The PokeVial regained 1 charge. Charges: {1}.", uses)) rescue nil
+      notify(:success, _INTL("The PokeVial regained 1 charge. Charges: {1}.", uses))
       3
     rescue Exception => e
       log_exception("PokeVial Charge item failed", e)
-      pbMessage(_INTL("The PokeVial Charge could not be used right now.")) rescue nil
+      notify(:error, _INTL("The PokeVial Charge could not be used right now."))
       0
     end
 
     def use_refill_item
       unless can_refill?
-        pbMessage(_INTL("The PokeVial is already full.")) rescue nil
+        notify(:warning, _INTL("The PokeVial is already full."))
         return 0
       end
       return 0 unless grant_full_refill(source: :item, notify: false)
-      pbMessage(_INTL("The PokeVial was fully refilled. Charges: {1}.", uses)) rescue nil
+      notify(:success, _INTL("The PokeVial was fully refilled. Charges: {1}.", uses))
       3
     rescue Exception => e
       log_exception("PokeVial Refill item failed", e)
-      pbMessage(_INTL("The PokeVial Refill could not be used right now.")) rescue nil
+      notify(:error, _INTL("The PokeVial Refill could not be used right now."))
       0
     end
 
@@ -1180,25 +1305,17 @@ module ReloadedPokeVial
             $PokemonSystem.hr_pokevial_progressive = value.to_i if $PokemonSystem
           },
           _INTL("Auto-scales max charges by badge count.")
-        )
-      ]
-      if ReloadedPokeVial.progressive_enabled?
-        options << EnumOption.new(
-          _INTL("Max Uses"),
-          [_INTL("Auto ({1})", ReloadedPokeVial.configured_max_uses)],
-          proc { 0 },
-          proc { |_value| },
-          _INTL("Current max charges are controlled by Progressive Uses.")
-        )
-      else
-        options << SliderOption.new(
+        ),
+        ConditionalSliderOption.new(
           _INTL("Max Uses"),
           1, 5, 1,
           proc { ReloadedPokeVial.configured_max_uses },
           proc { |value| ReloadedPokeVial.set_max_uses(value) },
-          _INTL("Maximum PokeVial charges between refills.")
+          proc { ReloadedPokeVial.progressive_enabled? },
+          _INTL("Maximum PokeVial charges between refills. Controlled by Progressive Uses while disabled."),
+          disabled_label: proc { _INTL("Auto ({1})", ReloadedPokeVial.configured_max_uses) }
         )
-      end
+      ]
       options.concat([
         EnumOption.new(
           _INTL("Heal Mode"),
@@ -1208,13 +1325,20 @@ module ReloadedPokeVial
           _INTL("Full Heal restores HP, status, and PP. HP Only restores HP.")
         ),
         EnumOption.new(
+          _INTL("PokeCenter Refill Mode"),
+          [_INTL("Ask"), _INTL("Automatic"), _INTL("Never")],
+          proc { ($PokemonSystem.hr_pokevial_refill_mode rescue REFILL_MODE_ASK).to_i },
+          proc { |value| $PokemonSystem.hr_pokevial_refill_mode = value.to_i if $PokemonSystem },
+          _INTL("Ask before refilling, refill automatically, or never refill after a PokeCenter heal.")
+        ),
+        EnumOption.new(
           _INTL("Cooldown"),
           [_INTL("Off"), _INTL("On")],
           proc { ReloadedPokeVial.cooldown_enabled? ? 1 : 0 },
           proc { |value| $PokemonSystem.hr_pokevial_cooldown_enabled = value.to_i if $PokemonSystem },
           _INTL("Controls whether the PokeVial must recharge between uses.")
         ),
-        EnumOption.new(
+        ConditionalEnumOption.new(
           _INTL("Cooldown Time (Real)"),
           cooldown_labels,
           proc {
@@ -1222,21 +1346,9 @@ module ReloadedPokeVial
             cooldown_values.index(minutes) || 0
           },
           proc { |index| $PokemonSystem.hr_pokevial_cooldown_seconds = cooldown_values[index.to_i] * 60 if $PokemonSystem },
-          _INTL("Recharge time between PokeVial uses.")
-        ),
-        EnumOption.new(
-          _INTL("PokeCenter Cost"),
-          [_INTL("Off"), _INTL("On")],
-          proc { ReloadedPokeVial.refill_cost_enabled? ? 1 : 0 },
-          proc { |value| $PokemonSystem.hr_pokevial_refill_cost_enabled = value.to_i if $PokemonSystem },
-          _INTL("Controls whether PokeCenters charge money to refill PokeVial uses.")
-        ),
-        SliderOption.new(
-          _INTL("Cost Per Use"),
-          0, 5000, 100,
-          proc { ReloadedPokeVial.refill_cost_per_use },
-          proc { |value| $PokemonSystem.hr_pokevial_refill_cost_per_use = value.to_i if $PokemonSystem },
-          _INTL("Cost for each missing PokeVial charge when refilling.")
+          proc { !ReloadedPokeVial.cooldown_enabled? },
+          _INTL("Recharge time between PokeVial uses. Available while Cooldown is On."),
+          disabled_label: _INTL("Disabled")
         )
       ])
       options
@@ -1272,6 +1384,9 @@ end
 
 if defined?(Events) && Events.respond_to?(:onMapUpdate)
   Events.onMapUpdate += proc { |_sender, _event|
-    ReloadedPokeVial.install_runtime_patches if defined?(ReloadedPokeVial)
+    if defined?(ReloadedPokeVial)
+      ReloadedPokeVial.install_runtime_patches
+      ReloadedPokeVial.update_overworld
+    end
   }
 end

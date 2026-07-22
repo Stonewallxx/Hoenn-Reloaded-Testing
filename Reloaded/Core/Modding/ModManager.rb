@@ -28,7 +28,7 @@ module Reloaded
     CORE_CHANGELOG_PATH = "Reloaded/Changelog.md"
     GAME_ID = "hoenn"
     UNINSTALLED_MARKER = ".ReloadedUninstalled"
-    MODDEV_TOOL_FOLDERS = ["Windows", "Proton"].freeze
+    MODDEV_TOOL_FOLDERS = ["Foundation Checks", "Tools"].freeze
 
     DEFAULT_MODDEV_ENABLED = false
 
@@ -312,6 +312,7 @@ module Reloaded
             log_invalid(candidate)
           end
         end
+        prune_missing_profile_mods
         validate_disabled_mods
         validate_incompatibilities
         @mods
@@ -674,6 +675,16 @@ module Reloaded
           next if mod[:enabled]
           @skipped_mods << skip_entry(mod, "Disabled")
         end
+      end
+
+      def prune_missing_profile_mods
+        return unless defined?(Reloaded::Profiles) && Reloaded::Profiles.respond_to?(:prune_missing_mods)
+        available = @candidates.map { |candidate| normalize_mod_id(candidate[:id]) }
+                               .reject { |id| id.empty? }
+                               .uniq
+        Reloaded::Profiles.prune_missing_mods(available)
+      rescue Exception => e
+        Reloaded::Log.exception("Could not prune missing profile mods", e, channel: :mods) if defined?(Reloaded::Log)
       end
 
       def apply_profile_state

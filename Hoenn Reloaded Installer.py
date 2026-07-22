@@ -28,7 +28,7 @@ SEGMENTED_DOWNLOAD_MINIMUM = 24 * 1024 * 1024
 DOWNLOAD_RETRIES = 3
 DOWNLOAD_RETRY_DELAY = 1.0
 DISK_SPACE_MARGIN = 64 * 1024 * 1024
-INSTALLER_VERSION = "4.1.0"
+INSTALLER_VERSION = "4.2.0"
 PUBLIC_MANIFEST_URL = (
     "https://raw.githubusercontent.com/Stonewallxx/Hoenn-Reloaded/"
     "main/Reloaded/InstallerManifest.json"
@@ -55,7 +55,8 @@ TESTING_EXCLUDED_PATTERNS = tuple(
     re.compile(value, re.IGNORECASE)
     for value in (
         r"^(?:\.agents|\.codex|\.git|\.github|\.vscode)/",
-        r"^(?:Admin Tools|Developer Tools|ModDev)/",
+        r"^(?:Admin Tools|Developer Tools)/",
+        r"^ModDev/(?!Tools(?:/|$))",
         r"^REQUIRED_BY_INSTALLER_UPDATER/",
         r"^Mods/",
         r"^Graphics/SpritePacks/",
@@ -189,14 +190,22 @@ def inside(root, path):
 def print_progress(label, current, total):
     if total > 0:
         percent = min(100, int(current * 100 / total))
-        width = 32
-        filled = int(width * percent / 100)
-        bar = "#" * filled + "-" * (width - filled)
-        text = "\r{} [{}] {:3d}% {:.1f}/{:.1f} MB".format(
-            label, bar, percent, current / 1048576.0, total / 1048576.0
+        amount = " {:.1f}/{:.1f} MB".format(
+            current / 1048576.0, total / 1048576.0
         )
+        prefix = label + " ["
+        suffix = "] {:3d}%{}".format(percent, amount)
+        columns = shutil.get_terminal_size((120, 24)).columns
+        width = max(16, columns - len(prefix) - len(suffix) - 1)
+        filled = int(width * percent / 100)
+        bar = ""
+        if filled:
+            bar += "\033[46m" + (" " * filled) + "\033[0m"
+        if width - filled:
+            bar += "\033[100m" + (" " * (width - filled)) + "\033[0m"
+        text = "\r\033[2K{}{}{}".format(prefix, bar, suffix)
     else:
-        text = "\r{} {:.1f} MB".format(label, current / 1048576.0)
+        text = "\r\033[2K{} {:.1f} MB".format(label, current / 1048576.0)
     sys.stdout.write(text)
     sys.stdout.flush()
 
@@ -1020,6 +1029,8 @@ def write_spritepack_state(game_root, spritepack):
         "id": identifier,
         "name": str(spritepack.get("name", "Full Spritepack")),
         "url": source_url,
+        "build_id": str(spritepack.get("build_id", "")),
+        "parts": parts,
         "components": [],
         "updated_at": str(spritepack.get("updated_at", "")),
         "full": True,
@@ -1057,7 +1068,12 @@ def main():
         "--game-root", default=os.path.dirname(os.path.abspath(__file__))
     )
     parser.add_argument("--channel", choices=("public", "testing"), default="")
-    parser.add_argument("--install-type", choices=("core", "full"), default="")
+    parser.add_argument(
+        "--install-type",
+        choices=("core", "full"),
+        default="",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--public-manifest-url", default=PUBLIC_MANIFEST_URL)
     parser.add_argument("--testing-archive-url", default=TESTING_ARCHIVE_URL)
     parser.add_argument("--spritepack-catalog-url", default=SPRITEPACK_CATALOG_URL)
@@ -1095,8 +1111,6 @@ def main():
         args.repair = True
         if incomplete.get("channel") in ("public", "testing"):
             args.channel = incomplete["channel"]
-        if incomplete.get("install_type") in ("core", "full"):
-            args.install_type = incomplete["install_type"]
         print("\nAn interrupted installation was detected.")
         print("Repair mode is required and has been enabled.")
 
@@ -1111,23 +1125,12 @@ def main():
             == 1
             else "testing"
         )
-    install_type = args.install_type
-    if not install_type:
-        install_type = (
-            "core"
-            if choose("Choose what to install:", ("Core", "Core + Spritepacks"))
-            == 1
-            else "full"
-        )
+    install_type = "full"
     args.channel = channel
     args.install_type = install_type
-    include_spritepacks = install_type == "full"
+    include_spritepacks = True
     print("\n Channel: {}".format(channel.title()))
-    print(
-        " Package: {}".format(
-            "Core + Spritepacks" if include_spritepacks else "Core"
-        )
-    )
+    print(" Package: Core + Full Spritepack")
     print(" Existing saves, mods, settings, profiles, and imports are preserved.")
 
     print("\n[1/5] Checking source")
@@ -1208,11 +1211,7 @@ def main():
     if not new_files:
         raise RuntimeError("The installed Core did not provide a managed file inventory.")
 
-    print(
-        "\n[4/5] {}".format(
-            "Checking Spritepacks" if include_spritepacks else "Preserving Spritepacks"
-        )
-    )
+    print("\n[4/5] Checking Full Spritepack")
     sprite_paths = []
     if include_spritepacks:
         catalog_url = str(
@@ -1304,9 +1303,6 @@ def main():
             write_spritepack_state(game_root, spritepack)
         else:
             print("Full Spritepack {} is already installed.".format(installed))
-    else:
-        print("Core-only selected. Existing Spritepacks were not changed.")
-
     print("\n[5/5] Finalizing installation")
     write_install_marker(
         incomplete_path,
@@ -1314,7 +1310,7 @@ def main():
         install_type,
         version,
         "finalizing",
-        wanted if include_spritepacks else "",
+        wanted,
     )
     remove_obsolete(game_root, old_files, new_files)
     if os.path.isfile(previous_managed):

@@ -86,6 +86,9 @@ module Reloaded
         :scope => :core,
         :files => [
           "Core/DataPatches/Registry.rb",
+          "Core/DataPatches/ExpandedDex.rb",
+          "Core/DataPatches/ExpandedDex/BattleMoves.rb",
+          "Core/DataPatches/ExpandedDex/BattleAbilities.rb",
           "Core/DataPatches/Outfits.rb",
           "Core/DataPatches/Items.rb",
           "Core/DataPatches/Moves.rb",

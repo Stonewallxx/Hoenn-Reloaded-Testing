@@ -226,8 +226,9 @@ module Reloaded
       end
 
       def list_entries(archive)
-        raise_failure(:process_unavailable, "Archive process support is unavailable.") unless defined?(Open3)
-        output, status = Open3.capture2e(archive_tool, "l", "-slt", "-ba", "-sccUTF-8", archive)
+        raise_failure(:process_unavailable, "Archive process support is unavailable.") unless process_supported?
+        command = [archive_tool, "l", "-slt", "-ba", "-sccUTF-8", archive]
+        output, status = capture_process(command)
         unless status && status.success?
           raise_failure(:invalid_archive, process_error("The archive could not be read.", output))
         end
@@ -365,25 +366,20 @@ module Reloaded
       end
 
       def run_extraction(archive, destination, opts)
-        raise_failure(:process_unavailable, "Archive process support is unavailable.") unless defined?(Open3)
+        raise_failure(:process_unavailable, "Archive process support is unavailable.") unless process_supported?
         overwrite = { :overwrite => "-aoa", :skip => "-aos", :fail => "-aos" }[opts[:overwrite]]
         command = [archive_tool, "x", archive, "-y", "-mmt=on", "-bb1", "-bsp1", "-bso1", "-bse1", "-sccUTF-8", overwrite, "-o#{destination}"]
         output = +""
-        exit_status = nil
-        Open3.popen2e(*command) do |_input, combined, wait|
-          combined.each_line do |line|
-            output << line.to_s
-            output = output[-8_000, 8_000] if output.length > 8_000
-            if line.to_s =~ /(\d{1,3})%/
-              percent = [[Regexp.last_match(1).to_i, 0].max, 100].min
-              report(opts[:task], 0.2 + percent / 100.0 * 0.74, "Extracting archive", opts)
-            end
-            if opts[:task] && opts[:task].respond_to?(:cancelled?) && opts[:task].cancelled?
-              Process.kill("KILL", wait.pid) rescue nil
-              opts[:task].checkpoint!
-            end
+        exit_status = stream_process(command) do |line, _pid|
+          output << line.to_s
+          output = output[-8_000, 8_000] if output.length > 8_000
+          if line.to_s =~ /(\d{1,3})%/
+            percent = [[Regexp.last_match(1).to_i, 0].max, 100].min
+            report(opts[:task], 0.2 + percent / 100.0 * 0.74, "Extracting archive", opts)
           end
-          exit_status = wait.value
+          if opts[:task] && opts[:task].respond_to?(:cancelled?) && opts[:task].cancelled?
+            opts[:task].checkpoint!
+          end
         end
         unless exit_status && exit_status.success?
           raise_failure(:extract_failed, process_error("The archive could not be extracted.", output))
@@ -394,6 +390,65 @@ module Reloaded
       rescue Exception => e
         raise if cancelled_exception?(e)
         raise_failure(:extract_failed, sanitize_error(e.message, "The archive could not be extracted."))
+      end
+
+      def process_supported?
+        defined?(Open3) || (defined?(Process) && Process.respond_to?(:spawn) && IO.respond_to?(:pipe))
+      rescue
+        false
+      end
+
+      def capture_process(command)
+        return Open3.capture2e(*command) if defined?(Open3)
+        reader = nil
+        writer = nil
+        pid = nil
+        reader, writer = IO.pipe
+        pid = Process.spawn(*command, :out => writer, :err => writer)
+        writer.close
+        output = reader.read
+        reader.close
+        Process.waitpid(pid)
+        status = $?
+        pid = nil
+        [output, status]
+      ensure
+        writer.close rescue nil
+        reader.close rescue nil
+        terminate_process(pid) if pid
+      end
+
+      def stream_process(command)
+        if defined?(Open3)
+          status = nil
+          Open3.popen2e(*command) do |_input, combined, wait|
+            combined.each_line { |line| yield line, wait.pid }
+            status = wait.value
+          end
+          return status
+        end
+        reader = nil
+        writer = nil
+        pid = nil
+        reader, writer = IO.pipe
+        pid = Process.spawn(*command, :out => writer, :err => writer)
+        writer.close
+        reader.each_line { |line| yield line, pid }
+        reader.close
+        Process.waitpid(pid)
+        status = $?
+        pid = nil
+        status
+      ensure
+        writer.close rescue nil
+        reader.close rescue nil
+        terminate_process(pid) if pid
+      end
+
+      def terminate_process(pid)
+        return unless pid
+        Process.kill("KILL", pid) rescue nil
+        Process.waitpid(pid) rescue nil
       end
 
       def verify_expected_files!(entries, destination)

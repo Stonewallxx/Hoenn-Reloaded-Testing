@@ -111,7 +111,7 @@ module Reloaded
           @title_y = 3
           @stage_y = 28
           @bar_y = 57
-          @percent_y = 70
+          @percent_y = 67
           @choice_y = 97
           @h = @options[:cancellable] ? 130 : 98
           @x = (PopupWindow::SCREEN_W - @w) / 2
@@ -174,7 +174,6 @@ module Reloaded
 
         def draw_cancel_row(bitmap, snapshot)
           cancelling = cancel_pending?(snapshot)
-          bitmap.fill_rect(14, @choice_y - 5, @w - 28, 1, @theme[:border] || PopupWindow::DIM)
           unless cancelling
             draw_selection(bitmap, 12, @choice_y, @w - 24, CHOICE_H)
           end

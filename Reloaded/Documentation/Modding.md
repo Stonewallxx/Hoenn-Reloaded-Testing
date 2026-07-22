@@ -2053,6 +2053,20 @@ ReloadedPokeVial.item_id?(:POKEVIAL_CHARGE)
 `status_text` returns the same short labels used by Reloaded menus:
 `Charges: #`, `EMPTY`, or `Cooldown: 04:12`.
 
+PokeVial use is rejected without consuming a charge when no party Pokemon needs
+the selected healing mode. Full Heal checks HP, status, and PP; HP Only checks HP.
+
+PokeCenter refills use the formula `250 x maximum charges x missing charges`.
+This scales refill prices with the capacity being restored instead of charging a
+flat amount per charge. Players can choose `Ask`, `Automatic`, or `Never` for
+PokeCenter refills; `Ask` is the default. Refill callbacks receive the calculated
+total in `ctx[:cost]`.
+
+When Progressive Uses is enabled, badge progression raises the current maximum.
+Each newly unlocked slot is immediately filled, and a delayed success Toast is
+shown once the player is safely back in the overworld. Future or otherwise
+invalid saved cooldown timestamps are clamped before cooldown time is calculated.
+
 Mods can register callbacks for use and refill flow:
 
 ```ruby
@@ -2387,21 +2401,32 @@ See `Reloaded/Documentation/Manager.md` for the source and index formats.
 
 ## Publishing
 
-Publishing uses the matching external ModDev script:
+Publishing uses the matching external fixed-action tool:
 
 ```text
-ModDev/Windows/Publish to GitHub.bat
-ModDev/Proton/Publish to GitHub.sh
+ModDev/Tools/Windows/Publish.bat
+ModDev/Tools/Windows/Update.bat
+ModDev/Tools/Windows/Delete.bat
+ModDev/Tools/Proton/Publish.sh
+ModDev/Tools/Proton/Update.sh
+ModDev/Tools/Proton/Delete.sh
 ```
 
 In-game, use:
 
 ```text
-Mod Manager -> Tools -> Publish
+Mod Manager -> Tools -> Mod Tools
 ```
 
-The external script selects and validates the mod or profile, then does the
-GitHub work before pushing.
+Publish selects a local Mod or Profile. It creates the first persistent release
+for a new ID or adds/replaces a version asset for an existing owned ID. Update
+is a separate metadata-only tool: it lists owned online entries and edits their
+display name, authors, description, tags, changelog URL, and homepage URL. It
+does not read local content, package files, or upload release assets.
+
+The tools do not clone or cache the repository. Publishing another version,
+Update, and Delete enforce the `publisher_login` recorded by the first publish,
+with a repository-owner override for maintenance.
 
 ## Reloaded Bag Autosort
 
@@ -2671,12 +2696,16 @@ folder `Mods/Reloaded/` is not included in mod backups.
 
 Tools menu order:
 
-- `Admin Tools` when local admin files are present
-- `Template Generator`
-- `Manifest Validator/Fixer`
-- `Log Files`
+- `Mod Tools`
+- `Create` -> `Mod` or `Profile`
+- `Update` -> owned online `Mod` or `Profile` -> edit public listing metadata
+- `Publish` -> local `Mod` or `Profile` -> create, add, or replace a version
+- `Delete` -> `Mod` or `Profile`
+- `Validate` -> `Mod` or `Profile`
+- `ModDev` -> `Off` or `On`
 - `Backup Mods`
-- `Publish`
+- `Log Files`
+- `Admin Tools` when private local admin files are present
 
 The manifest validator scans `Mods/` and enabled `ModDev/` folders and reports
 missing or invalid manifest fields. The fixer only applies safe structural
@@ -2698,8 +2727,7 @@ documentation also explains API contract classifications. Only documented
 overrides, scene implementations, adapters, and mutable internal registries
 must not be used by released mods.
 
-Profiles are created through the normal Profiles interface rather than a
-separate template action.
+Profile templates can be empty or seeded from currently installed Mods.
 
 The backend API is:
 

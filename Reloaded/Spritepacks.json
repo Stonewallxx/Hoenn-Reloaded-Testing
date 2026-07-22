@@ -3,34 +3,34 @@
     "extract_to":  ".",
     "files":  [
                   {
-                      "id":  "full_spritepack_20260719-121218",
+                      "id":  "full_spritepack_20260721-183247",
                       "name":  "Full Spritepack 1-126",
                       "url":  "",
-                      "updated_at":  "2026-07-19T17:03:12.5779115Z",
+                      "updated_at":  "2026-07-21T23:24:41.3615319Z",
                       "latest":  true,
-                      "build_id":  "20260719-121218",
-                      "size":  5187099942,
-                      "installed_size":  5835799757,
-                      "sha256":  "b99703d8384e9126f747f0906f96410bb1fcafa35a48d333a62216f9ee4ee9ac",
+                      "build_id":  "20260721-183247",
+                      "size":  4602842625,
+                      "installed_size":  5216423036,
+                      "sha256":  "e2edde741fa352ff79411151d43cad4a8371634d5bc205b404a9c2fc06c44ec9",
                       "full":  true,
                       "parts":  [
                                     {
                                         "file":  "Hoenn-Reloaded-Full-Spritepack-1-126.zip.001",
                                         "url":  "https://github.com/Stonewallxx/Hoenn-Reloaded/releases/download/Spritepacks/Hoenn-Reloaded-Full-Spritepack-1-126.zip.001",
                                         "size":  1992294400,
-                                        "sha256":  "9f6b7bee179f4a1c6f73fa2edfb742aa79acfcaaf21389a6a446c9e55243601b"
+                                        "sha256":  "7d26ee68e78fe757e1f01baf73870dda1b4a3dd5056351f528ca4b90d2299377"
                                     },
                                     {
                                         "file":  "Hoenn-Reloaded-Full-Spritepack-1-126.zip.002",
                                         "url":  "https://github.com/Stonewallxx/Hoenn-Reloaded/releases/download/Spritepacks/Hoenn-Reloaded-Full-Spritepack-1-126.zip.002",
                                         "size":  1992294400,
-                                        "sha256":  "66c668a2708261a59fdeba367cb82acc75b7b7d7b60121ffa86877c6f34a795f"
+                                        "sha256":  "858661ce5a53028fae1ae99bb93bee934a5b392454e1860abaf08306aa95ee1f"
                                     },
                                     {
                                         "file":  "Hoenn-Reloaded-Full-Spritepack-1-126.zip.003",
                                         "url":  "https://github.com/Stonewallxx/Hoenn-Reloaded/releases/download/Spritepacks/Hoenn-Reloaded-Full-Spritepack-1-126.zip.003",
-                                        "size":  1202511142,
-                                        "sha256":  "c4bd85ff3c1c0a0f40927189a7abfccf124660cda58902b9e369f89981fe9096"
+                                        "size":  618253825,
+                                        "sha256":  "5dab393777d98d9ea9add4e67e25ab66112cc84f8418c5d4295a47c4a7e6c3d4"
                                     }
                                 ]
                   }

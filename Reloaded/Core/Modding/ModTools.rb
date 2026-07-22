@@ -193,15 +193,23 @@ module Reloaded
       def manifest_targets
         dirs = [MODS_DIR]
         dirs << MODDEV_DIR if moddev_enabled?
-        dirs.each_with_object([]) do |root, list|
+        targets = dirs.each_with_object([]) do |root, list|
           next unless Dir.exist?(root)
           Dir[File.join(root, "*")].sort.each do |folder|
             next unless File.directory?(folder)
             next if same_path?(folder, File.join(MODS_DIR, "Reloaded"))
-            next if same_path?(root, MODDEV_DIR) && ["windows", "proton"].include?(File.basename(folder).downcase)
+            next if same_path?(root, MODDEV_DIR) && ["foundation checks", "tools"].include?(File.basename(folder).downcase)
             path = File.join(folder, "mod.json")
             list << manifest_target(folder, path, root)
           end
+        end
+        return targets unless moddev_enabled?
+        moddev_ids = targets.select { |target| target[:source] == :moddev }
+                             .map { |target| manifest_target_id(target) }
+                             .reject { |id| id.empty? }
+                             .uniq
+        targets.reject do |target|
+          target[:source] == :mods && moddev_ids.include?(manifest_target_id(target))
         end
       end
 
@@ -267,7 +275,66 @@ module Reloaded
         folder
       end
 
+      def profile_targets
+        return [] unless defined?(Reloaded::Profiles)
+        Reloaded::Profiles.list.map do |profile|
+          {
+            :id => profile["id"].to_s,
+            :name => profile["name"].to_s,
+            :profile => profile
+          }
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Could not list profile validation targets", e, channel: :mods) if defined?(Reloaded::Log)
+        []
+      end
+
+      def validate_profiles
+        available = available_profile_mod_ids
+        profile_targets.map do |target|
+          profile = target[:profile]
+          result = target.dup
+          result[:errors] = []
+          result[:warnings] = []
+          id = profile["id"].to_s
+          name = profile["name"].to_s
+          result[:errors] << "Profile name is required." if name.strip.empty?
+          result[:errors] << "id must use lowercase letters, numbers, and underscores" unless id =~ /\A[a-z0-9_]+\z/
+          enabled = normalize_array(profile["enabled_mods"], [])
+          disabled = normalize_array(profile["disabled_mods"], [])
+          order = normalize_array(profile["load_order"], [])
+          overlap = enabled & disabled
+          result[:errors] << "Mods cannot be both enabled and disabled: #{overlap.join(', ')}" unless overlap.empty?
+          duplicated = order.group_by { |mod_id| mod_id }.select { |_mod_id, rows| rows.length > 1 }.keys
+          result[:errors] << "Load order contains duplicates: #{duplicated.join(', ')}" unless duplicated.empty?
+          missing_order = enabled - order
+          result[:warnings] << "Enabled mods missing from load order: #{missing_order.join(', ')}" unless missing_order.empty?
+          referenced = (enabled + disabled + order).uniq
+          missing = referenced.reject { |mod_id| available.include?(normalize_mod_id(mod_id)) }
+          result[:errors] << "Referenced mods are not installed or published: #{missing.join(', ')}" unless missing.empty?
+          result
+        end
+      end
+
+      def create_profile_template(name, mod_ids = [])
+        raise "Reloaded profiles are unavailable." unless defined?(Reloaded::Profiles)
+        profile = Reloaded::Profiles.create(name, :activate => false)
+        ids = Array(mod_ids).map { |value| normalize_mod_id(value) }.reject { |value| value.empty? }.uniq
+        profile["enabled_mods"] = ids
+        profile["disabled_mods"] = []
+        profile["load_order"] = ids
+        Reloaded::Profiles.write_profile(profile)
+      end
+
       private
+
+      def available_profile_mod_ids
+        ids = []
+        ids.concat(Reloaded::ModManager.mod_ids) if defined?(Reloaded::ModManager)
+        ids.map { |value| normalize_mod_id(value) }.reject { |value| value.empty? }.uniq
+      rescue
+        []
+      end
 
       def read_export_text(path, name)
         raise "#{name} is too large to export." if File.size(path).to_i > MAX_TEXT_EXPORT_BYTES
@@ -343,6 +410,18 @@ module Reloaded
           :root => root.gsub("\\", "/"),
           :source => same_path?(root, MODDEV_DIR) ? :moddev : :mods
         }
+      end
+
+      def manifest_target_id(target)
+        path = target[:manifest_path].to_s
+        if File.exist?(path)
+          data = parse_json(File.read(path))
+          id = normalize_mod_id(data["id"]) if data.is_a?(Hash)
+          return id unless id.to_s.empty?
+        end
+        normalize_mod_id(File.basename(target[:folder_path].to_s))
+      rescue
+        normalize_mod_id(File.basename(target[:folder_path].to_s))
       end
 
       def validate_manifest_target(target)
@@ -774,6 +853,9 @@ module Reloaded
       def validate_manifests; ModderTools.validate_manifests; end
       def fix_manifest(target); ModderTools.fix_manifest(target); end
       def create_mod_template(name); ModderTools.create_mod_template(name); end
+      def profile_targets; ModderTools.profile_targets; end
+      def validate_profiles; ModderTools.validate_profiles; end
+      def create_profile_template(name, mod_ids = []); ModderTools.create_profile_template(name, mod_ids); end
     end
   end
 end

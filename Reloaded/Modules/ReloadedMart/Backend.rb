@@ -846,7 +846,9 @@ module ReloadedMart
     def open
       log_info("Opening Reloaded Mart")
       Ledger.recover_incomplete! if defined?(Ledger)
-      Source.load_for_open(blocking: false)
+      # Build the first frame from the current catalog before overlapping the
+      # initial row-state cache assembly with background network work.
+      Source.load_for_open(blocking: false, start_refresh: false)
       if ui_ready?
         open_ui
       else
@@ -952,6 +954,7 @@ module ReloadedMart
 
   module Source
     REMOTE_SOURCE_ID = :reloaded_mart_catalog
+    RECENT_REFRESH_SECONDS = 30.0
 
     @active_catalog = nil
     @active_report = nil
@@ -959,6 +962,8 @@ module ReloadedMart
     @active_raw = nil
     @fetch_task = nil
     @fetch_completion = nil
+    @last_refresh_finished_at = nil
+    @last_refresh_outcome = nil
 
     class << self
       attr_reader :active_catalog, :active_report, :active_source, :active_raw
@@ -967,9 +972,14 @@ module ReloadedMart
         ONLINE_CATALOG_URL
       end
 
-      def load_for_open(blocking: true)
+      def load_for_open(blocking: true, start_refresh: true)
         load_base_catalog(:open) unless @active_catalog
-        blocking ? refresh_online(blocking: true) : start_online_refresh
+        finish_online_refresh if @fetch_task && !@fetch_task.running?
+        if blocking
+          refresh_online(blocking: true)
+        elsif start_refresh
+          start_online_refresh
+        end
         current
       end
 
@@ -1064,6 +1074,8 @@ module ReloadedMart
 
       def clear_cache
         ReloadedMart.set_cache({})
+        @last_refresh_finished_at = nil
+        @last_refresh_outcome = nil
         ensure_remote_source
         Reloaded::RemoteData.clear(REMOTE_SOURCE_ID)
         true
@@ -1074,7 +1086,12 @@ module ReloadedMart
 
       def start_online_refresh
         return false unless defined?(Reloaded::Task)
-        return false if @fetch_task && @fetch_task.running?
+        return :running if @fetch_task && @fetch_task.running?
+        finish_online_refresh if @fetch_task
+        if recent_refresh?
+          ReloadedMart.log_debug("Mart catalog reused recent #{@last_refresh_outcome} refresh")
+          return @last_refresh_outcome == :success ? :recent_success : :recent_failure
+        end
         ensure_remote_source
         @fetch_completion = nil
         @fetch_task = Reloaded::Task.start(:reloaded_mart_refresh, {
@@ -1122,19 +1139,41 @@ module ReloadedMart
         return false unless completion.is_a?(Hash)
         case completion[:status]
         when :success
-          apply_remote_result(completion[:remote]) ? current : false
+          applied = apply_remote_result(completion[:remote])
+          record_refresh_outcome(applied ? :success : :failure)
+          applied ? current : false
         when :failure
           load_cached_or_fail(completion[:reason] || :remote_unavailable)
+          record_refresh_outcome(:failure)
           false
         else
+          record_refresh_outcome(:failure)
           false
         end
+      end
+
+      def recent_refresh?
+        return false unless @last_refresh_finished_at
+        age = Time.now.to_f - @last_refresh_finished_at.to_f
+        age >= 0.0 && age < RECENT_REFRESH_SECONDS
+      rescue
+        false
+      end
+
+      def record_refresh_outcome(outcome)
+        @last_refresh_finished_at = Time.now.to_f
+        @last_refresh_outcome = outcome.to_sym
+      rescue
+        @last_refresh_finished_at = nil
+        @last_refresh_outcome = nil
       end
 
       def shutdown
         @fetch_task.cancel if @fetch_task && @fetch_task.running?
         @fetch_task = nil
         @fetch_completion = nil
+        @last_refresh_finished_at = nil
+        @last_refresh_outcome = nil
         true
       rescue Exception => e
         ReloadedMart.log_exception("Reloaded Mart source shutdown failed", e)

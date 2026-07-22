@@ -1296,6 +1296,37 @@ if defined?(Option)
     end
   end
 
+  class ConditionalEnumOption < EnumOption
+    def initialize(name, options, getProc, setProc, disabled_proc, description = "", disabled_label: "Disabled")
+      super(name, options, getProc, setProc, description)
+      @disabled_proc = disabled_proc
+      @disabled_label = disabled_label
+    end
+
+    def disabled?
+      (@disabled_proc.call rescue false) ? true : false
+    end
+
+    def disabled_label
+      value = @disabled_label.respond_to?(:call) ? @disabled_label.call : @disabled_label
+      value.to_s
+    rescue
+      "Disabled"
+    end
+
+    def set(value)
+      super(value) unless disabled?
+    end
+
+    def next(current)
+      disabled? ? current : super
+    end
+
+    def prev(current)
+      disabled? ? current : super
+    end
+  end
+
   class LockableNumberOption < NumberOption
     attr_reader :locked_label
 
@@ -1497,6 +1528,37 @@ if defined?(SliderOption)
       value = current - @optinterval
       value = @optstart if value < @optstart
       value
+    end
+  end
+
+  class ConditionalSliderOption < SliderOption
+    def initialize(name, optstart, optend, optinterval, getProc, setProc, disabled_proc, description = "", disabled_label: "Disabled")
+      super(name, optstart, optend, optinterval, getProc, setProc, description)
+      @disabled_proc = disabled_proc
+      @disabled_label = disabled_label
+    end
+
+    def disabled?
+      (@disabled_proc.call rescue false) ? true : false
+    end
+
+    def disabled_label
+      value = @disabled_label.respond_to?(:call) ? @disabled_label.call : @disabled_label
+      value.to_s
+    rescue
+      "Disabled"
+    end
+
+    def set(value)
+      super(value) unless disabled?
+    end
+
+    def next(current)
+      disabled? ? current : super
+    end
+
+    def prev(current)
+      disabled? ? current : super
     end
   end
 end
@@ -1709,6 +1771,10 @@ if defined?(Window_PokemonOption)
     def draw_enum(option, index, rect)
       rect = drawCursor(index, rect)
       label_w = label_width(rect)
+      if disabled_option?(option)
+        draw_disabled_option(option, rect, label_w)
+        return
+      end
       pbDrawShadowText(self.contents, rect.x, rect.y, label_w, rect.height,
                        option.name, @nameBaseColor, @nameShadowColor)
       return if option.values.nil? || option.values.empty?
@@ -1735,6 +1801,10 @@ if defined?(Window_PokemonOption)
     def draw_slider(option, index, rect)
       rect = drawCursor(index, rect)
       label_w = label_width(rect)
+      if disabled_option?(option)
+        draw_disabled_option(option, rect, label_w)
+        return
+      end
       pbDrawShadowText(self.contents, rect.x, rect.y, label_w, rect.height,
                        option.name, @nameBaseColor, @nameShadowColor)
       actual = (option_display_value(option, index) || 0).to_f
@@ -1755,6 +1825,27 @@ if defined?(Window_PokemonOption)
       self.contents.fill_rect(tick_x, rect.y - 8 + rect.height / 2, 8, 16, slider_base)
       pbDrawShadowText(self.contents, area_x + bar_len + 6, rect.y, value_w + 4, rect.height,
                        actual.to_i.to_s, @selBaseColor, @selShadowColor)
+    end
+
+    def disabled_option?(option)
+      option.respond_to?(:disabled?) && option.disabled?
+    rescue
+      false
+    end
+
+    def draw_disabled_option(option, rect, label_w)
+      base = reloaded_with_alpha(@nameBaseColor, 115)
+      value_base = reloaded_with_alpha(@selBaseColor, 115)
+      shadow = Color.new(0, 0, 0, 0)
+      pbDrawShadowText(self.contents, rect.x, rect.y, label_w, rect.height,
+                       option.name, base, shadow)
+      value = option.respond_to?(:disabled_label) ? option.disabled_label.to_s : _INTL("Disabled")
+      area_x = rect.x + label_w
+      area_w = rect.width - label_w
+      value_w = self.contents.text_size(value).width rescue area_w
+      value_x = area_x + [(area_w - value_w) / 2, 0].max
+      pbDrawShadowText(self.contents, value_x, rect.y, value_w + 4, rect.height,
+                       value, value_base, shadow)
     end
   end
 end

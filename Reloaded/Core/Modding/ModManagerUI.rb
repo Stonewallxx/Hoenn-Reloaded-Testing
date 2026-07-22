@@ -60,6 +60,7 @@ module Reloaded
 
     FOOTER_BUTTONS = ["Profiles", "Browser", "Tools"].freeze
     BUG_REPORT_THREAD_URL = "https://discord.com/channels/1121345297352753243/1518892862429855794".freeze
+    RELEASE_REPOSITORY_URL = "https://github.com/Stonewallxx/Hoenn-Reloaded-Mods".freeze
     CORE_UPDATE_INSTALLERS = {
       :windows => "Hoenn Reloaded Installer.bat",
       :proton => "Hoenn Reloaded Installer.sh"
@@ -478,10 +479,26 @@ module Reloaded
           show_message("Spritepack downloads are not available.")
           return
         end
-        choice = show_message("Spritepacks", ["Latest", "All Files", "Back"])
-        case choice
-        when 0 then open_spritepack_file_menu("Latest", Reloaded::ModBrowser.spritepack_latest_files)
-        when 1 then open_spritepack_file_menu("All Files", Reloaded::ModBrowser.spritepack_all_files)
+        status = Reloaded::ModBrowser.spritepack_status
+        choices = []
+        if platform_supports?(:browser_downloads)
+          choices << "Repair Full Spritepack" if status[:state] == :repair_needed
+          choices << "Update Full Spritepack" if status[:state] == :update_available
+        end
+        monthly = Reloaded::ModBrowser.spritepack_all_files.reject { |file| file["full"] }
+        choices << "Browse Monthly Updates" unless monthly.empty?
+        choices << "Verify Spritepacks" if defined?(Reloaded::SpritePacks) && defined?(Reloaded::Task)
+        choices += ["View Installed Version", "Back"]
+        choice = show_message("Spritepacks", choices)
+        case choices[choice]
+        when "Repair Full Spritepack", "Update Full Spritepack"
+          confirm_spritepack_download(status[:full]) if status[:full]
+        when "Browse Monthly Updates"
+          open_spritepack_file_menu("Monthly Updates", monthly)
+        when "Verify Spritepacks"
+          verify_spritepacks
+        when "View Installed Version"
+          show_spritepack_version
         end
       rescue Exception => e
         Reloaded::Log.exception("Spritepack menu failed", e, channel: :mods) if defined?(Reloaded::Log)
@@ -514,19 +531,106 @@ module Reloaded
         lines << "Type: #{file["full"] ? 'Full Spritepack' : 'Monthly Update'}"
         updated = file["updated_at"].to_s.strip
         lines << "Updated: #{updated}" unless updated.empty?
+        lines << (spritepack_file_installed?(file) ? "Status: Installed" : "Status: Available")
         lines.join("\n")
       end
 
       def open_spritepack_action_menu(file)
         name = file["name"].to_s
         choices = []
-        choices << "Download" if platform_supports?(:browser_downloads)
-        choices += ["Mark as Installed", "Back"]
+        installed = spritepack_file_installed?(file)
+        if platform_supports?(:browser_downloads)
+          choices << (installed ? "Reinstall" : "Download")
+        end
+        choices << "Mark as Installed" unless file["full"]
+        choices << "Back"
         choice = show_message(name, choices)
         case choices[choice]
-        when "Download" then confirm_spritepack_download(file)
+        when "Download", "Reinstall" then confirm_spritepack_download(file)
         when "Mark as Installed" then confirm_spritepack_mark_installed(file)
         end
+      end
+
+      def show_spritepack_version
+        status = Reloaded::ModBrowser.spritepack_status
+        lines = []
+        installed = status[:installed_build_id].to_s
+        expected = status[:expected_build_id].to_s
+        full_label = case status[:full_state]
+                     when :installed then "Installed"
+                     when :update_available then "Update Available"
+                     else "Repair Needed"
+                     end
+        lines << "Full Spritepack: #{full_label}"
+        lines << "Installed Build: #{installed.empty? ? 'Not detected' : installed}"
+        lines << "Latest Build: #{expected.empty? ? 'Unavailable' : expected}"
+        latest = status[:latest]
+        if latest
+          monthly = status[:latest_installed] ? "Installed" : "Available"
+          lines << "Latest Monthly: #{latest['name']} (#{monthly})"
+        else
+          lines << "Monthly Updates: None published"
+        end
+        show_message(lines.join("\n"))
+      rescue Exception => e
+        Reloaded::Log.exception("Spritepack version display failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not read the installed Spritepack version.")
+      end
+
+      def verify_spritepacks
+        handle = Reloaded::Task.start(:verify_spritepacks, {
+          :owner => :mod_manager,
+          :duplicate => :reuse
+        }) do |task|
+          components = Reloaded::SpritePacks::COMPONENTS.map { |component| component[:id] }
+          updates = Reloaded::SpritePacks.installed_updates.map { |update| update[:id] }
+          total = [components.length + updates.length, 1].max
+          results = []
+          components.each_with_index do |component, index|
+            task.checkpoint!
+            task.report(index.to_f / total, "Verifying #{component.to_s.capitalize}")
+            results << Reloaded::SpritePacks.verify_component(component)
+          end
+          updates.each_with_index do |update, index|
+            task.checkpoint!
+            task.report((components.length + index).to_f / total, "Verifying update #{update}")
+            results << Reloaded::SpritePacks.verify_update(update)
+          end
+          task.report(1.0, "Verification complete")
+          results
+        end
+        outcome = Reloaded::ProgressWindow.show(
+          handle,
+          :title => "Verifying Spritepacks",
+          :stage => "Reading manifests...",
+          :cancellable => true,
+          :cancel_prompt => "Cancel Spritepack verification?"
+        )
+        return unless outcome
+        return if outcome.cancelled?
+        unless outcome.success?
+          show_message("Spritepack verification failed:\n#{outcome.error_message}")
+          return
+        end
+        failures = Array(outcome.value).reject { |result| result[:success] }
+        if failures.empty?
+          show_message("All installed Spritepacks passed verification.")
+          return
+        end
+        first_error = failures.map { |result| Array(result[:errors]).first }.compact.first.to_s
+        message = "Spritepack verification found #{failures.length} problem#{failures.length == 1 ? '' : 's'}."
+        message += "\n#{first_error}" unless first_error.empty?
+        choices = []
+        choices << "Repair Full Spritepack" if platform_supports?(:browser_downloads)
+        choices << "Back"
+        choice = show_message(message, choices, choices.length - 1)
+        if choices[choice] == "Repair Full Spritepack"
+          full = Reloaded::ModBrowser.spritepack_full_file
+          confirm_spritepack_download(full) if full
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Spritepack verification failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Spritepack verification failed:\n#{e.message}")
       end
 
       def confirm_spritepack_download(file)
@@ -1202,6 +1306,36 @@ module Reloaded
         Reloaded::Log.exception("Open #{label} failed", e, channel: :mods) if defined?(Reloaded::Log)
         show_message("Could not open #{label}.")
         false
+      end
+
+      def release_page_available?(row)
+        !trusted_release_url(row).empty? && platform_supports?(:open_url)
+      rescue
+        false
+      end
+
+      def open_release_page(row)
+        url = trusted_release_url(row)
+        if url.empty?
+          show_message("No published release page is available.")
+          return false
+        end
+        open_external_url(url, "release page")
+      end
+
+      def trusted_release_url(row)
+        entry = browser_entry_for_row(row) || row
+        value = if entry.is_a?(Hash)
+                  (entry["release_url"] rescue nil) || (entry[:release_url] rescue nil)
+                end
+        value = value.to_s.strip
+        prefix = "#{RELEASE_REPOSITORY_URL}/releases/tag/"
+        return "" unless value.start_with?(prefix)
+        tag = value[prefix.length..-1].to_s
+        return "" if tag.empty? || tag.include?("/") || tag =~ /\s/
+        value
+      rescue
+        ""
       end
 
       def open_patch_notes_file(path)
@@ -2093,6 +2227,8 @@ module Reloaded
         profile = selected_profile
         return unless profile
         choices = ["Enable/Disable", "Duplicate", "Rename", "Delete", "Import Code", "Export Code", "Back"]
+        release_entry = published_profile_entry(profile)
+        choices.insert(-2, "Open Release Page") if release_page_available?(release_entry)
         choice = show_message("Profile Actions", choices)
         selected_action = choices[choice]
         if selected_action && selected_action != "Back" && defined?(Reloaded::Log)
@@ -2105,7 +2241,15 @@ module Reloaded
         when "Delete" then delete_profile
         when "Import Code" then import_profile_code
         when "Export Code" then export_profile_code
+        when "Open Release Page" then open_release_page(release_entry)
         end
+      end
+
+      def published_profile_entry(profile)
+        return nil unless profile && defined?(Reloaded::ModBrowser)
+        Reloaded::ModBrowser.profile_entry(profile["id"])
+      rescue
+        nil
       end
 
       def mark_restart_required(reason)
@@ -3046,11 +3190,14 @@ module Reloaded
       def open_action_menu(row)
         return unless row
         if row["kind"] == "profile"
-          choices = ["Import Profile", "Import & Enable Mods", "Back"]
+          choices = ["Import Profile", "Import & Enable Mods"]
+          choices << "Open Release Page" if release_page_available?(row)
+          choices << "Back"
           choice = show_message(row["name"], choices)
           case choices[choice]
           when "Import Profile" then import_profile(row, false)
           when "Import & Enable Mods" then import_profile(row, true)
+          when "Open Release Page" then open_release_page(row)
           end
         elsif spritepack_entry_row?(row)
           open_spritepack_menu
@@ -3070,12 +3217,15 @@ module Reloaded
           when "Open Mods Folder" then open_mods_folder
           end
         else
-          choices = ["Download", "Download & Enable", "Versions", "Back"]
+          choices = ["Download", "Download & Enable", "Versions"]
+          choices << "Open Release Page" if release_page_available?(row)
+          choices << "Back"
           choice = show_message(row["name"], choices)
           case choices[choice]
           when "Download" then download_mod(row, false)
           when "Download & Enable" then download_mod(row, true)
           when "Versions" then choose_version(row)
+          when "Open Release Page" then open_release_page(row)
           end
         end
       end
@@ -3538,6 +3688,7 @@ module Reloaded
         entry = defined?(Reloaded::ModBrowser) ? Reloaded::ModBrowser.spritepack_entry : nil
         full = entry && entry["spritepack_full"]
         latest = entry && entry["spritepack_latest"]
+        channel = defined?(Reloaded::ModBrowser) ? Reloaded::ModBrowser.spritepack_status : {}
         {
           :id => spritepack_entry_id,
           :game => "hoenn",
@@ -3552,9 +3703,9 @@ module Reloaded
           :profile_enabled => true,
           :profile_disabled => false,
           :loaded => true,
-          :status => :ok,
+          :status => channel[:state] == :repair_needed ? :invalid : :ok,
           :tags => entry ? Array(entry["tags"]) : ["Spritepacks"],
-          :system_tags => [],
+          :system_tags => [channel[:label].to_s].reject { |label| label.empty? },
           :dependencies => [],
           :incompatibilities => [],
           :warnings => [],
@@ -3568,8 +3719,13 @@ module Reloaded
           :virtual => true,
           :protected => true,
           :spritepack_entry => true,
-          :spritepack_full_installed => spritepack_file_installed?(full),
-          :spritepack_latest_installed => spritepack_file_installed?(latest)
+          :spritepack_state => channel[:state],
+          :spritepack_full_state => channel[:full_state] || :repair_needed,
+          :spritepack_full_installed => channel[:full_state] == :installed,
+          :spritepack_installed_build_id => channel[:installed_build_id].to_s,
+          :spritepack_expected_build_id => channel[:expected_build_id].to_s,
+          :spritepack_latest => latest,
+          :spritepack_latest_installed => !!channel[:latest_installed]
         }
       rescue
         {
@@ -3586,9 +3742,9 @@ module Reloaded
           :profile_enabled => true,
           :profile_disabled => false,
           :loaded => true,
-          :status => :ok,
+          :status => :invalid,
           :tags => ["Spritepacks"],
-          :system_tags => [],
+          :system_tags => ["Repair Needed"],
           :dependencies => [],
           :incompatibilities => [],
           :warnings => [],
@@ -3602,7 +3758,12 @@ module Reloaded
           :virtual => true,
           :protected => true,
           :spritepack_entry => true,
+          :spritepack_state => :repair_needed,
+          :spritepack_full_state => :repair_needed,
           :spritepack_full_installed => false,
+          :spritepack_installed_build_id => "",
+          :spritepack_expected_build_id => "",
+          :spritepack_latest => nil,
           :spritepack_latest_installed => false
         }
       end
@@ -3699,10 +3860,7 @@ module Reloaded
             draw_selection_box(bitmap, 6, y - 1, LEFT_W - 12, ROW_H - 2, selection_fill)
           end
           bitmap.fill_rect(13, y + 7, 6, 6, row[:enabled] ? GREEN : RED)
-          prefix = row[:moddev] ? "[MD] " : ""
-          prefix = "* " + prefix if held
           bitmap.font.size = 18 rescue nil
-          name = trim_text(bitmap, prefix + row[:name].to_s, LEFT_W - 44)
           color = if selected || held
                     WHITE
                   elsif priority == 0
@@ -3712,7 +3870,19 @@ module Reloaded
                   else
                     text_color_for_status(row[:status])
                   end
-          draw_plain_text(bitmap, 25, y - 6, LEFT_W - 38, ROW_H, name, color)
+          text_x = 25
+          if held
+            marker = "* "
+            draw_plain_text(bitmap, text_x, y - 6, LEFT_W - text_x - 13, ROW_H, marker, color)
+            text_x += 16
+          end
+          if row[:moddev]
+            marker = "[MD] "
+            draw_plain_text(bitmap, text_x, y - 6, LEFT_W - text_x - 13, ROW_H, marker, RED)
+            text_x += 28
+          end
+          name = trim_text(bitmap, row[:name].to_s, [LEFT_W - text_x - 13, 20].max)
+          draw_plain_text(bitmap, text_x, y - 6, LEFT_W - text_x - 13, ROW_H, name, color)
         end
 
         pbDrawShadowText(bitmap, LEFT_W / 2 - 10, LIST_Y - 12, 20, 12, "^", GRAY, SHADOW, 1) if @scroll > 0
@@ -3797,16 +3967,30 @@ module Reloaded
       end
 
       def draw_spritepack_status_rows(bitmap, x, y, row)
-        full_installed = !!row[:spritepack_full_installed]
-        latest_installed = !!row[:spritepack_latest_installed]
-        pbDrawTextPositions(bitmap, [["Latest Full - #{full_installed ? 'Installed' : 'Not Installed'}", x, y - 9, 0, full_installed ? GREEN : RED, Color.new(0, 0, 0, 0)]])
+        full_state = row[:spritepack_full_state]
+        full_label = case full_state
+                     when :installed then "Installed"
+                     when :update_available then "Update Available"
+                     else "Repair Needed"
+                     end
+        full_color = full_state == :installed ? GREEN : (full_state == :update_available ? ORANGE : RED)
+        pbDrawTextPositions(bitmap, [["Full Pack - #{full_label}", x, y - 9, 0, full_color, Color.new(0, 0, 0, 0)]])
         y += 10
-        pbDrawTextPositions(bitmap, [["Latest Pack - #{latest_installed ? 'Installed' : 'Not Installed'}", x, y - 5, 0, latest_installed ? GREEN : RED, Color.new(0, 0, 0, 0)]])
+        latest = row[:spritepack_latest]
+        monthly_label = if latest.nil?
+                          "None Published"
+                        elsif row[:spritepack_latest_installed]
+                          "Up to Date"
+                        else
+                          "Update Available"
+                        end
+        monthly_color = latest.nil? ? GRAY : (row[:spritepack_latest_installed] ? GREEN : ORANGE)
+        pbDrawTextPositions(bitmap, [["Monthly - #{monthly_label}", x, y - 5, 0, monthly_color, Color.new(0, 0, 0, 0)]])
         y + 14
       rescue
-        pbDrawTextPositions(bitmap, [["Latest Full - Not Installed", x, y - 9, 0, RED, Color.new(0, 0, 0, 0)]])
+        pbDrawTextPositions(bitmap, [["Full Pack - Repair Needed", x, y - 9, 0, RED, Color.new(0, 0, 0, 0)]])
         y += 10
-        pbDrawTextPositions(bitmap, [["Latest Pack - Not Installed", x, y - 5, 0, RED, Color.new(0, 0, 0, 0)]])
+        pbDrawTextPositions(bitmap, [["Monthly - Unknown", x, y - 5, 0, GRAY, Color.new(0, 0, 0, 0)]])
         y + 14
       end
 
@@ -3842,10 +4026,12 @@ module Reloaded
       def tag_style(tag)
         key = tag_key(tag)
         case key
-        when "outdated", "broken", "invalid"
+        when "outdated", "broken", "invalid", "repairneeded"
           [Color.new(96, 30, 44), RED]
-        when "update"
+        when "update", "monthlyupdate"
           [Color.new(92, 58, 24), ORANGE]
+        when "uptodate", "installed"
+          [Color.new(28, 78, 56), GREEN]
         when "missingdependency", "conflict"
           [Color.new(92, 58, 24), ORANGE]
         when "profile"
@@ -4260,7 +4446,9 @@ module Reloaded
         choices << "Update" if update_available?(row) && platform_supports?(:browser_downloads)
         choices << "View Changelog" unless installed_changelog_url(row).empty?
         choices << "Settings" if mod_settings_available?(row)
-        choices += ["Dependencies", "Conflicts", "Uninstall"]
+        choices += ["Dependencies", "Conflicts"]
+        choices << "Open Release Page" if release_page_available?(row)
+        choices << "Uninstall"
         choice = show_message(row[:name], choices)
         case choices[choice]
         when "Enable"
@@ -4277,6 +4465,8 @@ module Reloaded
           show_dependency_details(row)
         when "Conflicts"
           show_conflict_details(row)
+        when "Open Release Page"
+          open_release_page(row)
         when "Uninstall"
           uninstall_mod(row)
         end
@@ -4690,23 +4880,50 @@ module Reloaded
         Reloaded::Log.info("Mod Manager opening Tools", :mods) if defined?(Reloaded::Log)
         loop do
           choices = []
-          choices << "Admin Tools" if admin_tools_enabled? && platform_supports?(:admin_tools)
-          choices << "Log Files"
+          choices << "Mod Tools" if mod_tools_menu_available?
+          choices << "Validate" if moddev_ui_tools_available?
+          choices << "ModDev" if moddev_ui_tools_available? && defined?(Reloaded::ModManager)
           choices << "Backup Mods" if desktop_tools_available?
-          if moddev_tools_available?
-            choices += ["Template Generator", "Manifest Validator/Fixer", "Publish"]
-          end
+          choices << "Log Files"
+          choices << "Admin Tools" if admin_tools_enabled? && platform_supports?(:admin_tools)
           choices << "Back"
           choice = show_message("Tools", choices)
           selected = choices[choice]
           break if selected.nil? || selected == "Back"
           case selected
-          when "Template Generator" then open_template_generator_menu
-          when "Manifest Validator/Fixer" then open_manifest_tools_menu
+          when "Mod Tools" then open_mod_tools_menu
+          when "Validate" then open_validate_tools_menu
+          when "ModDev" then open_moddev_tools_menu
           when "Log Files" then open_log_files_menu
           when "Backup Mods" then open_backup_mods_menu
-          when "Publish" then open_publisher_tool
           when "Admin Tools" then open_admin_tools_menu
+          end
+        end
+      end
+
+      def mod_tools_menu_available?
+        return true if moddev_ui_tools_available?
+        [:publish, :update, :delete].any? { |action| repository_tool_available?(action) }
+      rescue
+        false
+      end
+
+      def open_mod_tools_menu
+        loop do
+          choices = []
+          choices << "Create" if moddev_ui_tools_available?
+          choices << "Update" if repository_tool_available?(:update)
+          choices << "Publish" if repository_tool_available?(:publish)
+          choices << "Delete" if repository_tool_available?(:delete)
+          choices << "Back"
+          choice = show_message("Mod Tools", choices)
+          selected = choices[choice]
+          break if selected.nil? || selected == "Back"
+          case selected
+          when "Create" then open_create_tools_menu
+          when "Update" then open_repository_kind_menu(:update)
+          when "Publish" then open_repository_kind_menu(:publish)
+          when "Delete" then open_repository_kind_menu(:delete)
           end
         end
       end
@@ -4717,9 +4934,20 @@ module Reloaded
         false
       end
 
+      def repository_tool_available?(action)
+        desktop_tools_available? && defined?(Reloaded::Publisher) && Reloaded::Publisher.available?(action)
+      rescue
+        false
+      end
+
       def moddev_tools_available?
-        enabled = defined?(Reloaded::ModManager) && Reloaded::ModManager.moddev_enabled?
-        enabled && desktop_tools_available?
+        moddev_ui_tools_available?
+      rescue
+        false
+      end
+
+      def moddev_ui_tools_available?
+        platform_supports?(:moddev_tools) && modder_tools_available?
       rescue
         false
       end
@@ -4745,6 +4973,107 @@ module Reloaded
 
       def modder_tools_available?
         defined?(Reloaded::Diagnostics) && defined?(Reloaded::ModArchives) && defined?(Reloaded::ModDevelopment)
+      end
+
+      def open_create_tools_menu
+        choices = ["Mod", "Profile", "Back"]
+        choice = show_message("Create", choices)
+        case choices[choice]
+        when "Mod"
+          name = text_input_popup("Mod Name", "New Mod", 48)
+          return if name.to_s.strip.empty?
+          folder = Reloaded::ModDevelopment.create_mod_template(name)
+          show_message("Mod template created:\n#{tool_path(folder)}")
+          reload_after_profile_change
+        when "Profile"
+          create_profile_template_popup
+        end
+      rescue Exception => e
+        Reloaded::Log.exception("Create tool failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not create content:\n#{tool_text(e.message)}")
+      end
+
+      def create_profile_template_popup
+        name = text_input_popup("Profile Name", "New Profile", 48)
+        return if name.to_s.strip.empty?
+        choices = ["Use Installed Mods", "Empty Profile", "Back"]
+        choice = show_message("Profile Contents", choices)
+        return if choices[choice].nil? || choices[choice] == "Back"
+        ids = choices[choice] == "Use Installed Mods" ? profile_template_mod_ids : []
+        profile = Reloaded::ModDevelopment.create_profile_template(name, ids)
+        show_message("Profile created:\n#{profile["name"]}")
+        reload_after_profile_change
+      end
+
+      def profile_template_mod_ids
+        return [] unless defined?(Reloaded::ModManager)
+        Reloaded::ModManager.mod_rows.map do |row|
+          next if row[:protected]
+          row[:id].to_s
+        end.compact.reject { |id| id.empty? }.uniq
+      rescue
+        []
+      end
+
+      def open_validate_tools_menu
+        choices = ["Mod", "Profile", "Back"]
+        choice = show_message("Validate", choices)
+        case choices[choice]
+        when "Mod" then validate_manifests_popup
+        when "Profile" then validate_profiles_popup
+        end
+      end
+
+      def validate_profiles_popup
+        results = Reloaded::ModDevelopment.validate_profiles
+        if results.empty?
+          show_message("No profiles found.")
+          return
+        end
+        colored = results.map do |result|
+          errors = Array(result[:errors])
+          warnings = Array(result[:warnings])
+          name = result[:name].to_s.empty? ? result[:id].to_s : result[:name].to_s
+          detail = errors.first || warnings.first
+          detail = tool_text(detail.to_s)
+          detail = "#{detail[0, 74]}..." if detail.length > 77
+          state = errors.empty? ? (warnings.empty? ? "OK" : "WARNING") : "ERROR"
+          color = errors.empty? ? (warnings.empty? ? GREEN : YELLOW) : RED
+          text = detail.empty? ? "[#{state}] #{name}" : "[#{state}] #{name}: #{detail}"
+          { :text => text, :color => color }
+        end
+        valid = results.count { |result| Array(result[:errors]).empty? }
+        show_colored_lines("Profile Validation: #{valid} OK / #{results.length - valid} Error(s)", colored)
+      rescue Exception => e
+        Reloaded::Log.exception("Profile validation failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Profile validation failed:\n#{tool_text(e.message)}")
+      end
+
+      def open_moddev_tools_menu
+        enabled = Reloaded::ModManager.moddev_enabled?
+        choices = ["Off", "On", "Back"]
+        choice = show_message("ModDev", choices, enabled ? 1 : 0)
+        selected = choices[choice]
+        return if selected.nil? || selected == "Back"
+        next_value = selected == "On"
+        return if enabled == next_value
+        Reloaded::ModManager.set_moddev_enabled(next_value)
+        Reloaded::ModManager.refresh_metadata
+        mark_restart_required("changed ModDev")
+        refresh_rows
+        draw_all
+        show_message("ModDev is now #{selected}.\nThe loaded mod set updates after restart.")
+      rescue Exception => e
+        Reloaded::Log.exception("ModDev tool failed", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not change ModDev:\n#{tool_text(e.message)}")
+      end
+
+      def open_repository_kind_menu(action)
+        choices = ["Mod", "Profile", "Back"]
+        choice = show_message(action.to_s.capitalize, choices)
+        selected = choices[choice]
+        return if selected.nil? || selected == "Back"
+        open_repository_tool(action, selected.downcase.to_sym)
       end
 
       def tool_text(value)
@@ -5057,29 +5386,31 @@ module Reloaded
         File.join(admin_tools_dir, "Reloaded Mart Editor", "ReloadedMartEditor.rb")
       end
 
-      def open_publisher_tool
+      def open_repository_tool(action, kind)
         unless defined?(Reloaded::Publisher)
-          show_message("Publisher tools are not available.")
+          show_message("Repository tools are not available.")
           return
         end
-        unless Reloaded::Publisher.available?
-          show_message(Reloaded::Publisher.status_text)
+        unless Reloaded::Publisher.available?(action)
+          show_message(Reloaded::Publisher.status_text(action))
           return
         end
         handle = Reloaded::Publisher.launch_async(
+          :action => action,
+          :kind => kind,
           :notify => false,
-          :on_success => proc { |_outcome| Reloaded.toast_success("Publisher opened in a separate window.") },
-          :on_failure => proc { |outcome| Reloaded.toast_error("Could not open publisher:\n#{outcome.error_message}") }
+          :on_success => proc { |_outcome| Reloaded.toast_success("#{action.to_s.capitalize} tool opened in a separate window.") },
+          :on_failure => proc { |outcome| Reloaded.toast_error("Could not open #{action}:\n#{outcome.error_message}") }
         )
         Reloaded::ProgressWindow.show(
           handle,
-          :title => "Opening Publisher",
+          :title => "Opening #{action.to_s.capitalize}",
           :mode => :indeterminate,
           :minimum_visible_time => 0.15
         )
       rescue Exception => e
-        Reloaded::Log.exception("Failed to open publisher", e, channel: :mods) if defined?(Reloaded::Log)
-        show_message("Could not open publisher:\n#{e.message}")
+        Reloaded::Log.exception("Failed to open repository tool", e, channel: :mods) if defined?(Reloaded::Log)
+        show_message("Could not open #{action}:\n#{e.message}")
       end
 
       def open_filter_menu

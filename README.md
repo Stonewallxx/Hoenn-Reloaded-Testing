@@ -34,25 +34,22 @@ Hoenn Reloaded Installer.sh
 
 The Proton installer requires Python 3 and the bundled installer files.
 
-### Installer Choices
+### Installer Channels
 
-Both desktop installers offer:
+Both desktop installers offer a game channel choice:
 
 ```text
 Hoenn Reloaded
 Hoenn Reloaded Testing
-
-Core
-Core + Spritepacks
 ```
 
-`Core + Spritepacks` installs the complete Full Spritepack containing both Base
-and Expanded sprites. Core updates and Spritepack updates are versioned
+Every installation includes Core and the latest Full Spritepack containing both
+Base and Expanded sprites. Core updates and Spritepack updates remain versioned
 separately, so an unchanged Full Spritepack is not downloaded again.
 
 Rerun the same installer for future updates. If an installation is interrupted,
 the next launch automatically enters Repair mode using the original channel
-and package choice. The game will not boot from a known incomplete install.
+choice. The game will not boot from a known incomplete install.
 
 ### JoiPlay / Android
 

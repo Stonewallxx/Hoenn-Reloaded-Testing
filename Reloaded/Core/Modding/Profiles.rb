@@ -336,6 +336,35 @@ module Reloaded
         log_change("Removed #{id} references from profile #{active_name}")
       end
 
+      def prune_missing_mods(available_ids)
+        available = normalize_string_array(available_ids)
+        changed_profiles = []
+        list.each do |profile|
+          enabled = profile_enabled_mod_ids(profile)
+          disabled = profile_disabled_mod_ids(profile)
+          order = profile_load_order(profile)
+          settings = profile["mod_settings"].is_a?(Hash) ? profile["mod_settings"] : {}
+          referenced = (enabled + disabled + order + settings.keys.map { |key| normalize_mod_id(key) }).uniq
+          removed = referenced - available
+          next if removed.empty?
+          profile["enabled_mods"] = enabled.select { |id| available.include?(id) }
+          profile["disabled_mods"] = disabled.select { |id| available.include?(id) }
+          profile["load_order"] = order.select { |id| available.include?(id) }
+          profile["mod_settings"] = settings.each_with_object({}) do |(key, value), kept|
+            id = normalize_mod_id(key)
+            kept[id] = value if available.include?(id)
+          end
+          saved = write_profile(profile)
+          @active_profile = saved if same_profile?(saved["name"], active_name)
+          changed_profiles << { :name => saved["name"], :removed => removed }
+        end
+        unless changed_profiles.empty?
+          detail = changed_profiles.map { |entry| "#{entry[:name]}: #{entry[:removed].join(',')}" }.join("; ")
+          log_change("Removed missing mod references from profiles: #{detail}")
+        end
+        changed_profiles
+      end
+
       def ordered_mod_ids(available_ids)
         available = normalize_string_array(available_ids)
         ordered = load_order.select { |id| available.include?(id) }

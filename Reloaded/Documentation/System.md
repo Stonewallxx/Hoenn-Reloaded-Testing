@@ -40,9 +40,9 @@ Hoenn Reloaded currently has these framework systems in place:
   components, loose/mod asset priority, and one-file cache extraction.
 - Shared platform detection and desktop adapters for Windows, Proton, and
   restricted JoiPlay behavior.
-- Shared AIO Installer contract with Public/Testing and Core/Core + Spritepacks
-  choices, direct Windows/Proton installation, progress reporting, and no
-  player-side Git cache.
+- Shared AIO Installer contract with a Public/Testing channel choice, mandatory
+  Core plus the latest Full Spritepack, direct Windows/Proton installation,
+  progress reporting, and no player-side Git cache.
 - Shared streaming large-file downloads through `Reloaded::Download`, with
   atomic `.part` promotion, cancellation, limits, and optional SHA-256 checks.
 - Shared safe ZIP/RAR/7Z inspection and extraction through
@@ -95,17 +95,19 @@ Mods/<mod folder>/
 ModDev/<mod folder>/
 ```
 
-Platform development tools are reserved and are never scanned as mods:
+Player-facing Mod Manager tools are shipped under:
 
 ```text
-ModDev/Windows/
-ModDev/Proton/
+ModDev/Tools/Windows/
+ModDev/Tools/Proton/
 ```
 
-Windows uses the batch publisher in `ModDev/Windows`. Proton uses the native
-shell/Python publisher in `ModDev/Proton`; it requires Git, Python 3, and a
-supported desktop terminal. JoiPlay hides external publishing and archive
-tools.
+Windows uses batch/PowerShell launchers. Proton uses shell/Python launchers.
+Both require GitHub CLI authentication, update GitHub through its API without a
+local repository checkout, and remove temporary package files after each run.
+Private maintainer checks remain under `ModDev/Foundation Checks/Windows/` and
+`ModDev/Foundation Checks/Proton/`; those folders are not shipped. JoiPlay hides external
+publishing and archive tools.
 
 ## AIO Installer
 
@@ -124,10 +126,11 @@ frontend. Both install into the directory containing the installer and offer:
 ```text
 Hoenn Reloaded
 Hoenn Reloaded Testing
-
-Core
-Core + Spritepacks
 ```
+
+After the channel is selected, the installer always installs Core and the
+latest Full Spritepack. The artifacts remain independently versioned so an
+unchanged Full Spritepack is retained without another download.
 
 Public Core reads `Reloaded/InstallerManifest.json` from
 `Stonewallxx/Hoenn-Reloaded` and downloads the versioned release archive with
@@ -290,6 +293,11 @@ verify manifests, file sizes, SHA-256 checksums, pack structure, and missing
 files. Verification is not run during every boot because Full components can
 be several gigabytes.
 
+Expanded species data is compiled separately from sprite assets under
+`Reloaded/Data/ExpandedDex`. The compact GameData bundle loads before its
+battle handlers, while `ExpandedDexIDs.json` permanently reconciles retained
+source species numbers with runtime IDs used by the Full Spritepack.
+
 Player-provided PNGs belong in:
 
 ```text
@@ -331,8 +339,8 @@ exit. Workers are never force-killed.
 Standalone regression tools are available at:
 
 ```text
-ModDev/Windows/Run Foundation Checks.bat
-ModDev/Proton/Run Foundation Checks.sh
+ModDev/Foundation Checks/Windows/Run Foundation Checks.bat
+ModDev/Foundation Checks/Proton/Run Foundation Checks.sh
 ```
 
 They validate the load manifest, Ruby syntax, event behavior, patch conflict
