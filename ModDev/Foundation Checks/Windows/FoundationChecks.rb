@@ -37,6 +37,31 @@ Dir.chdir(GAME_ROOT) do
     manifest_files.all? { |path| File.file?(File.join(RELOADED_ROOT, path)) }
   end
 
+  check("Reloaded type icons are complete and loaded before UI consumers") do
+    type_icon_file = "Core/UI/TypeIcons.rb"
+    api_file = "Core/UI/ReloadedAPIs.rb"
+    icon_index = manifest_files.index(type_icon_file)
+    api_index = manifest_files.index(api_file)
+    type_names = %w[Bug Dark Dragon Electric Fairy Fighting Fire Flying Ghost Grass Ground Ice Normal Poison Psychic Rock Steel Water]
+    assets = type_names.flat_map do |name|
+      [File.join(RELOADED_ROOT, "Graphics", "Icons", "#{name}.png"),
+       File.join(RELOADED_ROOT, "Graphics", "Icons", "icon#{name}.png")]
+    end
+    api_index && icon_index && api_index < icon_index &&
+      File.file?(File.join(RELOADED_ROOT, "Graphics", "Icons", "QMARKS.png")) &&
+      assets.all? { |path| File.file?(path) }
+  end
+
+  check("Reloaded scenes use the shared local type icon set") do
+    consumers = %w[Modules/TMVault.rb Modules/ReloadedBag.rb Modules/ReloadedUI.rb Modules/OverworldMenu.rb]
+    sources = consumers.map { |path| File.read(File.join(RELOADED_ROOT, path)) }
+    helper = File.read(File.join(RELOADED_ROOT, "Core", "UI", "TypeIcons.rb"))
+    sources.all? { |source| source.include?("Reloaded::TypeIcons") } &&
+      sources.none? { |source| source.include?("Graphics/Pictures/types") } &&
+      sources.none? { |source| source.include?("Graphics/Pictures/Battle/typesSmall") } &&
+      helper.include?("Reloaded/Graphics/Icons") && helper.include?("/QMARKS")
+  end
+
   check("Mart automations load after the backend and before Mart UI") do
     backend = manifest_files.index("Modules/ReloadedMart/Backend.rb")
     featured = manifest_files.index("Modules/ReloadedMart/Automation/DailyFeatured.rb")
@@ -258,6 +283,19 @@ Dir.chdir(GAME_ROOT) do
       powershell_installer.include?('parts = @($Spritepack.parts)') &&
       python_installer.include?('"build_id": str(spritepack.get("build_id", ""))') &&
       python_installer.include?('"parts": parts')
+  end
+  check("Mod Manager stages verified Full Spritepacks without archive listing") do
+    mod_browser_source.include?("def rebuild_split_spritepack_archive") &&
+      mod_browser_source.include?("Digest::SHA256.new") &&
+      mod_browser_source.include?("The rebuilt Spritepack archive failed SHA-256 verification.") &&
+      mod_browser_source.include?("combined_archive = rebuild_split_spritepack_archive(archives, item, task)") &&
+      mod_browser_source.include?("install_verified_full_spritepack_archive(combined_archive") &&
+      mod_browser_source.include?("def spawn_verified_spritepack_extraction") &&
+      mod_browser_source.include?("pid = Process.spawn(*command") &&
+      mod_browser_source.include?("def validate_full_spritepack_staging!") &&
+      mod_browser_source.include?("def promote_full_spritepack_staging!") &&
+      mod_browser_source.include?("The Full Spritepack extracted an undeclared file.") &&
+      mod_browser_source.include?('"installed_size" => positive_download_size(source["installed_size"])')
   end
   check("Desktop and batch-backed tools use dynamic solid color progress bars") do
     powershell_installer.include?('$ProgressBarWidth = 56') &&
@@ -674,6 +712,53 @@ Dir.chdir(GAME_ROOT) do
   check("Developer-only platform option ignores stale UI writes") do
     options_source.include?("next unless Reloaded::Platform.developer_override_available?")
   end
+  reloaded_ui_options_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedUI.rb"))
+  overworld_menu_source = File.read(File.join(RELOADED_ROOT, "Modules", "OverworldMenu.rb"))
+  pause_menu_source = File.read(File.join(RELOADED_ROOT, "Modules", "PauseMenu.rb"))
+  pc_module_source = File.read(File.join(RELOADED_ROOT, "Modules", "PCModule.rb"))
+  tm_vault_options_source = File.read(File.join(RELOADED_ROOT, "Modules", "TMVault.rb"))
+  pokevial_options_source = File.read(File.join(RELOADED_ROOT, "Modules", "PokeVial.rb"))
+  iv_options_source = File.read(File.join(RELOADED_ROOT, "Modules", "IVBoundaries.rb"))
+  mart_options_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Backend.rb"))
+  check("Options place Reloaded rows before base rows in their owned categories") do
+    reloaded_ui_options_source.include?('register_category_option("VISUALS & UI"') &&
+      pokevial_options_source.include?('register_category_option("GAMEPLAY"') &&
+      tm_vault_options_source.include?('register_category_option("GAMEPLAY"') &&
+      pc_module_source.include?('register_category_option("GAMEPLAY"') &&
+      mart_options_source.include?('register_category_option("ECONOMY"') &&
+      iv_options_source.include?('register_category_option("CHALLENGE"') &&
+      options_source.include?('category_extension_options("VISUALS & UI", scene) + [') &&
+      options_source.include?('category_extension_options("GAMEPLAY", scene) + take_options') &&
+      options_source.include?('category_extension_options("CHALLENGE", scene) + take_options')
+  end
+  check("Reloaded UI owns the Overworld and Pause Menu settings") do
+    reloaded_ui_options_source.include?("Reloaded::OverworldMenuFeature.option_row") &&
+      reloaded_ui_options_source.include?("Reloaded::PauseMenuFeature.option_row") &&
+      overworld_menu_source.include?("def option_row") &&
+      pause_menu_source.include?("def option_row") &&
+      !overworld_menu_source.include?('register_category_option("RELOADED"') &&
+      !pause_menu_source.include?('register_category_option("RELOADED"')
+  end
+  check("Reloaded UI provides global Big Icons with native fallback") do
+    reloaded_ui_options_source.include?("DEFAULT_BIG_ICONS = 0") &&
+      reloaded_ui_options_source.include?('_INTL("Big Icons")') &&
+      reloaded_ui_options_source.include?("def reloaded_big_icons") &&
+      reloaded_ui_options_source.include?("GameData::Species.sprite_bitmap_from_pokemon") &&
+      reloaded_ui_options_source.include?("reloaded_big_icons_native_pokemon_set") &&
+      reloaded_ui_options_source.include?("reloaded_big_icons_native_refresh")
+  end
+  check("Options fix Battle Style to Set and finish with About and bug reporting") do
+    options_source.include?("def battlestyle") &&
+      options_source.include?("@battlestyle = 1") &&
+      options_source.include?('take_options(challenge, ["Battle Style"])') &&
+      options_source.include?('append_collapsible(master, "About", about_options)') &&
+      options_source.include?("master << bug_report_option") &&
+      options_source.include?("class StandaloneActionButton < ActionButton") &&
+      options_source.include?('proc { Reloaded.version.to_s }') &&
+      mod_manager_ui_source.include?("1518892862429855794/1518892862429855794") &&
+      mod_manager_ui_source.include?("def open_bug_report_thread") &&
+      mod_manager_ui_source.include?("def file_bug_report")
+  end
 
   load File.join(RELOADED_ROOT, "Core", "Foundation", "Events.rb")
   Reloaded::Events.clear
@@ -875,6 +960,27 @@ Dir.chdir(GAME_ROOT) do
     Reloaded::API.public?(:archive) && Reloaded::API.available?(:archive) &&
       Reloaded::Archive.available? && File.file?(Reloaded::Platform.archive_tool_path)
   end
+  archive_source = File.read(File.join(RELOADED_ROOT, "Core", "Foundation", "Archive.rb"))
+  check("Archive API uses file-backed 7-Zip listings before extraction") do
+    archive_source.include?("status = file_backed_process(command)") &&
+      archive_source.include?("def append_listing_line") &&
+      archive_source.include?("def append_listing_row") &&
+      archive_source.include?("def file_backed_process(command)") &&
+      archive_source.include?(":out => output, :err => output") &&
+      archive_source.include?("output file") &&
+      !archive_source.include?("output, status = capture_process(command)")
+  end
+  archive_file_backed_output = +""
+  archive_file_backed_status = Reloaded::Archive.send(
+    :file_backed_process,
+    [Reloaded::Platform.archive_tool_path, "i"]
+  ) do |line|
+    archive_file_backed_output << line
+  end
+  check("Archive API captures bundled 7-Zip output without child-process pipes") do
+    Reloaded::Archive.send(:process_success?, archive_file_backed_status) &&
+      archive_file_backed_output.include?("7-Zip")
+  end
   archive_open3 = Object.const_get(:Open3) if Object.const_defined?(:Open3)
   archive_process_fallback = begin
     Object.send(:remove_const, :Open3) if Object.const_defined?(:Open3)
@@ -921,7 +1027,28 @@ Dir.chdir(GAME_ROOT) do
   spritepack_data = spritepack.read(spritepack.entry(1, ""))
   check("Sprite Packs reads bounded AFI-compatible per-head entries") do
     Reloaded::API.public?(:sprite_packs) && Reloaded::API.available?(:sprite_packs) &&
-      spritepack.entry_count == 1 && spritepack_data == spritepack_png
+      spritepack.entry_count == 1 && spritepack_data == spritepack_png &&
+      Reloaded::SpritePacks.alt_letter_from_index(0) == "" &&
+      Reloaded::SpritePacks.alt_letter_from_index(1) == "a" &&
+      Reloaded::SpritePacks.alt_letter_from_index(26) == "z" &&
+      Reloaded::SpritePacks.alt_letter_from_index(27).nil?
+  end
+  spritepack_source = File.read(
+    File.join(RELOADED_ROOT, "Core", "Foundation", "SpritePacks.rb")
+  )
+  check("Sprite Packs expose packed variants to rendering and the Pokedex") do
+    spritepack_source.include?("def available_alt_letters") &&
+      spritepack_source.include?("def patch_battle_sprite_loader") &&
+      spritepack_source.include?("def patch_pokedex_utils") &&
+      spritepack_source.include?("def patch_packed_shiny_cache") &&
+      spritepack_source.include?("pif_sprite.alt_letter = fallback") &&
+      spritepack_source.include?("return runtime_sprite_path(cache_path)") &&
+      spritepack_source.include?("bitmap.scale_bitmap(scale) if scale > 1") &&
+      spritepack_source.include?("discard_blank_shiny_cache(cache_path)") &&
+      spritepack_source.include?("copy_visible_bitmap(bitmap)") &&
+      spritepack_source.include?("selected.alt_letter = choices.sample") &&
+      spritepack_source.include?("reloaded_spritepacks_getBaseSpritesAlts") &&
+      spritepack_source.include?("reloaded_spritepacks_getFusionSpriteAlts")
   end
   spritepack_layers = [
     { :id => "older", :sequence => 20260701000000, :created_at => "2026-07-01T00:00:00Z" },
@@ -1372,16 +1499,36 @@ Dir.chdir(GAME_ROOT) do
   pokemon_stub_created = !defined?(Pokemon)
   if pokemon_stub_created
     Object.const_set(:Pokemon, Class.new do
+      attr_accessor :body_shiny
+      attr_accessor :head_shiny
+      def initialize
+        @shiny = false
+        @body_shiny = false
+        @head_shiny = false
+      end
+      def shiny=(value); @shiny = value; end
+      def shiny?; @shiny; end
       def type1; :NORMAL; end
       def type2; :NORMAL; end
       def types; [:NORMAL]; end
     end)
   end
   Reloaded::Rewards.send(:install_pokemon_typing_patch)
+  Reloaded::Rewards.send(:install_reward_shiny_patch)
   typed_pokemon = Pokemon.new
   typed_pokemon.reloaded_reward_types = [:FIRE, :WATER]
   check("Reward Pokemon typings override all native type readers") do
     typed_pokemon.type1 == :FIRE && typed_pokemon.type2 == :WATER && typed_pokemon.types == [:FIRE, :WATER]
+  end
+  shiny_reward_pokemon = Pokemon.new
+  Reloaded::Rewards.send(:apply_reward_shininess, shiny_reward_pokemon, { :shiny => true })
+  legacy_shiny_reward = Pokemon.new
+  legacy_shiny_reward.shiny = true
+  legacy_shiny_reward.reloaded_distribution_id = "foundation:legacy_shiny"
+  legacy_shiny_reward.shiny?
+  check("Reward Pokemon normalize shiny component flags") do
+    shiny_reward_pokemon.body_shiny && shiny_reward_pokemon.head_shiny &&
+      legacy_shiny_reward.body_shiny && legacy_shiny_reward.head_shiny
   end
   Object.send(:remove_const, :Pokemon) if pokemon_stub_created
   composite_before = reward_state[:finalized]
@@ -1460,8 +1607,23 @@ Dir.chdir(GAME_ROOT) do
   end
   pokevial_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "PokeVial.rb"))
   check("PokeVial uses formula-based refill pricing, contextual settings, and protected progression") do
-    pokevial_reward_source.include?("REFILL_COST_UNIT = 250") &&
-      pokevial_reward_source.include?("REFILL_COST_UNIT * [[max_charges.to_i, 1].max, MAX_USES_CAP].min") &&
+      pokevial_reward_source.include?("REFILL_BASE_COST = 500") &&
+      pokevial_reward_source.include?("REFILL_BADGE_COST = 100") &&
+      pokevial_reward_source.include?("REFILL_PARTY_COST = 50") &&
+      pokevial_reward_source.include?("HARD_REFILL_COST_PERCENT = 125") &&
+      pokevial_reward_source.include?("HARD_COOLDOWN_SECONDS = 10 * 60") &&
+      pokevial_reward_source.include?("trainer_badge_count * REFILL_BADGE_COST") &&
+      pokevial_reward_source.include?("trainer_party_size * REFILL_PARTY_COST") &&
+      pokevial_reward_source.include?("[missing_charges.to_i, 0].max * refill_cost_per_charge") &&
+      pokevial_reward_source.include?("hard_difficulty? ? HARD_REFILL_COST_PERCENT : 100") &&
+      pokevial_reward_source.include?("(base_cost * refill_cost_percent / 100.0).ceil") &&
+      pokevial_reward_source.include?("def progressive_forced?") &&
+      pokevial_reward_source.include?("def cooldown_forced?") &&
+      pokevial_reward_source.include?("return HARD_COOLDOWN_SECONDS if cooldown_forced?") &&
+      pokevial_reward_source.include?("disabled_label: _INTL(\"On\")") &&
+      pokevial_reward_source.include?("ReloadedPokeVial.cooldown_forced? ? _INTL(\"10 min\")") &&
+      !pokevial_reward_source.include?("Forced On") &&
+      !pokevial_reward_source.include?("Forced 10 min") &&
       pokevial_reward_source.include?("PokeCenter Refill Mode") &&
       pokevial_reward_source.include?("ConditionalSliderOption.new") &&
       pokevial_reward_source.include?("ConditionalEnumOption.new") &&
@@ -1470,12 +1632,43 @@ Dir.chdir(GAME_ROOT) do
       pokevial_reward_source.include?("def update_capacity_notice") &&
       pokevial_reward_source.include?("def party_needs_healing?") &&
       pokevial_reward_source.include?("Your party is already fully healed.") &&
-      pokevial_reward_source.include?("pbPlayDecisionSE") &&
+      pokevial_reward_source.include?("toast_options: { :compact => true }") &&
+      pokevial_reward_source.include?("pbSEPlay(\"Recovery\")") &&
       pokevial_reward_source.include?("Restored {1} {2} for ${3}.") &&
       !pokevial_reward_source.include?("hr_pokevial_refill_cost_enabled") &&
       !pokevial_reward_source.include?("hr_pokevial_refill_cost_per_use")
   end
+  difficulty_source = File.read(File.join(RELOADED_ROOT, "Modules", "Difficulty.rb"))
+  check("Hard difficulty is confirmed once and remains permanent for that save") do
+    manifest_files.include?("Modules/Difficulty.rb") &&
+      difficulty_source.include?("Hard difficulty is permanent for this save") &&
+      difficulty_source.include?("cannot be changed later. Select Hard?") &&
+      difficulty_source.include?("def confirm_hard_selection") &&
+      difficulty_source.include?("if hard? && target != HARD_INDEX") &&
+      difficulty_source.include?("Object.send(:prepend, ReloadedDifficultySetDifficultyPatch)") &&
+      difficulty_source.include?("[_INTL(\"Normal\"), _INTL(\"Hard\")]") &&
+      difficulty_source.include?("def normalize_loaded_difficulty") &&
+      difficulty_source.include?("GameplayOptionsScene.send(:prepend, ReloadedDifficultyGameplayOptionsPatch)") &&
+      difficulty_source.include?("Object.send(:prepend, ReloadedDifficultyEnsureCorrectPatch)")
+  end
   iv_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "IVBoundaries.rb"))
+  check("IV Boundaries only maps the enabled Normal and Hard difficulties") do
+    !iv_reward_source.include?(":easy =>") &&
+      !iv_reward_source.include?(":hardest =>") &&
+      !iv_reward_source.include?(":curated =>") &&
+      !iv_reward_source.include?("SWITCH_GAME_DIFFICULTY_EASY") &&
+    !iv_reward_source.include?("SWITCH_GAME_DIFFICULTY_HARDEST") &&
+      !iv_reward_source.include?("SWITCH_GAME_DIFFICULTY_CURATED")
+  end
+  check("Hard difficulty prevents beneficial player IV minimum boundaries") do
+    iv_reward_source.include?("return IV_MIN if hard_difficulty?") &&
+      iv_reward_source.include?("def preset_selectable?") &&
+      iv_reward_source.include?("preset[:min].to_i <= IV_MIN") &&
+      iv_reward_source.include?("HardLockedMinSliderOption") &&
+      iv_reward_source.include?("def disabled_label") &&
+      iv_reward_source.include?("_INTL(\"0\")") &&
+      !iv_reward_source.include?("Forced 0")
+  end
   mart_reward_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Backend.rb"))
   daily_featured_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Automation", "DailyFeatured.rb"))
   economy_event_source = File.read(File.join(RELOADED_ROOT, "Modules", "ReloadedMart", "Automation", "EconomyEvents.rb"))
@@ -1515,6 +1708,10 @@ Dir.chdir(GAME_ROOT) do
       daily_featured_source.include?("DEFAULT_HIGH_DISCOUNT_LIMIT = 1") &&
       daily_featured_source.include?("REPEAT_BLOCK_DAYS = 3") &&
       daily_featured_source.include?("ADDED_ITEM_ALLOWLIST") &&
+      %w[UNKNOWN MISTSTONE SACREDASH ABILITYBALL VIRUSBALL SHINYBALL PERFECTBALL CANDYBALL].all? do |item_id|
+        daily_featured_source.include?(":#{item_id}")
+      end &&
+      !daily_featured_source.include?(":SACREDSHARD") &&
       daily_featured_source.include?("TRUSTED_CLOCK_STATE_KEY") &&
       daily_featured_source.include?("def eastern_time") &&
       daily_featured_source.include?("def record_trusted_server_time") &&
@@ -1689,9 +1886,12 @@ Dir.chdir(GAME_ROOT) do
       mart_ui_source.include?("no_shadow_text(bitmap, owned_x, y, 92, 14, \"Owned:") &&
       mart_ui_source.include?("no_shadow_text(bitmap, PAD, 4, icon_x - PAD * 2 - 4")
   end
-  check("Reward bag limits use the game setting and bundles avoid linear quantity scans") do
+  check("Reward delivery uses Bag limits, PC fallback, and logarithmic bundle checks") do
     reward_source = File.read(File.join(RELOADED_ROOT, "Core", "Foundation", "Rewards.rb"))
     reward_source.include?("::Settings::BAG_MAX_PER_SLOT") &&
+      reward_source.include?("reserve_item_reward_destination") &&
+      reward_source.include?("PCItemStorage::MAX_PER_SLOT") &&
+      reward_source.include?(":destination => destination") &&
       mart_ui_source.include?("highest_storable_quantity") &&
       !mart_ui_source.include?("max.downto(1)")
   end

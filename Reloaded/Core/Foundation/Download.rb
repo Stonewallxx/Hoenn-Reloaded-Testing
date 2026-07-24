@@ -850,8 +850,10 @@ module Reloaded
         temp_root = Reloaded::Platform.temporary_directory
         script = File.join(temp_root, "rld_download_#{Time.now.to_i}_#{rand(100000)}.ps1")
         error_file = "#{script}.error.txt"
+        terminal_title = terminal_download_title(opts[:label])
         ps = [
           "$ErrorActionPreference = 'Stop'",
+          "try { $Host.UI.RawUI.WindowTitle = '#{powershell_literal(terminal_title)}' } catch {}",
           "try {",
           "  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12",
           "  $wc = New-Object Net.WebClient",
@@ -1128,6 +1130,13 @@ module Reloaded
 
       def powershell_literal(value)
         value.to_s.gsub("'", "''")
+      end
+
+      def terminal_download_title(label)
+        text = label.to_s.gsub(/[\x00-\x1f\x7f]/, " ").strip
+        text = "File" if text.empty?
+        text = text[0, 96]
+        "Hoenn Reloaded - Downloading #{text}"
       end
 
       def terminate_process(pid)

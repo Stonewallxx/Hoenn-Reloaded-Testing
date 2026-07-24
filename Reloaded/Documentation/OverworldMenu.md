@@ -12,7 +12,7 @@ panel.
 
 ## Options
 
-The module registers one option under the `RELOADED` options category:
+The module adds one option under `VISUALS & UI -> Reloaded UI`:
 
 ```text
 Overworld Menu: Off / On

@@ -227,13 +227,28 @@ module Reloaded
 
       def list_entries(archive)
         raise_failure(:process_unavailable, "Archive process support is unavailable.") unless process_supported?
-        command = [archive_tool, "l", "-slt", "-ba", "-sccUTF-8", archive]
-        output, status = capture_process(command)
-        unless status && status.success?
-          raise_failure(:invalid_archive, process_error("The archive could not be read.", output))
+        command = [archive_tool, "l", "-slt", "-ba", "-sccUTF-8", "-bso1", "-bse1", archive]
+        rows = []
+        current = {}
+        output_tail = +""
+        line_count = 0
+        status = file_backed_process(command) do |line|
+          line_count += 1
+          append_listing_line(rows, current, line)
+          output_tail << line.to_s
+          output_tail = output_tail[-8_000, 8_000] if output_tail.length > 8_000
         end
-        rows = parse_listing(output)
-        raise_failure(:empty_archive, "The archive does not contain any files.") if rows.empty?
+        unless process_success?(status)
+          raise_failure(:invalid_archive, process_error("The archive could not be read.", output_tail))
+        end
+        append_listing_row(rows, current)
+        rows.select! { |row| !row[:path].to_s.empty? }
+        if rows.empty?
+          raise_failure(
+            :empty_archive,
+            "The archive tool returned no readable file entries from its output file (#{line_count} listing lines)."
+          )
+        end
         rows
       rescue Failure
         raise
@@ -244,19 +259,27 @@ module Reloaded
       def parse_listing(output)
         rows = []
         current = {}
-        output.to_s.each_line do |line|
-          text = line.to_s.sub(/\r?\n\z/, "")
-          if text.strip.empty?
-            rows << normalize_listing_row(current) unless current.empty?
-            current = {}
-            next
-          end
-          key, value = text.split(" = ", 2)
-          next unless value
-          current[key.to_s.strip] = value.to_s
-        end
-        rows << normalize_listing_row(current) unless current.empty?
+        output.to_s.each_line { |line| append_listing_line(rows, current, line) }
+        append_listing_row(rows, current)
         rows.select { |row| !row[:path].to_s.empty? }
+      end
+
+      def append_listing_line(rows, current, line)
+        text = line.to_s.sub(/\r?\n\z/, "")
+        if text.strip.empty?
+          append_listing_row(rows, current)
+          return
+        end
+        match = text.match(/\A\s*([^=]+?)\s*=\s*(.*)\z/)
+        return unless match
+        key = match[1].to_s.sub(/\A\xEF\xBB\xBF/, "").strip
+        current[key] = match[2].to_s
+      end
+
+      def append_listing_row(rows, current)
+        return if current.empty?
+        rows << normalize_listing_row(current)
+        current.clear
       end
 
       def normalize_listing_row(row)
@@ -381,7 +404,7 @@ module Reloaded
             opts[:task].checkpoint!
           end
         end
-        unless exit_status && exit_status.success?
+        unless process_success?(exit_status)
           raise_failure(:extract_failed, process_error("The archive could not be extracted.", output))
         end
         output
@@ -393,9 +416,49 @@ module Reloaded
       end
 
       def process_supported?
-        defined?(Open3) || (defined?(Process) && Process.respond_to?(:spawn) && IO.respond_to?(:pipe))
+        system_supported? || defined?(Open3) ||
+          (defined?(Process) && Process.respond_to?(:spawn) && IO.respond_to?(:pipe))
       rescue
         false
+      end
+
+      def system_supported?
+        Object.private_method_defined?(:system) || Object.method_defined?(:system)
+      rescue
+        respond_to?(:system, true)
+      end
+
+      def process_success?(status)
+        return status.success? if status.respond_to?(:success?)
+        status == true
+      rescue
+        false
+      end
+
+      def file_backed_process(command)
+        raise "System process support is unavailable." unless system_supported?
+        output_path = process_output_path
+        launched = nil
+        File.open(output_path, "wb") do |output|
+          launched = system(*command, :out => output, :err => output)
+        end
+        status = $? || launched
+        File.open(output_path, "rb") do |output|
+          output.each_line { |line| yield line }
+        end
+        status
+      ensure
+        File.delete(output_path) rescue nil if output_path
+      end
+
+      def process_output_path
+        root = if defined?(Reloaded::Platform) && Reloaded::Platform.respond_to?(:temporary_directory)
+                 Reloaded::Platform.temporary_directory
+               else
+                 GAME_ROOT
+               end
+        token = "#{Time.now.to_i}_#{Thread.current.object_id}_#{rand(1_000_000)}"
+        File.join(root, "archive_output_#{token}.txt")
       end
 
       def capture_process(command)
@@ -419,6 +482,17 @@ module Reloaded
       end
 
       def stream_process(command)
+        if defined?(IO) && IO.respond_to?(:popen)
+          begin
+            status = nil
+            IO.popen(command, "r") do |stream|
+              stream.each_line { |line| yield line, nil }
+            end
+            status = $?
+            return status
+          rescue Exception
+          end
+        end
         if defined?(Open3)
           status = nil
           Open3.popen2e(*command) do |_input, combined, wait|

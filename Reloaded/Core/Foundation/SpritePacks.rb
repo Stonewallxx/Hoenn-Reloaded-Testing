@@ -151,7 +151,9 @@ module Reloaded
         type = pif_sprite.type.to_sym rescue nil
         head_id = pif_sprite.head_id.to_i
         body_id = type == :BASE ? 0 : pif_sprite.body_id.to_i
-        materialize_entry(type, head_id, body_id, pif_sprite.alt_letter.to_s)
+        alt_letter = pif_sprite.alt_letter.to_s
+        alt_letter = "" if type == :AUTOGEN && alt_letter == "autogen"
+        materialize_entry(type, head_id, body_id, alt_letter)
       rescue Exception => e
         log_failure("Packed sprite could not be loaded", e)
         nil
@@ -166,11 +168,11 @@ module Reloaded
           entry = pack.entry(body_id, normalized_alt)
           next unless entry
           cache_path = cached_sprite_path(source, pack, type, head_id, body_id, normalized_alt)
-          return cache_path if valid_cached_png?(cache_path, entry[:length])
+          return runtime_sprite_path(cache_path) if valid_cached_png?(cache_path, entry[:length])
           data = pack.read(entry)
           raise "Packed sprite data is incomplete." unless valid_png_data?(data)
           write_cache_file(cache_path, data)
-          return cache_path
+          return runtime_sprite_path(cache_path)
         end
         nil
       rescue Exception => e
@@ -208,6 +210,28 @@ module Reloaded
         result
       rescue
         []
+      end
+
+      def available_alt_letters(type, head_id, body_id = 0)
+        type = type.to_sym rescue nil
+        return [] unless TYPE_FOLDERS[type]
+        target_body = type == :BASE ? 0 : body_id.to_i
+        found = {}
+        entries(type, head_id).each do |entry|
+          next unless entry[:body_id].to_i == target_body
+          letter = alt_letter_from_index(entry[:alt_index])
+          found[letter] = true if letter
+        end
+        found.keys.sort_by { |letter| [letter.empty? ? 0 : 1, letter] }
+      rescue
+        []
+      end
+
+      def alt_letter_from_index(index)
+        value = index.to_i
+        return nil if value < 0 || value > 26
+        return "" if value == 0
+        (value - 1 + "a".ord).chr
       end
 
       def entry?(type, head_id, body_id, alt_letter = "")
@@ -394,11 +418,96 @@ module Reloaded
         return true if @patched
         patch_bitmap_resolver
         patch_sprite_extractor
+        patch_battle_sprite_loader
+        patch_pokedex_utils
+        patch_packed_shiny_cache
         @patched = true
         log_info("Installed packed sprite resolver")
         true
       rescue Exception => e
         log_failure("Packed sprite resolver could not be installed", e)
+        false
+      end
+
+      def packed_animated_bitmap?(animated_bitmap)
+        return false unless animated_bitmap
+        path = File.join(
+          animated_bitmap.path.to_s,
+          animated_bitmap.filename.to_s
+        )
+        under_path?(File.expand_path(path), CACHE_ROOT)
+      rescue
+        false
+      end
+
+      def runtime_sprite_path(path)
+        absolute = File.expand_path(path.to_s)
+        return absolute unless under_path?(absolute, GAME_ROOT)
+        root = File.expand_path(GAME_ROOT).tr("\\", "/").sub(/\/+\z/, "")
+        normalized = absolute.tr("\\", "/")
+        normalized[(root.length + 1)..-1]
+      rescue
+        path.to_s
+      end
+
+      def visible_bitmap?(bitmap)
+        return false unless bitmap
+        return false if bitmap.respond_to?(:disposed?) && bitmap.disposed?
+        width = bitmap.width.to_i
+        height = bitmap.height.to_i
+        return false if width <= 0 || height <= 0
+        width.times do |x|
+          height.times do |y|
+            return true if bitmap.get_pixel(x, y).alpha.to_i > 0
+          end
+        end
+        false
+      rescue
+        false
+      end
+
+      def copy_visible_bitmap(bitmap)
+        return nil unless visible_bitmap?(bitmap)
+        copy = Bitmap.new(bitmap.width, bitmap.height)
+        copy.blt(0, 0, bitmap, Rect.new(0, 0, bitmap.width, bitmap.height))
+        copy
+      rescue
+        copy.dispose if defined?(copy) && copy && !copy.disposed?
+        nil
+      end
+
+      def base_shiny_cache_path(dex_number, body_shiny, head_shiny)
+        dex_number = dex_number.to_i
+        return nil if dex_number <= 0
+        return nil if defined?(Settings::NB_POKEMON) &&
+                      dex_number > Settings::NB_POKEMON
+        filename = dex_number.to_s
+        filename += "_bodyShiny" if body_shiny
+        filename += "_headShiny" if head_shiny
+        File.join(
+          GAME_ROOT,
+          "Graphics",
+          "Battlers",
+          "Shiny",
+          dex_number.to_s,
+          "#{filename}.png"
+        )
+      rescue
+        nil
+      end
+
+      def discard_blank_shiny_cache(path)
+        return false unless path && File.file?(path)
+        bitmap = Bitmap.new(runtime_sprite_path(path))
+        visible = visible_bitmap?(bitmap)
+        bitmap.dispose unless bitmap.disposed?
+        return false if visible
+        File.delete(path)
+        log_info("Removed transparent generated shiny cache")
+        true
+      rescue Exception => e
+        bitmap.dispose if defined?(bitmap) && bitmap && !bitmap.disposed?
+        log_failure("Transparent shiny cache could not be removed", e)
         false
       end
 
@@ -836,17 +945,194 @@ module Reloaded
                                 :CUSTOM
                               end
                 body_id = packed_type == :BASE ? 0 : pif_sprite.body_id.to_i
+                packed_alt = pif_sprite.alt_letter.to_s
+                if packed_type == :AUTOGEN && packed_alt == "autogen"
+                  packed_alt = ""
+                end
                 packed = if defined?(Reloaded::SpritePacks)
                            Reloaded::SpritePacks.materialize_entry(
                              packed_type,
                              pif_sprite.head_id.to_i,
                              body_id,
-                             pif_sprite.alt_letter.to_s
+                             packed_alt
                            )
                          end
-                return AnimatedBitmap.new(packed) if packed
+                if !packed && defined?(Reloaded::SpritePacks)
+                  alternatives = Reloaded::SpritePacks.available_alt_letters(
+                    packed_type,
+                    pif_sprite.head_id.to_i,
+                    body_id
+                  )
+                  sprite_name = if packed_type == :BASE
+                                  pif_sprite.head_id.to_i.to_s
+                                else
+                                  "#{pif_sprite.head_id.to_i}.#{body_id}"
+                                end
+                  main_letters = list_main_sprites_letters(sprite_name) rescue []
+                  fallback = (alternatives & main_letters).first ||
+                             alternatives.first
+                  if fallback
+                    pif_sprite.alt_letter = fallback
+                    packed = Reloaded::SpritePacks.materialize_entry(
+                      packed_type,
+                      pif_sprite.head_id.to_i,
+                      body_id,
+                      fallback
+                    )
+                  end
+                end
+                if packed
+                  bitmap = AnimatedBitmap.new(packed)
+                  scale = get_resize_scale.to_i rescue 1
+                  bitmap.scale_bitmap(scale) if scale > 1
+                  return bitmap
+                end
               end
               reloaded_spritepacks_load_sprite(pif_sprite, download_allowed)
+            end
+          end
+        end
+      end
+
+      def patch_battle_sprite_loader
+        return unless defined?(BattleSpriteLoader)
+        BattleSpriteLoader.class_eval do
+          unless method_defined?(:reloaded_spritepacks_select_new_pif_base_sprite)
+            alias_method :reloaded_spritepacks_select_new_pif_base_sprite,
+                         :select_new_pif_base_sprite
+            def select_new_pif_base_sprite(dex_number)
+              selected = reloaded_spritepacks_select_new_pif_base_sprite(dex_number)
+              return selected unless defined?(Reloaded::SpritePacks)
+              return selected if Reloaded::SpritePacks.entry?(
+                :BASE,
+                dex_number.to_i,
+                0,
+                selected.alt_letter.to_s
+              )
+              local = check_for_local_sprite(selected) rescue nil
+              return selected if local
+              sheet = selected.get_spritesheet_path rescue nil
+              return selected if sheet && pbResolveBitmap(sheet)
+              alternatives = Reloaded::SpritePacks.available_alt_letters(
+                :BASE,
+                dex_number.to_i,
+                0
+              )
+              return selected if alternatives.empty?
+              main_letters = list_main_sprites_letters(dex_number.to_i.to_s) rescue []
+              choices = alternatives & main_letters
+              choices = alternatives if choices.empty?
+              selected.alt_letter = choices.sample
+              selected
+            rescue
+              selected || reloaded_spritepacks_select_new_pif_base_sprite(dex_number)
+            end
+          end
+        end
+      end
+
+      def patch_pokedex_utils
+        return unless defined?(PokedexUtils)
+        PokedexUtils.class_eval do
+          unless method_defined?(:reloaded_spritepacks_getBaseSpritesAlts)
+            alias_method :reloaded_spritepacks_getBaseSpritesAlts,
+                         :getBaseSpritesAlts
+            def getBaseSpritesAlts(dex_number)
+              legacy = Array(reloaded_spritepacks_getBaseSpritesAlts(dex_number))
+              return legacy unless defined?(Reloaded::SpritePacks)
+              packed = Reloaded::SpritePacks.available_alt_letters(
+                :BASE,
+                dex_number.to_i,
+                0
+              )
+              return legacy if packed.empty?
+              sheet = if defined?(BaseSpriteExtracter)
+                        File.join(
+                          BaseSpriteExtracter::SPRITESHEET_FOLDER_PATH,
+                          "#{dex_number}.png"
+                        )
+                      end
+              return (legacy + packed).uniq if sheet && pbResolveBitmap(sheet)
+              packed
+            rescue
+              legacy || []
+            end
+          end
+
+          unless method_defined?(:reloaded_spritepacks_getFusionSpriteAlts)
+            alias_method :reloaded_spritepacks_getFusionSpriteAlts,
+                         :getFusionSpriteAlts
+            def getFusionSpriteAlts(head_id, body_id)
+              legacy = Array(
+                reloaded_spritepacks_getFusionSpriteAlts(head_id, body_id)
+              )
+              return legacy unless defined?(Reloaded::SpritePacks)
+              packed = Reloaded::SpritePacks.available_alt_letters(
+                :CUSTOM,
+                head_id.to_i,
+                body_id.to_i
+              )
+              return legacy if packed.empty?
+              sheet_exists = legacy.any? do |letter|
+                next false unless defined?(CustomSpriteExtracter)
+                path = File.join(
+                  CustomSpriteExtracter::SPRITESHEET_FOLDER_PATH,
+                  head_id.to_s,
+                  "#{head_id}#{letter}.png"
+                )
+                pbResolveBitmap(path)
+              end
+              sheet_exists ? (legacy + packed).uniq : packed
+            rescue
+              legacy || []
+            end
+          end
+        end
+      end
+
+      def patch_packed_shiny_cache
+        return unless defined?(AnimatedBitmap)
+        return unless AnimatedBitmap.method_defined?(:shiftAllColors)
+        AnimatedBitmap.class_eval do
+          unless method_defined?(:reloaded_spritepacks_shiftAllColors)
+            alias_method :reloaded_spritepacks_shiftAllColors, :shiftAllColors
+            def shiftAllColors(dex_number, body_shiny, head_shiny)
+              unless defined?(Reloaded::SpritePacks) &&
+                     Reloaded::SpritePacks.packed_animated_bitmap?(self)
+                return reloaded_spritepacks_shiftAllColors(
+                  dex_number,
+                  body_shiny,
+                  head_shiny
+                )
+              end
+
+              source = Reloaded::SpritePacks.copy_visible_bitmap(bitmap)
+              cache_path = Reloaded::SpritePacks.base_shiny_cache_path(
+                dex_number,
+                body_shiny,
+                head_shiny
+              )
+              Reloaded::SpritePacks.discard_blank_shiny_cache(cache_path)
+              result = reloaded_spritepacks_shiftAllColors(
+                dex_number,
+                body_shiny,
+                head_shiny
+              )
+              Reloaded::SpritePacks.discard_blank_shiny_cache(cache_path)
+              if source && !Reloaded::SpritePacks.visible_bitmap?(bitmap)
+                self.bitmap = source
+                source = nil
+                shiftColors(
+                  GameData::Species.calculateShinyHueOffset(
+                    dex_number,
+                    body_shiny,
+                    head_shiny
+                  )
+                )
+              end
+              result
+            ensure
+              source.dispose if source && !source.disposed?
             end
           end
         end

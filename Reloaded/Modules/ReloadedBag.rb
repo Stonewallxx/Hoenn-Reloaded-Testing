@@ -74,14 +74,6 @@ module ReloadedBag
       true
     end
 
-    def types_bitmap
-      return @types_bitmap if @types_bitmap
-      @types_animated_bitmap = AnimatedBitmap.new("Graphics/Pictures/types") rescue nil
-      @types_bitmap = @types_animated_bitmap&.bitmap
-    rescue
-      @types_bitmap = nil
-    end
-
     def move_type_color(type_id)
       type_num = (GameData::Type.get(type_id).id_number rescue nil)
       case type_num
@@ -1199,12 +1191,7 @@ module ReloadedBag
     end
 
     def draw_tm_type_icon(bitmap, type_id, x, y)
-      type_num = GameData::Type.get(type_id).id_number rescue nil
-      type_bmp = ReloadedBag.types_bitmap
-      return unless type_num && type_bmp
-      src = Rect.new(0, type_num * 28, 64, 28)
-      dst = Rect.new(x, y, 32, 14)
-      bitmap.stretch_blt(dst, type_bmp, src)
+      Reloaded::TypeIcons.draw(bitmap, type_id, x, y + 1, :badge, 32, 12)
     rescue
     end
 

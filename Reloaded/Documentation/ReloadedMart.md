@@ -50,7 +50,7 @@ preserving vanilla stock, custom mart prices, dialogue, and `cantsell`.
 
 ## Options
 
-Reloaded Mart adds one action button in the `RELOADED` category:
+Reloaded Mart adds one action button at the top of the `ECONOMY` category:
 
 ```text
 Reloaded Mart
@@ -243,6 +243,9 @@ supply four full rotations.
 Key items, TMs/HMs/TRs, important/untossable items, 0-price items, mod-added
 items, the built-in owner blacklist, online `blacklist` entries,
 curated Featured items, and catalog items with an active discount are excluded.
+The built-in list also reserves the unknown placeholder, Mist Stone, Sacred Ash,
+and special balls that directly grant hidden abilities, Pokerus, shininess,
+perfect IVs, or bonus levels for curated distribution.
 The runtime identifies additions from Data Patch ownership and by comparing the
 active item registry with the compiled base `Data/items.dat`. Trusted
 Hoenn Reloaded additions can be admitted by adding their item IDs to
@@ -512,6 +515,13 @@ Unknown reward types invalidate the containing bundle instead of being ignored.
 Custom reward handlers should implement rollback when they can change state so
 mixed bundles remain atomic.
 
+Item rewards use the Bag when the full quantity fits and otherwise send the
+whole reward to PC Item Storage. Transaction preflight simulates both
+destinations across every item in a bundle, gift, or Mystery outcome. If
+neither destination has enough room, the transaction is rejected before any
+currency or reward state changes. The reveal marks PC-delivered items with
+`(PC)`.
+
 ### Pokemon Distributions
 
 Bundles, gifts, and Mystery outcomes can use `type: "pokemon"`. Supported
@@ -520,6 +530,8 @@ delivery destination, Egg/form/shiny/gender/nature/ability data, optional
 nickname, held item, Poke Ball, friendship, moves, exact or ranged IVs, EVs,
 custom types, OT data, origin text, distribution ID/version, duplicate policy,
 evolution policy, and an optional trade lock.
+Shiny rewards set both shiny components and recolor their selected packed
+sprite at runtime; separate shiny copies are not required in the Spritepack.
 
 `species_mode` controls the Pokemon source:
 
@@ -559,10 +571,19 @@ enforced by normal trades, NPC trades, Wonder Trade, and fusions containing the
 distribution. `duplicate_policy` accepts `allow`, `reject`, or `replace`;
 `evolution_policy` accepts `allow` or `block`.
 
+The default `delivery` is `either`: a reward Pokemon joins the party when space
+is available and otherwise goes to the first available Pokemon Storage Box.
+
 ### PokeVial Grants
 
 Bundles, gifts, and Mystery Boxes can grant PokeVial rewards instead of normal
 bag items. Mystery Gift payloads can use the same reward markers.
+
+The Mart Editor's normal `PokeVial Charge Item` and `PokeVial Refill Item`
+choices create standard item rewards for the consumable `POKEVIAL_CHARGE` and
+`POKEVIAL_REFILL` items. The direct reward types below remain available for
+existing catalogs, scripts, and mod APIs when an immediate charge change is
+specifically intended.
 
 Single-use charge:
 

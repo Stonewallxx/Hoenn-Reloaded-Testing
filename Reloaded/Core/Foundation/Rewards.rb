@@ -185,6 +185,7 @@ module Reloaded
           ctx[:planned_rewards] = rewards
           result = validate(reward, ctx)
           return result unless result.ok?
+          rewards[index] = result.reward if result.reward.is_a?(Hash)
         end
         success(:details => { :rewards => rewards })
       rescue Exception => e
@@ -199,6 +200,7 @@ module Reloaded
         unless ctx[:skip_validation]
           validation = validate(reward, ctx)
           return failed_grant(validation, reward, ctx) unless validation.ok?
+          reward = validation.reward if validation.reward.is_a?(Hash)
         end
         decision = emit_decision(:reward_grant_requested, reward, ctx)
         if decision == false
@@ -236,7 +238,8 @@ module Reloaded
         rewards = validation.details[:rewards]
         receipts = []
         applied = []
-        rewards.each do |reward|
+        rewards.each_with_index do |reward, index|
+          ctx[:reward_index] = index
           result = grant(reward, ctx.merge(:skip_validation => true, :defer_finalize => true))
           unless result.ok?
             rollback_all(receipts, ctx.merge(:source => :reward_batch_rollback))
@@ -441,7 +444,7 @@ module Reloaded
             data ? data.name : reward[:item_id].to_s
           },
           :describe => proc { |reward| describe_item_reward(reward) },
-          :message => proc { |reward, _result, _context| item_reward_message(reward) }
+          :message => proc { |reward, result, _context| item_reward_message(reward, result) }
         )
       end
 
@@ -486,36 +489,67 @@ module Reloaded
         return failure(:missing_item, "That item is unavailable.", :reward => reward) unless data
         return failure(:bag_unavailable, "The Bag is unavailable.", :reward => reward) unless defined?($PokemonBag) && $PokemonBag
         qty = reward[:quantity].to_i
-        plan = context[:reward_plan]
-        if plan.is_a?(Hash) && defined?(ItemStorageHelper)
-          pockets = plan[:bag_pockets] ||= duplicate_bag_pockets
-          maxsize = simulated_bag_size(pockets, data.pocket)
-          stored = ItemStorageHelper.pbStoreItem(pockets[data.pocket], maxsize, bag_max_per_slot, data.id, qty, false)
-          return failure(:bag_full, "There isn't enough room in the Bag.", :reward => reward) unless stored
-        elsif $PokemonBag.respond_to?(:pbCanStore?) && !$PokemonBag.pbCanStore?(data.id, qty)
-          return failure(:bag_full, "There isn't enough room in the Bag.", :reward => reward)
-        end
-        success(:reward => reward)
+        destination = reserve_item_reward_destination(data, qty, context)
+        return failure(
+          :item_storage_full,
+          "There isn't enough room in the Bag or PC Item Storage.",
+          :reward => reward
+        ) unless destination
+        success(:reward => reward.merge(:delivered_to => destination))
       rescue Exception => e
         log_exception("Item reward validation failed", e)
-        failure(:bag_preflight_failed, "There isn't enough room in the Bag.", :reward => reward)
+        failure(:item_storage_preflight_failed, "The item storage could not be checked.", :reward => reward)
       end
 
       def grant_item_reward(reward, _context)
         data = resolve_item(reward[:item_id])
         qty = reward[:quantity].to_i
-        stored = if $PokemonBag.respond_to?(:pbStoreAllOrNone)
-                   $PokemonBag.pbStoreAllOrNone(data.id, qty)
-                 else
-                   $PokemonBag.pbStoreItem(data.id, qty)
-                 end
-        return failure(:item_grant_failed, "The item could not be added to the Bag.", :reward => reward) unless stored
-        success(:reward => reward, :details => { :receipt_data => { :item_id => data.id, :quantity => qty } })
+        destination = reward[:delivered_to].to_sym rescue nil
+        destination ||= live_item_reward_destination(data, qty)
+        return failure(
+          :item_storage_full,
+          "There isn't enough room in the Bag or PC Item Storage.",
+          :reward => reward
+        ) unless destination
+        pc_storage_created = false
+        if destination == :pc
+          storage, pc_storage_created = ensure_pc_item_storage
+          stored = storage && storage.pbCanStore?(data.id, qty) && storage.pbStoreItem(data.id, qty)
+          if !stored && pc_storage_created && defined?($PokemonGlobal) && $PokemonGlobal
+            $PokemonGlobal.pcItemStorage = nil
+          end
+        else
+          stored = if $PokemonBag.respond_to?(:pbStoreAllOrNone)
+                     $PokemonBag.pbStoreAllOrNone(data.id, qty)
+                   else
+                     $PokemonBag.pbStoreItem(data.id, qty)
+                   end
+        end
+        return failure(:item_grant_failed, "The item could not be delivered.", :reward => reward) unless stored
+        reward[:delivered_to] = destination
+        success(
+          :reward => reward,
+          :details => {
+            :receipt_data => {
+              :item_id => data.id,
+              :quantity => qty,
+              :destination => destination,
+              :pc_storage_created => pc_storage_created
+            }
+          }
+        )
       end
 
       def rollback_item_reward(receipt)
-        return false unless defined?($PokemonBag) && $PokemonBag
         data = receipt.data || {}
+        destination = data[:destination].to_sym rescue :bag
+        if destination == :pc
+          return false unless defined?($PokemonGlobal) && $PokemonGlobal && $PokemonGlobal.pcItemStorage
+          deleted = $PokemonGlobal.pcItemStorage.pbDeleteItem(data[:item_id], data[:quantity].to_i)
+          $PokemonGlobal.pcItemStorage = nil if deleted && data[:pc_storage_created]
+          return deleted
+        end
+        return false unless defined?($PokemonBag) && $PokemonBag
         $PokemonBag.pbDeleteItem(data[:item_id], data[:quantity].to_i)
       end
 
@@ -530,22 +564,25 @@ module Reloaded
         "item=#{data ? data.id : reward[:item_id]} quantity=#{reward[:quantity].to_i}"
       end
 
-      def item_reward_message(reward)
+      def item_reward_message(reward, result = nil)
         data = resolve_item(reward[:item_id])
         return "" unless data
         qty = reward[:quantity].to_i
         item_name = qty > 1 ? data.name_plural : data.name
-        if data.id == :LEFTOVERS
-          _INTL("\\me[Item get]You obtained some \\c[1]{1}\\c[0]!\\wtnp[30]", item_name)
-        elsif data.is_machine?
-          _INTL("\\me[Item get]You obtained \\c[1]{1} {2}\\c[0]!\\wtnp[30]", item_name, GameData::Move.get(data.move).name)
-        elsif qty > 1
-          _INTL("\\me[Item get]You obtained {1} \\c[1]{2}\\c[0]!\\wtnp[30]", qty, item_name)
-        elsif item_name.respond_to?(:starts_with_vowel?) && item_name.starts_with_vowel?
-          _INTL("\\me[Item get]You obtained an \\c[1]{1}\\c[0]!\\wtnp[30]", item_name)
-        else
-          _INTL("\\me[Item get]You obtained a \\c[1]{1}\\c[0]!\\wtnp[30]", item_name)
-        end
+        message = if data.id == :LEFTOVERS
+                    _INTL("\\me[Item get]You obtained some \\c[1]{1}\\c[0]!\\wtnp[30]", item_name)
+                  elsif data.is_machine?
+                    _INTL("\\me[Item get]You obtained \\c[1]{1} {2}\\c[0]!\\wtnp[30]", item_name, GameData::Move.get(data.move).name)
+                  elsif qty > 1
+                    _INTL("\\me[Item get]You obtained {1} \\c[1]{2}\\c[0]!\\wtnp[30]", qty, item_name)
+                  elsif item_name.respond_to?(:starts_with_vowel?) && item_name.starts_with_vowel?
+                    _INTL("\\me[Item get]You obtained an \\c[1]{1}\\c[0]!\\wtnp[30]", item_name)
+                  else
+                    _INTL("\\me[Item get]You obtained a \\c[1]{1}\\c[0]!\\wtnp[30]", item_name)
+                  end
+        destination = item_reward_result_destination(result) || reward[:delivered_to]
+        return message unless destination && destination.to_sym == :pc
+        message.sub("\\wtnp[30]", _INTL("\nIt was sent to PC Item Storage.") + "\\wtnp[30]")
       rescue
         ""
       end
@@ -692,6 +729,80 @@ module Reloaded
         $PokemonBag.pockets.map do |pocket|
           Array(pocket).map { |slot| slot ? [slot[0], slot[1]] : nil }
         end
+      end
+
+      def reserve_item_reward_destination(data, qty, context)
+        plan = context[:reward_plan]
+        if plan.is_a?(Hash) && defined?(ItemStorageHelper)
+          pockets = plan[:bag_pockets] ||= duplicate_bag_pockets
+          maxsize = simulated_bag_size(pockets, data.pocket)
+          return :bag if ItemStorageHelper.pbStoreItem(
+            pockets[data.pocket], maxsize, bag_max_per_slot, data.id, qty, false
+          )
+          pc_items = plan[:pc_item_storage] ||= duplicate_pc_items
+          return :pc if pc_items && ItemStorageHelper.pbStoreItem(
+            pc_items, pc_storage_max_size, pc_storage_max_per_slot, data.id, qty, false
+          )
+          return nil
+        end
+        live_item_reward_destination(data, qty)
+      end
+
+      def live_item_reward_destination(data, qty)
+        if $PokemonBag.respond_to?(:pbCanStore?) && $PokemonBag.pbCanStore?(data.id, qty)
+          return :bag
+        end
+        return :pc if pc_item_storage_can_store?(data.id, qty)
+        nil
+      end
+
+      def duplicate_pc_items
+        storage = if defined?($PokemonGlobal) && $PokemonGlobal && $PokemonGlobal.pcItemStorage
+                    $PokemonGlobal.pcItemStorage
+                  elsif defined?(PCItemStorage)
+                    PCItemStorage.new
+                  end
+        return nil unless storage && storage.respond_to?(:items)
+        storage.items.map { |slot| slot ? [slot[0], slot[1]] : nil }
+      end
+
+      def pc_item_storage_can_store?(item_id, qty)
+        return false unless defined?($PokemonGlobal) && $PokemonGlobal && defined?(PCItemStorage)
+        storage = $PokemonGlobal.pcItemStorage || PCItemStorage.new
+        storage.respond_to?(:pbCanStore?) && storage.pbCanStore?(item_id, qty)
+      rescue
+        false
+      end
+
+      def ensure_pc_item_storage
+        return [nil, false] unless defined?($PokemonGlobal) && $PokemonGlobal && defined?(PCItemStorage)
+        return [$PokemonGlobal.pcItemStorage, false] if $PokemonGlobal.pcItemStorage
+        $PokemonGlobal.pcItemStorage = PCItemStorage.new
+        [$PokemonGlobal.pcItemStorage, true]
+      end
+
+      def pc_storage_max_size
+        return PCItemStorage::MAX_SIZE.to_i if defined?(PCItemStorage::MAX_SIZE)
+        999
+      rescue
+        999
+      end
+
+      def pc_storage_max_per_slot
+        return PCItemStorage::MAX_PER_SLOT.to_i if defined?(PCItemStorage::MAX_PER_SLOT)
+        999
+      rescue
+        999
+      end
+
+      def item_reward_result_destination(result)
+        return nil unless result
+        receipt = result.receipt if result.respond_to?(:receipt)
+        receipt ||= result.details[:receipt] if result.respond_to?(:details) && result.details.is_a?(Hash)
+        return nil unless receipt.respond_to?(:data) && receipt.data.is_a?(Hash)
+        receipt.data[:destination] || receipt.data["destination"]
+      rescue
+        nil
       end
 
       def simulated_bag_size(pockets, pocket)

@@ -55,6 +55,7 @@ module Reloaded
         register_choice_reward unless registered?(:choice)
         register_random_reward unless registered?(:random)
         install_pokemon_typing_patch
+        install_reward_shiny_patch
         install_trade_restriction_patches
         install_evolution_restriction_patch
         true
@@ -542,7 +543,7 @@ module Reloaded
                     creator.call
                   end
         pokemon.form_simple = reward[:form].to_i if reward.key?(:form)
-        pokemon.shiny = reward_truthy?(reward[:shiny]) if reward.key?(:shiny) && !random_reward_value?(reward[:shiny])
+        apply_reward_shininess(pokemon, reward)
         pokemon.gender = normalize_gender(reward[:gender]) if reward.key?(:gender) && !random_reward_value?(reward[:gender])
         pokemon.nature = reward[:nature] if reward[:nature] && !random_reward_value?(reward[:nature])
         pokemon.ability = reward[:ability] if reward[:ability] && !random_reward_value?(reward[:ability])
@@ -563,6 +564,16 @@ module Reloaded
         pokemon.calc_stats
         pokemon.record_first_moves
         pokemon
+      end
+
+      def apply_reward_shininess(pokemon, reward)
+        return unless reward.key?(:shiny)
+        return if random_reward_value?(reward[:shiny])
+        shiny = reward_truthy?(reward[:shiny])
+        pokemon.shiny = shiny
+        return unless pokemon.respond_to?(:body_shiny=) && pokemon.respond_to?(:head_shiny=)
+        pokemon.body_shiny = shiny
+        pokemon.head_shiny = shiny
       end
 
       def apply_reward_stats(pokemon, reward)
@@ -1329,6 +1340,34 @@ module Reloaded
         true
       rescue Exception => e
         extended_log_exception("Pokemon reward typing patch failed", e)
+        false
+      end
+
+      def install_reward_shiny_patch
+        return false unless defined?(Pokemon)
+        return true if Pokemon.method_defined?(:reloaded_rewards_original_shiny?)
+        Pokemon.class_eval do
+          alias_method :reloaded_rewards_original_shiny?, :shiny?
+
+          def shiny?
+            shiny = reloaded_rewards_original_shiny?
+            if shiny &&
+               !@reloaded_distribution_id.to_s.empty? &&
+               !@body_shiny &&
+               !@head_shiny
+              @body_shiny = true
+              @head_shiny = true
+            end
+            shiny
+          end
+        end
+        register_distribution_patch(
+          :rewards_pokemon_shiny_components,
+          "Pokemon#shiny?"
+        )
+        true
+      rescue Exception => e
+        extended_log_exception("Pokemon reward shiny normalization failed", e)
         false
       end
 

@@ -59,7 +59,7 @@ module Reloaded
     SELECTION_BORDER = Color.new(210, 236, 255)
 
     FOOTER_BUTTONS = ["Profiles", "Browser", "Tools"].freeze
-    BUG_REPORT_THREAD_URL = "https://discord.com/channels/1121345297352753243/1518892862429855794".freeze
+    BUG_REPORT_THREAD_URL = "https://discord.com/channels/1121345297352753243/1518892862429855794/1518892862429855794".freeze
     RELEASE_REPOSITORY_URL = "https://github.com/Stonewallxx/Hoenn-Reloaded-Mods".freeze
     CORE_UPDATE_INSTALLERS = {
       :windows => "Hoenn Reloaded Installer.bat",
@@ -85,6 +85,14 @@ module Reloaded
         raise if e.is_a?(SystemExit)
         Reloaded::Log.exception("Failed to open Admin Tools", e, channel: :mods) if defined?(Reloaded::Log)
         pbMessage("Admin Tools failed to open.") rescue nil
+      end
+
+      def open_bug_report_thread
+        Scene_Installed.new.open_external_url(BUG_REPORT_THREAD_URL, "Discord thread")
+      end
+
+      def file_bug_report
+        Scene_Installed.new.file_bug_report
       end
 
       def clipboard_write(text)

@@ -152,10 +152,13 @@ update layers without deleting their files.
 
 Component archives should include the builder-generated `manifest.json`.
 Every per-head `.pak` record in that manifest has an entry count, exact size,
-and SHA-256. The outer Spritepack catalog row should still provide its own
-optional archive `size`, `installed_size`, and `sha256`. The installer uses
-`installed_size` for extraction-space preflight and checks archive size/hash
-before extraction.
+and SHA-256. The outer Full Spritepack catalog row must provide archive `size`,
+`installed_size`, and `sha256`. The Mod Manager verifies the downloaded parts
+and reconstructed archive, extracts it into an isolated game-drive staging
+folder without depending on archive-listing output, validates the generated
+manifests and all declared file sizes, and only then promotes the pack. Existing
+monthly update layers and replaced assets are preserved for rollback while the
+promotion is in progress.
 Downloaded packs and `Reloaded/Cache/SpritePacks` are runtime output and must
 not be committed.
 

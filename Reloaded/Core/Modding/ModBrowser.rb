@@ -22,6 +22,15 @@ begin
 rescue Exception
 end
 
+begin
+  require "digest/sha2"
+rescue Exception
+  begin
+    require "digest"
+  rescue Exception
+  end
+end
+
 module Reloaded
   module ModBrowser
     ROOT = File.expand_path(File.join(File.dirname(__FILE__), "..", ".."))
@@ -43,6 +52,8 @@ module Reloaded
     SPRITEPACK_CONFIG_PATH = File.join(ROOT, "Spritepacks.json")
     SPRITEPACK_INSTALL_STATE_PATH = File.join(GAME_ROOT, "Mods", "Reloaded", "SpritepacksInstalled.json")
     SPRITEPACK_FULL_MANIFEST_PATH = File.join(GAME_ROOT, "Graphics", "SpritePacks", "manifest.json")
+    SPRITEPACK_STAGE_ROOT = File.join(ROOT, "Cache", "SpritepackInstall")
+    SPRITEPACK_BACKUP_ROOT = File.join(ROOT, "Cache", "SpritepackInstallBackups")
     CORE_VERSION_REMOTE_ID = :hoenn_reloaded_version
     SPRITEPACK_REMOTE_ID = :hoenn_reloaded_spritepacks
     NETWORK_TIMEOUT_SECONDS = 8
@@ -594,13 +605,18 @@ module Reloaded
         task.checkpoint! if task
         task.report(0.7, "Extracting #{name}") if task
         log("Spritepack archive downloaded: name=#{name} bytes=#{File.size(archive) rescue 0} destination=#{relative_game_path(destination)}")
-        unless extract_archive(
-          archive,
-          destination,
-          :task => task,
-          :overwrite => :overwrite,
-          :progress_range => [0.7, 0.98]
-        )
+        extracted = if truthy?(item["full"])
+                      install_verified_full_spritepack_archive(archive, item, task, [0.7, 0.98])
+                    else
+                      extract_archive(
+                        archive,
+                        destination,
+                        :task => task,
+                        :overwrite => :overwrite,
+                        :progress_range => [0.7, 0.98]
+                      )
+                    end
+        unless extracted
           File.delete(archive) rescue nil
           return { :success => false, :status => :extract_failed, :name => name, :url => url }
         end
@@ -621,6 +637,7 @@ module Reloaded
       def perform_split_spritepack_download(item, parts, task = nil)
         name = item["name"].to_s.empty? ? "Spritepack" : item["name"].to_s
         archives = []
+        combined_archive = nil
         cleanup_archives = false
         total = parts.length
         raise "Split Spritepack has no archive parts." if total <= 0
@@ -659,15 +676,20 @@ module Reloaded
         end
         destination = spritepack_extract_destination(item)
         task.checkpoint! if task
-        task.report(0.7, "Extracting #{name}") if task
         log("Split Spritepack downloaded: name=#{name} parts=#{archives.length} destination=#{relative_game_path(destination)}")
-        extracted = extract_archive(
-          archives.first,
-          destination,
-          :task => task,
-          :overwrite => :overwrite,
-          :progress_range => [0.7, 0.98]
-        )
+        combined_archive = rebuild_split_spritepack_archive(archives, item, task)
+        task.report(0.77, "Extracting #{name}") if task
+        extracted = if truthy?(item["full"])
+                      install_verified_full_spritepack_archive(combined_archive, item, task, [0.77, 0.98])
+                    else
+                      extract_archive(
+                        combined_archive,
+                        destination,
+                        :task => task,
+                        :overwrite => :overwrite,
+                        :progress_range => [0.77, 0.98]
+                      )
+                    end
         raise "The verified Spritepack parts could not be extracted." unless extracted
         Reloaded::SpritePacks.clear_index if defined?(Reloaded::SpritePacks)
         task.report(1.0, "Installed #{name}") if task
@@ -686,7 +708,380 @@ module Reloaded
         Reloaded::Log.exception("Split Spritepack download failed", e, channel: :mods) if defined?(Reloaded::Log)
         { :success => false, :status => :error, :name => name.to_s, :error => e.message }
       ensure
+        File.delete(combined_archive) rescue nil if combined_archive
         Array(archives).each { |archive| File.delete(archive) rescue nil } if cleanup_archives
+      end
+
+      def rebuild_split_spritepack_archive(archives, item, task = nil)
+        parts = Array(archives)
+        raise "No verified Spritepack parts are available." if parts.empty?
+        combined = parts.first.sub(/\.001\z/i, "")
+        raise "The Spritepack parts do not have a numbered archive name." if combined == parts.first
+        expected_size = item["size"].to_i
+        expected_hash = item["sha256"].to_s.downcase.strip
+        total_size = parts.inject(0) { |sum, path| sum + (File.size(path) rescue 0).to_i }
+        if expected_size > 0 && total_size != expected_size
+          raise "The verified Spritepack parts do not match the published archive size."
+        end
+        ensure_split_rebuild_space!(combined, total_size)
+        digest = if !expected_hash.empty? && defined?(Digest::SHA256)
+                   Digest::SHA256.new
+                 end
+        if !expected_hash.empty? && !digest
+          raise "SHA-256 verification is unavailable for the rebuilt Spritepack archive."
+        end
+        copied = 0
+        File.open(combined, "wb") do |output|
+          parts.each do |path|
+            File.open(path, "rb") do |input|
+              while (chunk = input.read(4 * 1024 * 1024))
+                task.checkpoint! if task
+                output.write(chunk)
+                digest.update(chunk) if digest
+                copied += chunk.bytesize
+                progress = total_size > 0 ? copied.to_f / total_size.to_f : 1.0
+                task.report(0.68 + progress * 0.09, "Preparing #{item['name']}") if task
+              end
+            end
+          end
+          output.flush rescue nil
+        end
+        raise "The rebuilt Spritepack archive has the wrong size." if expected_size > 0 && copied != expected_size
+        if digest && digest.hexdigest.downcase != expected_hash
+          raise "The rebuilt Spritepack archive failed SHA-256 verification."
+        end
+        log("Rebuilt split Spritepack archive: archive=#{relative_game_path(combined)} bytes=#{copied} parts=#{parts.length}")
+        combined
+      rescue Exception
+        File.delete(combined) rescue nil if combined
+        raise
+      end
+
+      def ensure_split_rebuild_space!(path, required_bytes)
+        return true unless defined?(Reloaded::Platform) && Reloaded::Platform.respond_to?(:free_disk_bytes)
+        free = Reloaded::Platform.free_disk_bytes(File.dirname(path))
+        return true unless free
+        margin = 256 * 1024 * 1024
+        return true if free.to_i >= required_bytes.to_i + margin
+        raise "There is not enough free disk space to prepare the verified Spritepack archive."
+      rescue RuntimeError
+        raise
+      rescue
+        true
+      end
+
+      def install_verified_full_spritepack_archive(archive, item, task = nil, progress_range = [0.7, 0.98])
+        expected_size = item["size"].to_i
+        expected_hash = item["sha256"].to_s.downcase.strip
+        installed_size = item["installed_size"].to_i
+        raise "The Full Spritepack catalog entry requires its archive size." if expected_size <= 0
+        raise "The Full Spritepack catalog entry requires its SHA-256 hash." if expected_hash.empty?
+        raise "The Full Spritepack catalog entry requires its installed size." if installed_size <= 0
+        raise "The verified Full Spritepack archive has the wrong size." unless File.size(archive).to_i == expected_size
+
+        token = "#{Time.now.to_i}_#{Thread.current.object_id}_#{rand(1_000_000)}"
+        staging = File.join(SPRITEPACK_STAGE_ROOT, token)
+        backup = File.join(SPRITEPACK_BACKUP_ROOT, token)
+        delete_tree(staging)
+        delete_tree(backup)
+        ensure_directory(staging)
+        ensure_full_spritepack_space!(staging, installed_size)
+
+        low, high = normalize_task_progress_range(progress_range)
+        extract_end = low + (high - low) * 0.72
+        validate_end = low + (high - low) * 0.90
+        task.report(low, "Extracting #{item['name']}") if task
+        spawn_verified_spritepack_extraction(archive, staging, task, installed_size, [low, extract_end])
+        task.checkpoint! if task
+        task.report(extract_end, "Validating #{item['name']}") if task
+        summary = validate_full_spritepack_staging!(staging, item, task)
+        task.report(validate_end, "Installing #{item['name']}") if task
+        promote_full_spritepack_staging!(staging, backup, summary, task, [validate_end, high])
+        task.report(high, "Installed #{item['name']}") if task
+        log("Verified Full Spritepack installed without archive listing: files=#{summary[:file_count]} bytes=#{summary[:installed_bytes]} build=#{summary[:build_id]}")
+        true
+      rescue Reloaded::Task::Cancelled
+        delete_tree(staging) if staging
+        delete_tree(backup) if backup
+        raise
+      rescue Exception => e
+        delete_tree(staging) if staging
+        delete_tree(backup) if backup
+        log("Verified Full Spritepack install failed: #{e.class}: #{e.message}", :error)
+        false
+      ensure
+        delete_tree(staging) if staging && Dir.exist?(staging)
+        delete_tree(backup) if backup && Dir.exist?(backup)
+      end
+
+      def spawn_verified_spritepack_extraction(archive, staging, task, installed_size, progress_range)
+        unless defined?(Reloaded::Platform) && Reloaded::Platform.respond_to?(:archive_tool_path)
+          raise "The bundled archive tool is unavailable."
+        end
+        tool = Reloaded::Platform.archive_tool_path
+        raise "The bundled archive tool is missing." unless File.file?(tool)
+        command = [tool, "x", archive, "-y", "-mmt=on", "-bb0", "-bso0", "-bse0", "-aoa", "-o#{staging}"]
+        null_device = File.const_defined?(:NULL) ? File::NULL : (RUBY_PLATFORM.to_s =~ /mswin|mingw|windows/i ? "NUL" : "/dev/null")
+        pid = Process.spawn(*command, :out => null_device, :err => null_device)
+        low, high = normalize_task_progress_range(progress_range)
+        last_measure = 0.0
+        status = nil
+        loop do
+          task.checkpoint! if task
+          finished = Process.waitpid(pid, Process::WNOHANG) rescue nil
+          if finished
+            status = $?
+            pid = nil
+            break
+          end
+          now = Time.now.to_f
+          if task && now - last_measure >= 0.75
+            extracted = tree_file_bytes(staging)
+            ratio = [[extracted.to_f / installed_size.to_f, 0.0].max, 0.99].min
+            task.report(low + (high - low) * ratio, "Extracting Full Spritepack")
+            last_measure = now
+          end
+          sleep(0.1)
+        end
+        unless status && status.success?
+          code = status.respond_to?(:exitstatus) ? status.exitstatus : "unknown"
+          raise "7-Zip could not extract the verified Full Spritepack (exit #{code})."
+        end
+        task.report(high, "Extracting Full Spritepack") if task
+        true
+      rescue Reloaded::Task::Cancelled
+        terminate_spritepack_process(pid)
+        raise
+      rescue Exception
+        terminate_spritepack_process(pid)
+        raise
+      end
+
+      def validate_full_spritepack_staging!(staging, item, task = nil)
+        pack_root = File.join(staging, "Graphics", "SpritePacks")
+        main_relative = "Graphics/SpritePacks/manifest.json"
+        main_path = File.join(staging, *main_relative.split("/"))
+        raise "The extracted Full Spritepack manifest is missing." unless File.file?(main_path)
+        main = parse_json_file(main_path)
+        raise "The extracted Full Spritepack manifest is invalid." unless main.is_a?(Hash)
+        build_id = main["build_id"].to_s
+        expected_build = item["build_id"].to_s
+        raise "The extracted Full Spritepack manifest has no build ID." if build_id.empty?
+        if !expected_build.empty? && build_id != expected_build
+          raise "The extracted Full Spritepack build ID does not match the catalog."
+        end
+
+        components = Array(main["components"])
+        component_ids = components.map { |component| component.is_a?(Hash) ? component["id"].to_s.downcase : "" }
+        unless component_ids.include?("base") && component_ids.include?("expanded")
+          raise "The Full Spritepack must contain Base and Expanded components."
+        end
+
+        expected = { main_relative.downcase => true }
+        asset_paths = []
+        pack_count = 0
+        components.each_with_index do |component, component_index|
+          task.checkpoint! if task && component_index > 0
+          raise "The Full Spritepack contains an invalid component." unless component.is_a?(Hash)
+          component_relative = safe_spritepack_relative_path(component["path"])
+          unless component_relative && component_relative.downcase.end_with?("/manifest.json")
+            raise "The Full Spritepack contains an unsafe component manifest path."
+          end
+          manifest_relative = "Graphics/SpritePacks/#{component_relative}"
+          manifest_path = File.join(staging, *manifest_relative.split("/"))
+          raise "A Full Spritepack component manifest is missing." unless File.file?(manifest_path)
+          expected[manifest_relative.downcase] = true
+          manifest = parse_json_file(manifest_path)
+          raise "A Full Spritepack component manifest is invalid." unless manifest.is_a?(Hash)
+          component_root_relative = File.dirname(manifest_relative).tr("\\", "/")
+
+          Array(manifest["packs"]).each_with_index do |row, row_index|
+            task.checkpoint! if task && (row_index % 100).zero?
+            raise "A Full Spritepack manifest contains an invalid pack entry." unless row.is_a?(Hash)
+            relative = safe_spritepack_relative_path(row["path"])
+            raise "A Full Spritepack manifest contains an unsafe pack path." unless relative && relative.downcase.end_with?(".pak")
+            staged_relative = "#{component_root_relative}/#{relative}"
+            validate_staged_spritepack_file!(staging, staged_relative, row)
+            expected[staged_relative.downcase] = true
+            pack_count += 1
+          end
+
+          Array(manifest["assets"]).each_with_index do |row, row_index|
+            task.checkpoint! if task && (row_index % 100).zero?
+            raise "A Full Spritepack manifest contains an invalid asset entry." unless row.is_a?(Hash)
+            relative = safe_spritepack_relative_path(row["path"])
+            prefix = relative.to_s.downcase
+            unless relative && (prefix.start_with?("audio/") || prefix.start_with?("graphics/"))
+              raise "A Full Spritepack manifest contains an unsafe asset path."
+            end
+            validate_staged_spritepack_file!(staging, relative, row)
+            expected[relative.downcase] = true
+            asset_paths << relative
+          end
+        end
+
+        report_relative = "BuildReport.json"
+        expected[report_relative.downcase] = true if File.file?(File.join(staging, report_relative))
+        actual_files = tree_files(staging)
+        actual = {}
+        actual_files.each do |path|
+          relative = relative_tree_path(path, staging)
+          raise "The Full Spritepack extracted an undeclared file." unless expected[relative.downcase]
+          actual[relative.downcase] = true
+        end
+        expected.each_key do |relative|
+          raise "A declared Full Spritepack file was not extracted." unless actual[relative]
+        end
+
+        installed_bytes = actual_files.inject(0) { |sum, path| sum + File.size(path).to_i }
+        expected_installed = item["installed_size"].to_i
+        if expected_installed > 0 && installed_bytes != expected_installed
+          raise "The extracted Full Spritepack size does not match the catalog."
+        end
+        {
+          :build_id => build_id,
+          :pack_root => pack_root,
+          :pack_count => pack_count,
+          :asset_paths => asset_paths.uniq,
+          :file_count => actual_files.length,
+          :installed_bytes => installed_bytes
+        }
+      end
+
+      def promote_full_spritepack_staging!(staging, backup, summary, task = nil, progress_range = [0.95, 0.98])
+        staged_pack_root = summary[:pack_root]
+        target_pack_root = File.join(GAME_ROOT, "Graphics", "SpritePacks")
+        backup_pack_root = File.join(backup, "Graphics", "SpritePacks")
+        asset_records = []
+        pack_backed_up = false
+        pack_promoted = false
+        low, high = normalize_task_progress_range(progress_range)
+        ensure_directory(backup)
+        if Dir.exist?(target_pack_root)
+          ensure_directory(File.dirname(backup_pack_root))
+          move_tree(target_pack_root, backup_pack_root)
+          pack_backed_up = true
+        end
+        move_tree(staged_pack_root, target_pack_root)
+        pack_promoted = true
+
+        old_updates = File.join(backup_pack_root, "Updates")
+        copy_tree(old_updates, File.join(target_pack_root, "Updates")) if Dir.exist?(old_updates)
+
+        assets = Array(summary[:asset_paths])
+        assets.each_with_index do |relative, index|
+          task.checkpoint! if task
+          source = File.join(staging, *relative.split("/"))
+          target = File.join(GAME_ROOT, *relative.split("/"))
+          asset_backup = File.join(backup, "Assets", *relative.split("/"))
+          raise "A Full Spritepack asset conflicts with an existing folder." if File.directory?(target)
+          record = { :target => target, :backup => asset_backup, :existed => File.file?(target) }
+          asset_records << record
+          if record[:existed]
+            ensure_directory(File.dirname(asset_backup))
+            move_file(source: target, destination: asset_backup)
+          end
+          move_file(source: source, destination: target)
+          if task && !assets.empty?
+            ratio = (index + 1).to_f / assets.length.to_f
+            task.report(low + (high - low) * ratio, "Installing Full Spritepack")
+          end
+        end
+        delete_tree(backup)
+        true
+      rescue Exception
+        asset_records.reverse_each do |record|
+          File.delete(record[:target]) rescue nil
+          if record[:existed] && File.file?(record[:backup])
+            move_file(source: record[:backup], destination: record[:target]) rescue nil
+          end
+        end
+        delete_tree(target_pack_root) if pack_promoted && Dir.exist?(target_pack_root)
+        move_tree(backup_pack_root, target_pack_root) if pack_backed_up && Dir.exist?(backup_pack_root)
+        raise
+      end
+
+      def validate_staged_spritepack_file!(staging, relative, row)
+        path = File.expand_path(File.join(staging, *relative.split("/")))
+        root = normalize_path(File.expand_path(staging))
+        target = normalize_path(path)
+        unless target.start_with?(root + "/") && File.file?(path)
+          raise "A declared Full Spritepack file is missing."
+        end
+        expected_size = row["size"].to_i
+        if expected_size > 0 && File.size(path).to_i != expected_size
+          raise "A Full Spritepack file has the wrong extracted size."
+        end
+        path
+      end
+
+      def safe_spritepack_relative_path(value)
+        text = value.to_s.tr("\\", "/")
+        return nil if text.empty? || text.start_with?("/") || text =~ /\A[A-Za-z]:/
+        parts = text.split("/")
+        return nil if parts.empty? || parts.any? { |part| part.empty? || part == "." || part == ".." || part.include?(":") || part =~ /[\x00-\x1f]/ }
+        parts.join("/")
+      end
+
+      def tree_files(root, current = nil, found = nil)
+        current ||= root
+        found ||= []
+        Dir.foreach(current) do |name|
+          next if name == "." || name == ".."
+          path = File.join(current, name)
+          raise "The Full Spritepack contains a link." if File.respond_to?(:symlink?) && File.symlink?(path)
+          if File.directory?(path)
+            tree_files(root, path, found)
+          elsif File.file?(path)
+            found << path
+          else
+            raise "The Full Spritepack contains an unsupported file entry."
+          end
+        end
+        found
+      end
+
+      def tree_file_bytes(root)
+        return 0 unless Dir.exist?(root)
+        tree_files(root).inject(0) { |sum, path| sum + (File.size(path) rescue 0).to_i }
+      rescue
+        0
+      end
+
+      def relative_tree_path(path, root)
+        path.to_s[(root.to_s.length + 1)..-1].to_s.tr("\\", "/")
+      end
+
+      def normalize_task_progress_range(value)
+        pair = Array(value)
+        low = pair.length >= 1 ? pair[0].to_f : 0.0
+        high = pair.length >= 2 ? pair[1].to_f : 1.0
+        low = [[low, 0.0].max, 1.0].min
+        high = [[high, low].max, 1.0].min
+        [low, high]
+      end
+
+      def ensure_full_spritepack_space!(staging, required_bytes)
+        return true unless defined?(Reloaded::Platform) && Reloaded::Platform.respond_to?(:free_disk_bytes)
+        free = Reloaded::Platform.free_disk_bytes(File.dirname(staging))
+        return true unless free
+        margin = 256 * 1024 * 1024
+        return true if free.to_i >= required_bytes.to_i + margin
+        raise "There is not enough free disk space to extract the Full Spritepack safely."
+      end
+
+      def terminate_spritepack_process(pid)
+        return unless pid
+        Process.kill("KILL", pid) rescue nil
+        Process.waitpid(pid) rescue nil
+      end
+
+      def move_file(source:, destination:)
+        ensure_directory(File.dirname(destination))
+        File.rename(source, destination)
+      rescue
+        copy_file(source, destination)
+        File.delete(source)
       end
 
       def perform_component_spritepack_download(item, components, task = nil)
@@ -1433,6 +1828,7 @@ module Reloaded
           "extract_to" => source["extract_to"].to_s,
           "sha256" => first_string(source["sha256"], source["checksum"]),
           "size" => positive_download_size(source["size"] || source["bytes"]),
+          "installed_size" => positive_download_size(source["installed_size"]),
           "parts" => normalize_spritepack_parts(source["parts"]),
           "components" => normalize_spritepack_components(source["components"]),
           "_index" => index.to_i

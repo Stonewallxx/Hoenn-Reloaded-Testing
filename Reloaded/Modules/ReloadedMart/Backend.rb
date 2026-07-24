@@ -59,7 +59,7 @@ module Reloaded
 
       def register_options
         return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :reloaded_mart_options, priority: 4) do |_scene|
+        Reloaded::Options.register_category_option("ECONOMY", :reloaded_mart_options, priority: 0) do |_scene|
           [ActionButton.new(
             _INTL("Reloaded Mart"),
             proc { ReloadedMart.open_options if defined?(ReloadedMart) },
@@ -96,9 +96,11 @@ module ReloadedMart
   # Explicit high-value exclusions. The complete generated-pool filter also
   # rejects key items, TMs/HMs/TRs, important/untossable items, and 0-price data.
   DAILY_FEATURED_ITEM_BLACKLIST = [
-    :MASTERBALL, :RARECANDY, :ABILITYCAPSULE, :ABILITYPATCH,
+    :UNKNOWN, :MASTERBALL, :MISTSTONE, :RARECANDY,
+    :ABILITYCAPSULE, :ABILITYPATCH, :ABILITYBALL,
+    :VIRUSBALL, :SHINYBALL, :PERFECTBALL, :CANDYBALL,
     :EXPALL, :EXPSHARE, :LUCKYEGG, :LEFTOVERS,
-    :SACREDSHARD
+    :SACREDASH
   ].freeze
   CURRENCY_SYMBOLS = {
     :money => "$",

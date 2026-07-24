@@ -93,7 +93,7 @@ module Reloaded
 
       def register_option
         return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :pokevial_options, priority: 6) do |_scene|
+        Reloaded::Options.register_category_option("GAMEPLAY", :pokevial_options, priority: 0) do |_scene|
           [ActionButton.new(
             _INTL("PokeVial"),
             proc { ReloadedPokeVial.open_options if defined?(ReloadedPokeVial) },
@@ -112,7 +112,11 @@ module ReloadedPokeVial
 
   DEFAULT_MAX_USES = 3
   DEFAULT_COOLDOWN_SECONDS = 5 * 60
-  REFILL_COST_UNIT = 250
+  REFILL_BASE_COST = 500
+  REFILL_BADGE_COST = 100
+  REFILL_PARTY_COST = 50
+  HARD_REFILL_COST_PERCENT = 125
+  HARD_COOLDOWN_SECONDS = 10 * 60
   REFILL_MODE_ASK = 0
   REFILL_MODE_AUTOMATIC = 1
   REFILL_MODE_NEVER = 2
@@ -170,7 +174,21 @@ module ReloadedPokeVial
     end
 
     def progressive_enabled?
-      ($PokemonSystem.hr_pokevial_progressive rescue 1).to_i == 1
+      progressive_forced? || ($PokemonSystem.hr_pokevial_progressive rescue 1).to_i == 1
+    end
+
+    def progressive_forced?
+      hard_difficulty?
+    end
+
+    def hard_difficulty?
+      return ReloadedDifficulty.hard? if defined?(ReloadedDifficulty)
+      if defined?($game_switches) && $game_switches && Object.const_defined?(:SWITCH_GAME_DIFFICULTY_HARD)
+        return true if $game_switches[Object.const_get(:SWITCH_GAME_DIFFICULTY_HARD)]
+      end
+      ($Trainer.selected_difficulty rescue nil).to_i == 2
+    rescue
+      false
     end
 
     def hp_only?
@@ -178,7 +196,11 @@ module ReloadedPokeVial
     end
 
     def cooldown_enabled?
-      ($PokemonSystem.hr_pokevial_cooldown_enabled rescue 0).to_i == 1
+      cooldown_forced? || ($PokemonSystem.hr_pokevial_cooldown_enabled rescue 0).to_i == 1
+    end
+
+    def cooldown_forced?
+      hard_difficulty?
     end
 
     def pokecenter_refill_mode
@@ -187,15 +209,34 @@ module ReloadedPokeVial
     end
 
     def cooldown_seconds
+      return HARD_COOLDOWN_SECONDS if cooldown_forced?
       [($PokemonSystem.hr_pokevial_cooldown_seconds rescue DEFAULT_COOLDOWN_SECONDS).to_i, 0].max
     end
 
-    def refill_cost_per_charge(max_charges = configured_max_uses)
-      REFILL_COST_UNIT * [[max_charges.to_i, 1].max, MAX_USES_CAP].min
+    def trainer_badge_count
+      [($Trainer.badge_count rescue 0).to_i, 0].max
+    end
+
+    def trainer_party_size
+      party = $Trainer.party rescue []
+      Array(party).compact.length
+    rescue
+      0
+    end
+
+    def refill_cost_per_charge
+      REFILL_BASE_COST +
+        trainer_badge_count * REFILL_BADGE_COST +
+        trainer_party_size * REFILL_PARTY_COST
+    end
+
+    def refill_cost_percent
+      hard_difficulty? ? HARD_REFILL_COST_PERCENT : 100
     end
 
     def pokecenter_refill_cost(missing_charges = uses_needed_for_refill)
-      [missing_charges.to_i, 0].max * refill_cost_per_charge(configured_max_uses)
+      base_cost = [missing_charges.to_i, 0].max * refill_cost_per_charge
+      (base_cost * refill_cost_percent / 100.0).ceil
     end
 
     def configured_max_uses
@@ -554,15 +595,15 @@ module ReloadedPokeVial
       Color.new(120, 230, 150)
     end
 
-    def notify(kind, message)
+    def notify(kind, message, options = {})
       if defined?(Reloaded)
         case kind.to_sym
         when :success
-          return Reloaded.toast_success(message.to_s) if Reloaded.respond_to?(:toast_success)
+          return Reloaded.toast_success(message.to_s, options) if Reloaded.respond_to?(:toast_success)
         when :error
-          return Reloaded.toast_error(message.to_s) if Reloaded.respond_to?(:toast_error)
+          return Reloaded.toast_error(message.to_s, options) if Reloaded.respond_to?(:toast_error)
         else
-          return Reloaded.toast_warning(message.to_s) if Reloaded.respond_to?(:toast_warning)
+          return Reloaded.toast_warning(message.to_s, options) if Reloaded.respond_to?(:toast_warning)
         end
       end
       pbMessage(message.to_s) rescue nil
@@ -668,19 +709,25 @@ module ReloadedPokeVial
       "The PokeVial cannot be used right now."
     end
 
-    def deny(message, popup: nil, severity: :warning)
+    def deny(message, popup: nil, severity: :warning, toast_options: {})
       pbPlayBuzzerSE rescue nil
       if popup
         popup.call(message)
       else
-        notify(severity, message)
+        notify(severity, message, toast_options)
       end
       false
     end
 
     def use_from_menu(source = :repm, popup: nil)
       return deny(lock_reason, popup: popup) unless selectable?
-      return deny(_INTL("Your party is already fully healed."), popup: popup) unless party_needs_healing?
+      unless party_needs_healing?
+        return deny(
+          _INTL("Your party is already fully healed."),
+          popup: popup,
+          toast_options: { :compact => true }
+        )
+      end
       return deny(_INTL("The PokeVial is EMPTY. Visit a PokeCenter to replenish it."), popup: popup) if uses <= 0
       remaining = cooldown_remaining_seconds
       if remaining > 0
@@ -703,7 +750,7 @@ module ReloadedPokeVial
       @healing_from_vial = false
       ctx[:uses_after] = uses
       run_callbacks(:after_use, ctx)
-      pbPlayDecisionSE rescue nil
+      play_healing_sound
       message = _INTL("Your party was healed. Charges: {1}.", uses)
       popup ? popup.call(message) : notify(:success, message)
       true
@@ -730,6 +777,18 @@ module ReloadedPokeVial
         hp_only? ? pkmn.heal_HP : pkmn.heal
       end
       true
+    end
+
+    def play_healing_sound
+      if defined?(pbSEPlay)
+        pbSEPlay("Recovery")
+      elsif defined?(pbPlayDecisionSE)
+        pbPlayDecisionSE
+      end
+      true
+    rescue
+      pbPlayDecisionSE rescue nil
+      false
     end
 
     def healing_from_vial?
@@ -1297,14 +1356,16 @@ module ReloadedPokeVial
           proc { |value| $PokemonSystem.hr_pokevial_enabled = value.to_i if $PokemonSystem },
           _INTL("Controls whether the PokeVial can be used from Reloaded menus.")
         ),
-        EnumOption.new(
+        ConditionalEnumOption.new(
           _INTL("Progressive Uses"),
           [_INTL("Off"), _INTL("On")],
           proc { ReloadedPokeVial.progressive_enabled? ? 1 : 0 },
           proc { |value|
             $PokemonSystem.hr_pokevial_progressive = value.to_i if $PokemonSystem
           },
-          _INTL("Auto-scales max charges by badge count.")
+          proc { ReloadedPokeVial.progressive_forced? },
+          _INTL("Auto-scales max charges by badge count. Always On while playing on Hard."),
+          disabled_label: _INTL("On")
         ),
         ConditionalSliderOption.new(
           _INTL("Max Uses"),
@@ -1331,12 +1392,14 @@ module ReloadedPokeVial
           proc { |value| $PokemonSystem.hr_pokevial_refill_mode = value.to_i if $PokemonSystem },
           _INTL("Ask before refilling, refill automatically, or never refill after a PokeCenter heal.")
         ),
-        EnumOption.new(
+        ConditionalEnumOption.new(
           _INTL("Cooldown"),
           [_INTL("Off"), _INTL("On")],
           proc { ReloadedPokeVial.cooldown_enabled? ? 1 : 0 },
           proc { |value| $PokemonSystem.hr_pokevial_cooldown_enabled = value.to_i if $PokemonSystem },
-          _INTL("Controls whether the PokeVial must recharge between uses.")
+          proc { ReloadedPokeVial.cooldown_forced? },
+          _INTL("Controls whether the PokeVial must recharge between uses. Always On while playing on Hard."),
+          disabled_label: _INTL("On")
         ),
         ConditionalEnumOption.new(
           _INTL("Cooldown Time (Real)"),
@@ -1346,9 +1409,11 @@ module ReloadedPokeVial
             cooldown_values.index(minutes) || 0
           },
           proc { |index| $PokemonSystem.hr_pokevial_cooldown_seconds = cooldown_values[index.to_i] * 60 if $PokemonSystem },
-          proc { !ReloadedPokeVial.cooldown_enabled? },
-          _INTL("Recharge time between PokeVial uses. Available while Cooldown is On."),
-          disabled_label: _INTL("Disabled")
+          proc { !ReloadedPokeVial.cooldown_enabled? || ReloadedPokeVial.cooldown_forced? },
+          _INTL("Recharge time between PokeVial uses. Fixed at 10 minutes while playing on Hard."),
+          disabled_label: proc {
+            ReloadedPokeVial.cooldown_forced? ? _INTL("10 min") : _INTL("Disabled")
+          }
         )
       ])
       options

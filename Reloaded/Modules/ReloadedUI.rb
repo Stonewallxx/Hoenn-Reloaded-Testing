@@ -16,9 +16,11 @@ module ReloadedUI
     DEFAULT_SUMMARY_MODE = 1
     DEFAULT_BAG_MODE = 0
     DEFAULT_HINT_TEXTS = 1
+    DEFAULT_BIG_ICONS = 0
     SUMMARY_MODE_NAMES = ["Standard", "Reloaded"].freeze
     BAG_MODE_NAMES = ["Standard", "Reloaded"].freeze
     HINT_TEXT_NAMES = ["Off", "On"].freeze
+    BIG_ICON_NAMES = ["Off", "On"].freeze
 
     class << self
       def install
@@ -56,6 +58,18 @@ module ReloadedUI
         ($PokemonSystem.reloaded_hint_texts rescue DEFAULT_HINT_TEXTS).to_i == 1 ? 1 : 0
       rescue
         DEFAULT_HINT_TEXTS
+      end
+
+      def big_icons_mode
+        ($PokemonSystem.reloaded_big_icons rescue DEFAULT_BIG_ICONS).to_i == 1 ? 1 : 0
+      rescue
+        DEFAULT_BIG_ICONS
+      end
+
+      def big_icons?
+        big_icons_mode == 1
+      rescue
+        false
       end
 
       def open_options
@@ -97,12 +111,20 @@ module ReloadedUI
             @reloaded_hint_texts = value.to_i == 1 ? 1 : 0
           end
 
+          def reloaded_big_icons
+            @reloaded_big_icons.nil? ? ReloadedUI::SummaryFeature::DEFAULT_BIG_ICONS : @reloaded_big_icons
+          end
+
+          def reloaded_big_icons=(value)
+            @reloaded_big_icons = value.to_i == 1 ? 1 : 0
+          end
+
         end
       end
 
       def register_option
         return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :reloaded_ui_options, priority: 0) do |_scene|
+        Reloaded::Options.register_category_option("VISUALS & UI", :reloaded_ui_options, priority: 0) do |_scene|
           [ActionButton.new(
             _INTL("Reloaded UI"),
             proc { open_options },
@@ -122,7 +144,14 @@ module ReloadedUI
     end
 
     def pbGetOptions(_inloadscreen = false)
-      [
+      options = []
+      if defined?(Reloaded::PauseMenuFeature)
+        options << Reloaded::PauseMenuFeature.option_row
+      end
+      if defined?(Reloaded::OverworldMenuFeature)
+        options << Reloaded::OverworldMenuFeature.option_row
+      end
+      options.concat([
         EnumOption.new(
           _INTL("Reloaded Summary"),
           SummaryFeature::SUMMARY_MODE_NAMES.map { |name| _INTL(name) },
@@ -148,6 +177,18 @@ module ReloadedUI
           _INTL("Standard: Uses the base Bag.\nReloaded: Uses the Reloaded Bag when available.")
         ),
         EnumOption.new(
+          _INTL("Big Icons"),
+          SummaryFeature::BIG_ICON_NAMES.map { |name| _INTL(name) },
+          proc { SummaryFeature.big_icons_mode },
+          proc { |value|
+            next unless $PokemonSystem
+            next_value = value.to_i == 1 ? 1 : 0
+            next if SummaryFeature.big_icons_mode == next_value
+            $PokemonSystem.reloaded_big_icons = next_value
+          },
+          _INTL("Replaces Pokemon icons with larger fitted full sprites.")
+        ),
+        EnumOption.new(
           _INTL("Hint Texts"),
           SummaryFeature::HINT_TEXT_NAMES.map { |name| _INTL(name) },
           proc { SummaryFeature.hint_texts_mode },
@@ -159,7 +200,91 @@ module ReloadedUI
           },
           _INTL("Shows or hides Reloaded hint text rows.")
         )
-      ]
+      ])
+      options.compact
+    end
+  end
+
+  module BigIcons
+    STANDARD_SIZE = 64
+    BIG_SIZE = 96
+    EGG_SIZE = 64
+
+    class << self
+      def enabled?
+        ReloadedUI::SummaryFeature.big_icons?
+      rescue
+        false
+      end
+
+      def build(pokemon, duplicate_frame = false)
+        return nil unless enabled? && pokemon
+        source = nil
+        output = nil
+        source = GameData::Species.sprite_bitmap_from_pokemon(pokemon)
+        return nil unless source && source.bitmap
+        source_bitmap = source.bitmap
+        target_size = pokemon.egg? ? EGG_SIZE : BIG_SIZE
+        source_width = source_bitmap.width
+        source_height = source_bitmap.height
+        return nil if source_width <= 0 || source_height <= 0
+        scale = [target_size.to_f / source_width, target_size.to_f / source_height].min
+        draw_width = [(source_width * scale).round, 1].max
+        draw_height = [(source_height * scale).round, 1].max
+        frame_count = duplicate_frame ? 2 : 1
+        output = Bitmap.new(target_size * frame_count, target_size)
+        source_rect = Rect.new(0, 0, source_width, source_height)
+        frame_count.times do |frame|
+          x = (target_size - draw_width) / 2 + (frame * target_size)
+          y = (target_size - draw_height) / 2
+          output.stretch_blt(
+            Rect.new(x, y, draw_width, draw_height),
+            source_bitmap,
+            source_rect
+          )
+        end
+        wrapped = AnimatedBitmap.from_bitmap(output)
+        output = nil
+        wrapped
+      rescue Exception => e
+        report_failure(pokemon, e)
+        nil
+      ensure
+        source.dispose if source
+        output.dispose if output && !output.disposed?
+      end
+
+      def horizontal_offset(pokemon, origin = nil)
+        return 0 unless pokemon && !pokemon.egg?
+        if defined?(PictureOrigin)
+          centered = [PictureOrigin::Top, PictureOrigin::Center, PictureOrigin::Bottom]
+          return 0 if centered.include?(origin)
+        end
+        -((BIG_SIZE - STANDARD_SIZE) / 2)
+      rescue
+        -16
+      end
+
+      def storage_offset(pokemon)
+        return 0 unless pokemon && !pokemon.egg?
+        -((BIG_SIZE - STANDARD_SIZE) / 2)
+      rescue
+        -16
+      end
+
+      private
+
+      def report_failure(pokemon, error)
+        @reported_failures ||= {}
+        key = pokemon.species rescue :unknown
+        return if @reported_failures[key]
+        @reported_failures[key] = true
+        if defined?(Reloaded::Log)
+          Reloaded::Log.exception("Big Icons could not render #{key}", error, channel: :modules)
+        end
+      rescue
+        nil
+      end
     end
   end
 
@@ -169,7 +294,6 @@ module ReloadedUI
     SCREEN_H = 384
     FOOTER_H = 22
     FOOTER_Y = SCREEN_H - FOOTER_H
-    ICON_ROOT = "Reloaded/Graphics/Icons"
     BACKGROUND_PATH = "Reloaded/Graphics/Backgrounds/statsbackground"
     BG_KEY = "reloaded_ui_stats_bg"
     POKEMON_KEY = "reloaded_ui_stats_pokemon"
@@ -572,13 +696,11 @@ module ReloadedUI
       end
 
       def draw_type_icon(bitmap, type_id, x, y, small)
-        name = type_file_name(type_id)
-        path = "#{ICON_ROOT}/#{small ? 'icon' : ''}#{name}"
-        if pbResolveBitmap(path)
-          draw_bitmap_scaled(bitmap, path, x, y, small ? 18 : 47, small ? 18 : 20)
-          return
-        end
-        fallback_type_icon(bitmap, type_id, x, y, small)
+        style = small ? :symbol : :badge
+        Reloaded::TypeIcons.draw(
+          bitmap, type_id, x, y, style,
+          small ? 18 : 47, small ? 18 : 20
+        )
       rescue
       end
 
@@ -590,27 +712,6 @@ module ReloadedUI
         bmp.dispose
       rescue
         bmp.dispose if bmp rescue nil
-      end
-
-      def fallback_type_icon(bitmap, type_id, x, y, small)
-        type_number = GameData::Type.get(type_id).id_number
-        bmp = AnimatedBitmap.new("Graphics/Pictures/types")
-        src = Rect.new(0, type_number * 28, 64, 28)
-        if small
-          bitmap.stretch_blt(Rect.new(x, y, 18, 18), bmp.bitmap, src)
-        else
-          bitmap.stretch_blt(Rect.new(x, y, 47, 20), bmp.bitmap, src)
-        end
-        bmp.dispose
-      rescue
-        bmp.dispose if bmp rescue nil
-      end
-
-      def type_file_name(type_id)
-        data = GameData::Type.get(type_id)
-        data.name.to_s.gsub(/[^A-Za-z0-9]/, "")
-      rescue
-        type_id.to_s.split("_").map { |part| part.capitalize }.join
       end
 
       def hidden_power_data(pokemon)
@@ -847,6 +948,130 @@ module ReloadedUI
 end
 
 ReloadedUI::SummaryFeature.install if defined?(ReloadedUI::SummaryFeature)
+
+if defined?(PokemonIconSprite)
+  class PokemonIconSprite
+    unless method_defined?(:reloaded_big_icons_native_pokemon_set)
+      alias_method :reloaded_big_icons_native_pokemon_set, :pokemon=
+      alias_method :reloaded_big_icons_native_set_offset, :setOffset
+
+      def pokemon=(value)
+        @reloaded_big_icon_active = false
+        unless ReloadedUI::BigIcons.enabled? && value
+          result = reloaded_big_icons_native_pokemon_set(value)
+          self.x = @logical_x unless @logical_x.nil?
+          self.y = @logical_y unless @logical_y.nil?
+          return result
+        end
+        full_sprite = ReloadedUI::BigIcons.build(value, true)
+        unless full_sprite
+          result = reloaded_big_icons_native_pokemon_set(value)
+          self.x = @logical_x unless @logical_x.nil?
+          self.y = @logical_y unless @logical_y.nil?
+          return result
+        end
+        @pokemon = value
+        @animBitmap.dispose if @animBitmap
+        @animBitmap = full_sprite
+        self.bitmap = @animBitmap.bitmap
+        self.src_rect.width = @animBitmap.height
+        self.src_rect.height = @animBitmap.height
+        @numFrames = [@animBitmap.width / @animBitmap.height, 1].max
+        @currentFrame = 0
+        @counter = 0
+        @reloaded_big_icon_active = true
+        changeOrigin
+        self.x = @logical_x unless @logical_x.nil?
+        self.y = @logical_y unless @logical_y.nil?
+        value
+      end
+
+      def x=(value)
+        @logical_x = value
+        offset = @adjusted_x || 0
+        if @reloaded_big_icon_active
+          offset += ReloadedUI::BigIcons.horizontal_offset(@pokemon, @offset)
+        end
+        super(@logical_x + offset)
+      end
+
+      def y=(value)
+        @logical_y = value
+        super(@logical_y + (@adjusted_y || 0))
+      end
+
+      def setOffset(offset = PictureOrigin::Center)
+        reloaded_big_icons_native_set_offset(offset)
+        self.x = @logical_x unless @logical_x.nil?
+        self.y = @logical_y unless @logical_y.nil?
+      end
+    end
+  end
+end
+
+if defined?(PokemonBoxIcon)
+  class PokemonBoxIcon
+    unless method_defined?(:reloaded_big_icons_native_initialize)
+      alias_method :reloaded_big_icons_native_initialize, :initialize
+      alias_method :reloaded_big_icons_native_refresh, :refresh
+
+      def initialize(*args)
+        @reloaded_big_icon_offset_x = 0
+        @reloaded_big_icon_offset_y = 0
+        @reloaded_big_icon_logical_x = 0
+        @reloaded_big_icon_logical_y = 0
+        reloaded_big_icons_native_initialize(*args)
+      end
+
+      def x
+        @reloaded_big_icon_logical_x
+      end
+
+      def y
+        @reloaded_big_icon_logical_y
+      end
+
+      def x=(value)
+        @reloaded_big_icon_logical_x = value
+        super(value + (@reloaded_big_icon_offset_x || 0))
+      end
+
+      def y=(value)
+        @reloaded_big_icon_logical_y = value
+        super(value + (@reloaded_big_icon_offset_y || 0))
+      end
+
+      def refresh(*args)
+        unless ReloadedUI::BigIcons.enabled? && @pokemon
+          @reloaded_big_icon_offset_x = 0
+          @reloaded_big_icon_offset_y = 0
+          result = reloaded_big_icons_native_refresh(*args)
+          self.x = @reloaded_big_icon_logical_x
+          self.y = @reloaded_big_icon_logical_y
+          return result
+        end
+        full_sprite = ReloadedUI::BigIcons.build(@pokemon)
+        unless full_sprite
+          @reloaded_big_icon_offset_x = 0
+          @reloaded_big_icon_offset_y = 0
+          result = reloaded_big_icons_native_refresh(*args)
+          self.x = @reloaded_big_icon_logical_x
+          self.y = @reloaded_big_icon_logical_y
+          return result
+        end
+        offset = ReloadedUI::BigIcons.storage_offset(@pokemon)
+        @reloaded_big_icon_offset_x = offset
+        @reloaded_big_icon_offset_y = offset
+        setBitmapDirectly(full_sprite)
+        self.src_rect = Rect.new(0, 0, self.bitmap.width, self.bitmap.height)
+        self.visible = true
+        self.x = @reloaded_big_icon_logical_x
+        self.y = @reloaded_big_icon_logical_y
+        true
+      end
+    end
+  end
+end
 
 if defined?(PokemonSummary_Scene)
   class PokemonSummary_Scene

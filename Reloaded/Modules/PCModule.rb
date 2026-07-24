@@ -40,7 +40,7 @@ module Reloaded
 
       def register_option
         return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :pc_module, priority: 8) do |_scene|
+        Reloaded::Options.register_category_option("GAMEPLAY", :pc_module, priority: 10) do |_scene|
           [EnumOption.new(
             _INTL("PC Module"),
             [_INTL("Off"), _INTL("On")],

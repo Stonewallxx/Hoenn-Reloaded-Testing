@@ -378,6 +378,19 @@ module Reloaded
             @reloaded_options_defaults_version || 0
           end
 
+          unless method_defined?(:reloaded_options_original_battlestyle)
+            alias_method :reloaded_options_original_battlestyle, :battlestyle
+            alias_method :reloaded_options_original_battlestyle=, :battlestyle=
+
+            def battlestyle
+              @battlestyle = 1
+            end
+
+            def battlestyle=(_value)
+              @battlestyle = 1
+            end
+          end
+
           def apply_reloaded_option_defaults!
             old_defaults_version = reloaded_options_defaults_version
             return if old_defaults_version >= Reloaded::Options::DEFAULTS_VERSION
@@ -509,11 +522,12 @@ module Reloaded
         gameplay = source_options(GameplayOptionsScene, inloadscreen)
         visuals = source_options(SpriteOptionsScene, inloadscreen)
         challenge = source_options(ChallengeOptionsScene, inloadscreen)
+        take_options(gameplay, ["Battle Style"])
+        take_options(challenge, ["Battle Style"])
 
         master = []
-        append_collapsible(master, "RELOADED", reloaded_options(scene))
         append_collapsible(master, "VISUALS & UI",
-          [
+          category_extension_options("VISUALS & UI", scene) + [
             option_theme_option(scene),
             category_theme_option(scene),
             cursor_theme_option(scene),
@@ -536,21 +550,20 @@ module Reloaded
           ])
         )
         append_collapsible(master, "GAMEPLAY",
-          take_options(gameplay, [
+          category_extension_options("GAMEPLAY", scene) + take_options(gameplay, [
             "Difficulty",
             "Default Movement",
             "Overworld Encounters",
             "Battle type",
             "Battle Type",
-            "Battle Style",
             "Prompt Nicknames",
             "Quick HMs",
             "Trainers"
-          ]) + take_options(challenge, ["Battle Style"])
+          ])
         )
-        append_collapsible(master, "ECONOMY", economy_options(scene))
+        append_collapsible(master, "ECONOMY", category_extension_options("ECONOMY", scene))
         append_collapsible(master, "CHALLENGE",
-          take_options(challenge, [
+          category_extension_options("CHALLENGE", scene) + take_options(challenge, [
             "Level caps",
             "Level Caps",
             "No reviving",
@@ -580,9 +593,6 @@ module Reloaded
             "Speed-up Type",
             "Speed-up (Overworld)",
             "Speed-up (Battles)"
-          ]) + take_options(visuals, [
-            "Autogen dex entries",
-            "Autogen Dex Entries"
           ])
         )
         append_collapsible(master, "MODS", [
@@ -593,6 +603,8 @@ module Reloaded
         append_collapsible(master, "DEVELOPER", [admin_tools_option, foundation_inspector_option, logging_mode_option, platform_override_option] + category_extension_options("DEVELOPER", scene))
         leftovers = system + gameplay + visuals + challenge
         append_collapsible(master, "OTHER", leftovers) unless leftovers.empty?
+        append_collapsible(master, "About", about_options)
+        master << bug_report_option
         master
       end
 
@@ -625,12 +637,32 @@ module Reloaded
         category.to_s.strip.upcase
       end
 
-      def economy_options(_scene)
-        []
+      def about_options
+        [
+          TextDisplayOption.new(
+            _INTL("Framework"),
+            proc { Reloaded.version.to_s },
+            _INTL("Current Hoenn Reloaded framework version.")
+          ),
+          TextDisplayOption.new(
+            _INTL("Author"),
+            proc { "Stonewall" },
+            _INTL("Hoenn Reloaded author.")
+          ),
+          ActionButton.new(
+            _INTL("Discord Link"),
+            proc { Reloaded::ModManagerUI.open_bug_report_thread if defined?(Reloaded::ModManagerUI) },
+            _INTL("Open the Hoenn Reloaded Discord thread.")
+          )
+        ]
       end
 
-      def reloaded_options(scene)
-        category_extension_options("RELOADED", scene)
+      def bug_report_option
+        StandaloneActionButton.new(
+          _INTL("File A Bug Report"),
+          proc { Reloaded::ModManagerUI.file_bug_report if defined?(Reloaded::ModManagerUI) },
+          _INTL("Create a sanitized report, upload it, copy its link, and open the bug report thread.")
+        )
       end
 
       def setup_collapsible_callbacks(scene, master)
@@ -646,6 +678,9 @@ module Reloaded
         Array(master).each do |option|
           if option.is_a?(CollapsibleHeader)
             collapsed = option.collapsed
+            visible << option
+          elsif option.respond_to?(:outside_collapsible?) && option.outside_collapsible?
+            collapsed = false
             visible << option
           elsif !collapsed
             visible << option
@@ -697,7 +732,7 @@ module Reloaded
 
       def category_description(label)
         case label
-        when "RELOADED"
+        when "About"
           _INTL("Hoenn Reloaded framework information.")
         when "VISUALS & UI"
           _INTL("Window frames, colors, battle visuals, and sprite settings.")
@@ -1397,6 +1432,12 @@ if defined?(Option)
     end
   end
 
+  class StandaloneActionButton < ActionButton
+    def outside_collapsible?
+      true
+    end
+  end
+
   class HiddenOption < Option
     include PropertyMixin
     attr_reader :name
@@ -1746,8 +1787,13 @@ if defined?(Window_PokemonOption)
       label_w = label_width(rect)
       pbDrawShadowText(self.contents, rect.x, rect.y, label_w, rect.height,
                        option.name, @nameBaseColor, @nameShadowColor)
-      pbDrawShadowText(self.contents, rect.x + label_w, rect.y, rect.width - label_w, rect.height,
-                       option.current_text, self.baseColor, self.shadowColor)
+      value = option.current_text
+      area_x = rect.x + label_w
+      area_w = rect.width - label_w
+      value_w = self.contents.text_size(value).width rescue area_w
+      value_x = area_x + [(area_w - value_w) / 2, 0].max
+      pbDrawShadowText(self.contents, value_x, rect.y, value_w + 4, rect.height,
+                       value, self.baseColor, self.shadowColor)
     end
 
     def draw_action_button(option, index, rect)

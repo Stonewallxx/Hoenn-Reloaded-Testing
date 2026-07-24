@@ -10,15 +10,22 @@ module ReloadedMart
     COMPILED_ITEMS_FILE = File.join(GAME_ROOT, "Data", "items.dat")
 
     ITEM_BLACKLIST = [
+      :UNKNOWN,
       :MASTERBALL,
+      :MISTSTONE,
       :RARECANDY,
       :ABILITYCAPSULE,
       :ABILITYPATCH,
+      :ABILITYBALL,
+      :VIRUSBALL,
+      :SHINYBALL,
+      :PERFECTBALL,
+      :CANDYBALL,
       :EXPALL,
       :EXPSHARE,
       :LUCKYEGG,
       :LEFTOVERS,
-      :SACREDSHARD
+      :SACREDASH
     ].freeze
 
     # Trusted HR-added items listed here may enter automatic offline offers.

@@ -40,7 +40,7 @@ module Reloaded
 
       def register_option
         return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :tm_vault, priority: 5) do |_scene|
+        Reloaded::Options.register_category_option("GAMEPLAY", :tm_vault, priority: 1) do |_scene|
           [ActionButton.new(
             _INTL("TM Vault"),
             proc { TMVault.open_options if defined?(TMVault) },
@@ -303,40 +303,6 @@ module TMVault
       @tm_label_cache[itm.move] = itm.name
     end rescue nil
     @tm_label_cache ||= {}
-  end
-
-  # Module-level types spritesheet, loaded once per game session.
-  def self.types_bitmap
-    return @types_bitmap if @types_bitmap
-    @types_animated_bitmap = AnimatedBitmap.new("Graphics/Pictures/types") rescue nil
-    @types_bitmap = @types_animated_bitmap&.bitmap
-  rescue
-    @types_bitmap = nil
-  end
-
-  # Pre-cut 32x14 type icons, keyed by type symbol and type id number.
-  def self.type_icons
-    return @type_icons if @type_icons
-    bmp = types_bitmap
-    return (@type_icons = {}) unless bmp
-    @type_icons = {}
-    GameData::Type.each do |type_data|
-      begin
-        tmp = Bitmap.new(32, 14)
-        tmp.stretch_blt(Rect.new(0, 0, 32, 14), bmp, Rect.new(0, type_data.id_number * 28, 64, 28))
-        @type_icons[type_data.id_number] = tmp
-        @type_icons[type_data.id] = tmp
-      rescue
-        tmp.dispose rescue nil
-      end
-    end rescue nil
-    @type_icons ||= {}
-  end
-
-  def self.type_icon(type_id)
-    type_data = GameData::Type.get(type_id) rescue nil
-    return nil unless type_data
-    type_icons[type_data.id] || type_icons[type_data.id_number]
   end
 
   def self.egg_icon_bitmap
@@ -767,16 +733,7 @@ module TMVault
         pbDrawShadowText(b, 10, ry, max_name_w, ROW_H, display_name, color, SHADOW)
 
         if md
-          type_num = GameData::Type.get(md.type).id_number rescue nil
-          if type_num && (type_bmp = TMVault.types_bitmap)
-            src = Rect.new(0, type_num * 28, 64, 28)
-            dst = Rect.new(LEFT_W - 38, ry + 5, 32, 14)
-            begin
-              b.stretch_blt(dst, type_bmp, src)
-            rescue
-              b.blt(LEFT_W - 70, ry - 4, type_bmp, src)
-            end
-          end
+          Reloaded::TypeIcons.draw(b, md.type, LEFT_W - 38, ry + 6, :badge, 32, 12)
           if relearn_egg_move?(id) && (egg_bmp = TMVault.egg_icon_bitmap)
             egg_src = Rect.new(18, 22, 28, 34)
             egg_dst = Rect.new(LEFT_W - 54, ry + 3, 14, 17)
@@ -1590,6 +1547,5 @@ end
 $tmvault_load_hook_applied = false
 # Pre-warm module-level caches at game boot (Reloaded runs during boot screen).
 # GameData is already loaded at this point. This eliminates the black pause on
-# first vault open: tm_label_cache and type_icons are instant by then.
+# first vault open: the TM label cache is instant by then.
 TMVault.tm_label_cache rescue nil
-TMVault.type_icons rescue nil

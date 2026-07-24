@@ -24,7 +24,6 @@ module Reloaded
     class << self
       def install
         install_pokemon_system_settings
-        register_option
         Reloaded::Log.info("Installed Reloaded Pause Menu module", :framework) if defined?(Reloaded::Log)
         true
       rescue Exception => e
@@ -53,19 +52,14 @@ module Reloaded
         end
       end
 
-      def register_option
-        return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :pause_menu, priority: 10) do |_scene|
-          [EnumOption.new(
-            _INTL("Pause Menu"),
-            [_INTL("Standard"), _INTL("Reloaded")],
-            proc { ($PokemonSystem.hr_pause_menu rescue 1).to_i == 1 ? 1 : 0 },
-            proc { |value| $PokemonSystem.hr_pause_menu = value.to_i if $PokemonSystem },
-            _INTL("Standard: Uses the base game's pause menu.\nReloaded: Uses the Reloaded Pause Menu with modules, carousel, and favorites.")
-          )]
-        end
-      rescue Exception => e
-        Reloaded::Log.exception("Failed to register Reloaded Pause Menu option", e, channel: :options) if defined?(Reloaded::Log)
+      def option_row
+        EnumOption.new(
+          _INTL("Pause Menu"),
+          [_INTL("Standard"), _INTL("Reloaded")],
+          proc { ($PokemonSystem.hr_pause_menu rescue 1).to_i == 1 ? 1 : 0 },
+          proc { |value| $PokemonSystem.hr_pause_menu = value.to_i if $PokemonSystem },
+          _INTL("Standard: Uses the base game's pause menu.\nReloaded: Uses the Reloaded Pause Menu with modules, carousel, and favorites.")
+        )
       end
     end
   end

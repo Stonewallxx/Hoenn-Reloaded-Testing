@@ -75,17 +75,20 @@ Remote Data caches, and disposable packed-sprite cache files.
 Current player-facing entry points:
 
 ```text
-Options -> Reloaded -> Reloaded Mart
-Options -> Reloaded -> Reloaded UI
-Options -> Reloaded -> Overworld Menu
-Options -> Reloaded -> IV Boundaries
-Options -> Reloaded -> [ TM Vault ]
+Options -> Visuals & UI -> Reloaded UI
+Options -> Gameplay -> PokeVial
+Options -> Gameplay -> TM Vault
+Options -> Gameplay -> PC Module
+Options -> Economy -> Reloaded Mart
+Options -> Challenge -> IV Boundaries
 Options -> Mods -> Mod Manager
 Options -> Mods -> Mod Settings
 Options -> Mods -> ModDev
 Options -> Developer -> Admin Tools
 Options -> Developer -> Foundation Inspector
 Options -> Developer -> Logging Mode
+Options -> About -> Discord Link
+Options -> File A Bug Report
 ```
 
 Mods belong in:
@@ -286,6 +289,10 @@ head pack during gameplay. A Full manifest can mark the cutoff through which
 monthly updates were compacted; those older layers are ignored.
 Monthly manifests may also tombstone removed per-head packs so lower layers do
 not restore content that was intentionally removed.
+Packed alternate indexes are also exposed to the normal sprite-choice flow.
+When a legacy spritesheet is absent, the installed pack becomes authoritative
+for Pokédex sprite choices and unavailable saved variants are repaired to an
+available packed variant when they are next rendered.
 
 `Reloaded::SpritePacks.verify_component(:base)`,
 `verify_component(:expanded)`, and `verify_update(update_id)` explicitly
@@ -1033,6 +1040,7 @@ Reloaded option defaults:
 - `Options Cursor Color`: `White`
 - `Reloaded Mart -> Remove Confirm Prompt`: `Off`
 - `Reloaded Mart -> Box Animation`: `On`
+- `Battle Style`: always `Set` and hidden from the Options menu.
 
 Themes live in:
 
@@ -1049,7 +1057,6 @@ Reloaded/Graphics/Windowskins/
 
 The main Options menu is reorganized into collapsible categories:
 
-- `RELOADED`
 - `VISUALS & UI`
 - `GAMEPLAY`
 - `ECONOMY`
@@ -1058,25 +1065,34 @@ The main Options menu is reorganized into collapsible categories:
 - `MODS`
 - `DEVELOPER`
 - `OTHER`
+- `About`
 
-`RELOADED` is first in the category order.
+`OTHER` is shown only when an upstream or modded option has no known category.
+`About` is always the final collapsible category, followed by the standalone
+`File A Bug Report` action.
 
-`RELOADED` currently contains:
+Reloaded-owned actions and settings are placed before base-game rows in their
+respective categories:
 
-- `Reloaded UI`
-- `Reloaded Mart`
-- `IV Boundaries`
-- `PokeVial`
-- `Overworld Menu`
-- `PC`
-- `TM Vault`
+- `VISUALS & UI`: `Reloaded UI`.
+- `GAMEPLAY`: `PokeVial`, `TM Vault`, and `PC Module`.
+- `ECONOMY`: `Reloaded Mart`.
+- `CHALLENGE`: `IV Boundaries`.
 
 `Reloaded UI` currently contains:
 
+- `Pause Menu`: `Standard` or `Reloaded`.
+- `Overworld Menu`: `Off` or `On`.
 - `Reloaded Summary`: `Standard` or `Reloaded`.
 - `Reloaded Bag`: `Standard` or `Reloaded`.
+- `Big Icons`: `Off` or `On`. When enabled, Pokemon icon displays use
+  fitted full sprites, including PC storage icons. Defaults to `Off`.
 - `Hint Texts`: `Off` or `On`. Defaults to `On`.
 - `Autosort Options`: opens Reloaded Bag sorting and custom list order tools.
+
+`About` contains the framework version, author, and Discord link. The
+standalone bug-report action uses the same sanitized export, upload, clipboard,
+and Discord workflow as the Mod Manager.
 
 `Reloaded Bag` replaces the standard Bag when set to `Reloaded`. It also
 replaces choose-item flows, including the battle bag item picker, while still

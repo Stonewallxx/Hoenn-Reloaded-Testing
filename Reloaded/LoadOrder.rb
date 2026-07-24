@@ -71,6 +71,7 @@ module Reloaded
         :files => [
           "Core/UI/Options.rb",
           "Core/UI/ReloadedAPIs.rb",
+          "Core/UI/TypeIcons.rb",
           "Core/UI/ActionMenu.rb",
           "Core/UI/ListState.rb",
           "Core/UI/ProgressWindow.rb",
@@ -120,6 +121,7 @@ module Reloaded
           "Modules/ReloadedMart/UI.rb",
           "Modules/ReloadedMart/Services.rb",
           "Modules/OverworldMenu.rb",
+          "Modules/Difficulty.rb",
           "Modules/PCModule.rb",
           "Modules/PokeVial.rb",
           "Modules/IVBoundaries.rb",

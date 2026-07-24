@@ -18,7 +18,6 @@ module Reloaded
     class << self
       def install
         install_pokemon_system_settings
-        register_options
         OverworldMenu.register_patch_points if defined?(OverworldMenu)
         Reloaded::Log.info("Installed Overworld Menu module", :modules) if defined?(Reloaded::Log)
         true
@@ -50,19 +49,14 @@ module Reloaded
         end
       end
 
-      def register_options
-        return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :overworld_menu, priority: 7) do |_scene|
-          [EnumOption.new(
-            _INTL("Overworld Menu"),
-            [_INTL("Off"), _INTL("On")],
-            proc { ($PokemonSystem.hr_om_enabled rescue 1).to_i == 1 ? 1 : 0 },
-            proc { |value| $PokemonSystem.hr_om_enabled = value.to_i if $PokemonSystem },
-            _INTL("Enables the quick-access Overworld Menu while walking around.")
-          )]
-        end
-      rescue Exception => e
-        Reloaded::Log.exception("Failed to register Overworld Menu options", e, channel: :options) if defined?(Reloaded::Log)
+      def option_row
+        EnumOption.new(
+          _INTL("Overworld Menu"),
+          [_INTL("Off"), _INTL("On")],
+          proc { ($PokemonSystem.hr_om_enabled rescue 1).to_i == 1 ? 1 : 0 },
+          proc { |value| $PokemonSystem.hr_om_enabled = value.to_i if $PokemonSystem },
+          _INTL("Enables the quick-access Overworld Menu while walking around.")
+        )
       end
     end
   end
@@ -576,7 +570,6 @@ class OverworldMenuScene
     draw_panel_bg(b, party_w, ph, "PARTY")
     @party_spr.x = PARTY_X
     @party_spr.y = PANEL_Y
-    types_bmp = Bitmap.new("Graphics/Pictures/Battle/typesSmall") rescue nil
     statuses_bmp = Bitmap.new("Graphics/Pictures/statuses") rescue nil
     shiny_bmp = Bitmap.new("Reloaded/Graphics/Icons/shiny") rescue nil
     party = ($Trainer.party rescue []) || []
@@ -594,20 +587,19 @@ class OverworldMenuScene
         b.font.size = 15
         pbDrawShadowText(b, lx, sy + (SLOT_H - 16) / 2, tw, 16, "EGG", C_GRAY, C_SHADOW, 1)
       else
-        draw_party_pokemon_details(b, pkmn, sx, sy, lx, tw, types_bmp, statuses_bmp, shiny_bmp)
+        draw_party_pokemon_details(b, pkmn, sx, sy, lx, tw, statuses_bmp, shiny_bmp)
       end
       if @icon_sprites[i]
         @icon_sprites[i].x = @party_spr.x + sx + 28
         @icon_sprites[i].y = @party_spr.y + sy + 34
       end
     end
-    types_bmp.dispose rescue nil
     statuses_bmp.dispose rescue nil
     shiny_bmp.dispose rescue nil
     @party_spr.visible = true
   end
 
-  def draw_party_pokemon_details(bitmap, pkmn, sx, sy, lx, tw, types_bmp, statuses_bmp, shiny_bmp)
+  def draw_party_pokemon_details(bitmap, pkmn, sx, sy, lx, tw, statuses_bmp, shiny_bmp)
     gender_str = pkmn.gender == 0 ? "\u2642" : pkmn.gender == 1 ? "\u2640" : ""
     gender_col = pkmn.gender == 0 ? Color.new(100, 160, 255) : Color.new(255, 120, 160)
     name_w = tw - (gender_str.empty? ? 0 : 14)
@@ -625,13 +617,9 @@ class OverworldMenuScene
     bitmap.font.size = 13
     pbDrawShadowText(bitmap, lx, sy + 21, 36, 14, "Lv #{pkmn.level}", C_GOLD, C_SHADOW)
     type_x = lx + 35
-    if types_bmp
-      [pkmn.type1, pkmn.type2, (pkmn.type3 rescue nil)].compact.uniq.first(3).each do |type_symbol|
-        type_id = GameData::Type.get(type_symbol).id_number rescue nil
-        next unless type_id
-        bitmap.stretch_blt(Rect.new(type_x, sy + 23, 14, 14), types_bmp, Rect.new(0, type_id * 19, 19, 19))
-        type_x += 16
-      end
+    [pkmn.type1, pkmn.type2, (pkmn.type3 rescue nil)].compact.uniq.first(3).each do |type_symbol|
+      Reloaded::TypeIcons.draw(bitmap, type_symbol, type_x, sy + 23, :symbol, 14, 14)
+      type_x += 16
     end
     hp_pct = pkmn.totalhp > 0 ? pkmn.hp.to_f / pkmn.totalhp : 0.0
     hp_col = hp_pct > 0.5 ? C_HP_OK : (hp_pct > 0.25 ? C_HP_WARN : C_HP_LOW)

@@ -460,7 +460,8 @@ module Reloaded
           rows_h = choice_mode? ? @rows.length * ROW_H : 0
           message_gap = choice_mode? ? 4 : 12
           desired_h = (choice_mode? ? 4 : PAD) + message_h + message_gap + rows_h + PAD
-          @h = [[desired_h, MIN_H].max, MAX_H].min
+          minimum_h = @options[:compact] ? desired_h : MIN_H
+          @h = [[desired_h, minimum_h].max, MAX_H].min
           @content_y = choice_mode? ? 4 : PAD
           @rows_y = @content_y + message_h + 4
           @visible_rows = choice_mode? ? [((@h - @rows_y - PAD) / ROW_H), 1].max : 0

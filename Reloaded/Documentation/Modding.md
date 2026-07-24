@@ -979,6 +979,10 @@ their `.part` files and preserve any valid existing destination. Windows and
 Proton use streaming HTTPS with a platform fallback. JoiPlay does not expose
 remote downloads.
 
+PowerShell fallback workers set their terminal title from the sanitized
+download label. Spritepack workers therefore identify the Full or monthly pack
+and numbered part currently being downloaded if the host displays their window.
+
 Pass `:resume => true` only for large immutable downloads with an expected size
 and preferably SHA-256. Interrupted network/transport failures preserve the
 `.part` file and its `.part.meta.json` range state for a byte-range retry.
@@ -993,6 +997,10 @@ Use `Reloaded::Archive` to inspect or extract ZIP, RAR, and 7Z files. It lists
 and validates every archive entry before extraction, rejects absolute and
 parent-directory paths, links, encrypted entries, duplicate paths, Windows
 device names, excessive entry sizes/counts, and unsafe compression ratios.
+Generic 7-Zip listings are written to a temporary output file and parsed
+incrementally instead of being held as one large in-memory string. Verified
+Full Spritepack installs use their own manifest-backed staging path because
+some embedded game runtimes do not reliably expose 7-Zip listing output.
 
 ```ruby
 result = Reloaded::Archive.extract(
@@ -1039,6 +1047,7 @@ bitmap = AnimatedBitmap.new(path) if path
 
 entries = Reloaded::SpritePacks.entries(:CUSTOM, 25)
 packed = Reloaded::SpritePacks.entry?(:CUSTOM, 25, 133, "a")
+alts = Reloaded::SpritePacks.available_alt_letters(:CUSTOM, 25, 133)
 health = Reloaded::SpritePacks.pack_health
 verified = Reloaded::SpritePacks.verify_component(:expanded)
 update = Reloaded::SpritePacks.verify_update("2026-08")
@@ -1047,9 +1056,15 @@ layers = Reloaded::SpritePacks.installed_updates
 
 Supported entry types are `:CUSTOM`, `:AUTOGEN`, and `:BASE`. `materialize`
 also accepts a `PIFSprite`. Materialized paths point into the disposable
-Reloaded cache and must not be saved as permanent mod data. Mods should still
+Reloaded cache, are returned relative to the game root for engine bitmap
+compatibility, and must not be saved as permanent mod data. Mods should still
 ship ordinary `Graphics` overrides unless they are intentionally publishing a
-large per-head Spritepack component.
+large per-head Spritepack component. `available_alt_letters` returns only the
+variants present in installed pack layers for one head/body pair.
+
+Packed entries pass through the same extractor scaling as loose sprites. When
+the engine generates a shiny image from a packed entry, Reloaded rejects a
+fully transparent generated cache and keeps a visible runtime recolor instead.
 
 Monthly update layers load newest-first above Full Base and Expanded. Base has
 higher priority than Expanded within each layer. No packed layer overrides a
@@ -1190,6 +1205,11 @@ result = Reloaded.grant_rewards([
 whole batch, grants in registered priority order, and rolls already-applied
 rewards back in reverse order if a later grant fails.
 
+Item rewards are delivered to the Bag when the full quantity fits. If it does
+not, the full reward is sent to PC Item Storage instead. A batch fails
+preflight before changing player state when neither destination can hold an
+item reward; one reward is never split between both destinations.
+
 Built-in and Reloaded module reward types are:
 
 - `:item` - requires `:id`/`:item_id` and optional `:quantity`.
@@ -1222,7 +1242,10 @@ Built-in and Reloaded module reward types are:
 - `:iv_boundary_force_next` - queues a rule for matching new Pokemon.
 
 Pokemon rewards default to `:delivery => :either`, which fills the party first
-and then Pokemon Storage. Use `:party` or `:storage` to require one destination.
+and then the first available Pokemon Storage Box. Use `:party` or `:storage` to
+require one destination.
+Setting `:shiny => true` marks both shiny components so unfused and fused
+reward Pokemon use the engine's generated shiny coloration with packed sprites.
 Custom typings accept one or two type IDs and are saved on that Pokemon. Battle
 logic and Reloaded UI both read the stored types.
 
@@ -1777,8 +1800,8 @@ The Reloaded Pause Menu is implemented in:
 Reloaded/Modules/PauseMenu.rb
 ```
 
-The active pause menu is controlled by the `Pause Menu` option in the
-`RELOADED` category:
+The active pause menu is controlled by the `Pause Menu` option under
+`VISUALS & UI -> Reloaded UI`:
 
 ```text
 Standard / Reloaded
@@ -1907,6 +1930,12 @@ encounters, and Eggs. Existing party/box Pokemon are not changed.
 The options submenu includes presets, custom Min/Max IV sliders, and a preview
 action. If Max IV is below 31, perfect IVs are treated like any other
 out-of-range value and rerolled inside the active range.
+
+Hard difficulty forces the player minimum IV boundary to `0`. Players may
+still leave IV Boundaries off or lower the maximum for a neutral or more
+restrictive challenge, but presets that guarantee beneficial minimum IVs are
+unavailable. Explicit authored Pokemon rewards and temporary earned IV rewards
+retain their own configured behavior.
 
 Trainer IV boundaries are not player-editable. They are controlled by difficulty
 rules and trainer-class config in `IVBoundaries.rb`:
@@ -2056,11 +2085,12 @@ ReloadedPokeVial.item_id?(:POKEVIAL_CHARGE)
 PokeVial use is rejected without consuming a charge when no party Pokemon needs
 the selected healing mode. Full Heal checks HP, status, and PP; HP Only checks HP.
 
-PokeCenter refills use the formula `250 x maximum charges x missing charges`.
-This scales refill prices with the capacity being restored instead of charging a
-flat amount per charge. Players can choose `Ask`, `Automatic`, or `Never` for
-PokeCenter refills; `Ask` is the default. Refill callbacks receive the calculated
-total in `ctx[:cost]`.
+PokeCenter refills use the formula
+`missing charges x (500 + badges x 100 + party size x 50)`. Hard difficulty
+charges 125% of that result, forces Progressive Uses on, and fixes the enabled
+cooldown at 10 real minutes. Players can choose `Ask`, `Automatic`, or `Never`
+for PokeCenter refills; `Ask` is the default. Refill callbacks receive the
+calculated total in `ctx[:cost]`.
 
 When Progressive Uses is enabled, badge progression raises the current maximum.
 Each newly unlocked slot is immediately filled, and a delayed success Toast is
@@ -2165,7 +2195,7 @@ Current saved fields:
 - `sort_mode`: current TM Vault sort mode.
 - `egg_moves`: whether Relearn Moves includes egg moves.
 
-The `[ TM Vault ]` button in the `RELOADED` category opens a submenu:
+The `TM Vault` button at the top of the `GAMEPLAY` category opens a submenu:
 
 ```text
 TM Vault: Off / PokeNav

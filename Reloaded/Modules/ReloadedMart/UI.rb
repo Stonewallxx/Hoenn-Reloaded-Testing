@@ -147,6 +147,8 @@ class ReloadedMartBuyAdapter
   def initialize
     @price_cache = {}
     @row_state_cache = {}
+    @max_quantity_failure = nil
+    @max_quantity_failure_entry_id = nil
   end
 
   def categories(sort_mode = :name)
@@ -403,6 +405,7 @@ class ReloadedMartBuyAdapter
   end
 
   def max_quantity(entry)
+    clear_max_quantity_failure
     return 0 unless entry
     return 0 if locked?(entry)
     max = ReloadedMart::Limits.max_per_purchase(entry) || ReloadedMart.bag_max_per_slot
@@ -441,17 +444,31 @@ class ReloadedMartBuyAdapter
     while low <= high
       quantity = (low + high) / 2
       grants = handler.grants_for(entry, quantity, context)
-      if ReloadedMart::Inventory.can_store_grants?(grants).ok?
+      result = ReloadedMart::Inventory.can_store_grants?(grants)
+      if result.ok?
         best = quantity
         low = quantity + 1
       else
         high = quantity - 1
       end
     end
+    if best <= 0
+      grants = handler.grants_for(entry, 1, context)
+      result = ReloadedMart::Inventory.can_store_grants?(grants)
+      remember_max_quantity_failure(entry, result) unless result.ok?
+    end
     best
   rescue Exception => e
     ReloadedMart.log_exception("Mart bundle quantity check failed for #{entry&.id}", e)
     0
+  end
+
+  def max_quantity_failure(entry)
+    return nil unless entry
+    return nil unless @max_quantity_failure_entry_id == entry.id.to_s
+    @max_quantity_failure
+  rescue
+    nil
   end
 
   def mystery_box_max_quantity(entry, max)
@@ -534,6 +551,17 @@ class ReloadedMartBuyAdapter
   end
 
   private
+
+  def clear_max_quantity_failure
+    @max_quantity_failure = nil
+    @max_quantity_failure_entry_id = nil
+  end
+
+  def remember_max_quantity_failure(entry, result)
+    return unless entry && result
+    @max_quantity_failure_entry_id = entry.id.to_s
+    @max_quantity_failure = result
+  end
 
   def catalog_visible_entries
     rows = Array(ReloadedMart::Source.active_catalog)
@@ -959,19 +987,12 @@ class ReloadedMartBuyScene
     overlay.bitmap = Bitmap.new(SW, SH)
     chest_sheet = load_box_animation_sheet(entry, :mystery_box)
     chest = create_box_animation_sprite(chest_sheet)
-    icon = ItemIconSprite.new(SW / 2, 190, nil, @viewport) rescue nil
-    if icon
-      icon.z = 982
-      icon.visible = false
-      icon.item = rows.first[:item_id]
-      icon.setOffset(PictureOrigin::Center) rescue nil
-      icon.zoom_x = 1.35
-      icon.zoom_y = 1.35
-    end
+    icon = nil
     pbSEPlay("GUI naming tab swap start") rescue nil
     rows.each_with_index do |row, index|
+      icon.dispose rescue nil
+      icon = create_reward_reveal_icon(row, SW / 2, 190, 1.35)
       icon.visible = false if icon
-      icon.item = row[:item_id] if icon
       result_state = play_mystery_box_single_reveal(overlay.bitmap, chest, icon, entry, row, index, rows.length, adapter)
       if result_state == :skip_all
         chest.visible = false if chest
@@ -996,12 +1017,13 @@ class ReloadedMartBuyScene
     return false unless ReloadedMart.box_animation_enabled?
     rows = mystery_box_reveal_rows(result)
     return false if rows.empty?
+    animation_rows = bundle_reveal_animation_rows(rows)
     overlay = Sprite.new(@viewport)
     overlay.z = 980
     overlay.bitmap = Bitmap.new(SW, SH)
     chest_sheet = load_box_animation_sheet(entry, entry.kind == :gift ? :gift : :bundle)
     chest = create_box_animation_sprite(chest_sheet, 5)
-    icons = create_bundle_reveal_icons(rows[0, 5])
+    icons = create_bundle_reveal_icons(animation_rows)
     frame = 0
     ready = false
     arrive_se_played = false
@@ -1025,7 +1047,7 @@ class ReloadedMartBuyScene
         arrive_se_played = true
       end
       ready = true if anim_frame >= 108
-      draw_bundle_reveal_frame(overlay.bitmap, entry, rows, anim_frame, adapter, !chest.nil?, ready)
+      draw_bundle_reveal_frame(overlay.bitmap, entry, animation_rows, anim_frame, adapter, !chest.nil?, ready)
       icons.each { |sprite| sprite.update rescue nil }
     end
     chest.visible = false if chest
@@ -1090,7 +1112,8 @@ class ReloadedMartBuyScene
   def mystery_box_reveal_rows(result)
     details = result && result.respond_to?(:details) ? result.details : {}
     raw = Array(details[:revealed] || details["revealed"] || details[:applied] || details["applied"])
-    raw.map do |grant|
+    receipts = mystery_box_reveal_leaf_receipts(details[:receipts] || details["receipts"])
+    raw.each_with_index.map do |grant, index|
       reward = Reloaded::Rewards.normalize(grant) rescue nil
       item_id = nil
       if reward && reward[:type] == :item
@@ -1100,16 +1123,49 @@ class ReloadedMartBuyScene
       end
       data = GameData::Item.try_get(item_id) rescue nil
       name = data ? data.name.to_s : (reward ? Reloaded::Rewards.label(reward).to_s : "")
+      name += " (PC)" if reward && reward[:delivered_to] && reward[:delivered_to].to_sym == :pc
       next nil if name.empty?
+      receipt = receipts[index]
       {
         :item_id => data ? data.id : nil,
         :name => name,
-        :quantity => [(grant[:quantity] || grant["quantity"] || grant[:qty] || grant["qty"] || 1).to_i, 1].max,
-        :rarity => (grant[:rarity] || grant["rarity"]).to_s
+        :quantity => [((reward && reward[:quantity]) || grant[:quantity] || grant["quantity"] || grant[:qty] || grant["qty"] || 1).to_i, 1].max,
+        :rarity => (grant[:rarity] || grant["rarity"]).to_s,
+        :reward_type => reward && reward[:type],
+        :currency => reward && reward[:currency],
+        :species => reward && (reward[:resolved_species] || reward[:species]),
+        :egg => reward && reward[:egg] == true,
+        :pokemon => mystery_box_receipt_pokemon(receipt),
+        :reward => reward
       }
     end.compact
   rescue
     []
+  end
+
+  def mystery_box_reveal_leaf_receipts(receipts)
+    Array(receipts).each_with_object([]) do |receipt, rows|
+      next unless defined?(Reloaded::Rewards::Receipt) && receipt.is_a?(Reloaded::Rewards::Receipt)
+      data = receipt.data.is_a?(Hash) ? receipt.data : {}
+      children = data[:receipts] || data["receipts"]
+      if children && !Array(children).empty?
+        rows.concat(mystery_box_reveal_leaf_receipts(children))
+      else
+        rows << receipt
+      end
+    end
+  rescue
+    []
+  end
+
+  def mystery_box_receipt_pokemon(receipt)
+    return nil unless receipt && receipt.respond_to?(:data)
+    data = receipt.data.is_a?(Hash) ? receipt.data : {}
+    delivery = Array(data[:deliveries] || data["deliveries"]).first
+    return nil unless delivery.is_a?(Hash)
+    delivery[:pokemon] || delivery["pokemon"]
+  rescue
+    nil
   end
 
   def mystery_box_rarity_color(rarity)
@@ -1257,19 +1313,101 @@ class ReloadedMartBuyScene
   end
 
   def create_bundle_reveal_icons(rows)
-    Array(rows)[0, 5].to_a.each_with_index.map do |row, index|
-      sprite = ItemIconSprite.new(SW / 2, 217, nil, @viewport) rescue nil
-      next nil unless sprite
-      sprite.z = 982
-      sprite.visible = false
-      sprite.item = row[:item_id]
-      sprite.setOffset(PictureOrigin::Center) rescue nil
-      sprite.zoom_x = 1.15
-      sprite.zoom_y = 1.15
+    Array(rows)[0, 5].to_a.map do |row|
+      sprite = create_reward_reveal_icon(row, SW / 2, 217, 1.15)
+      sprite.visible = false if sprite
       sprite
     end.compact
   rescue
     []
+  end
+
+  def create_reward_reveal_icon(row, x, y, zoom = 1.0)
+    return nil unless row
+    kind = row[:reward_type].to_sym rescue nil
+    sprite = nil
+    scale = zoom.to_f
+    if kind == :pokemon
+      if row[:egg]
+        sprite = create_reward_egg_icon(row, x, y)
+        source_size = sprite && sprite.src_rect ? [sprite.src_rect.width, 1].max : 64
+        scale *= 1.64 * (64.0 / source_size)
+      elsif row[:pokemon]
+        sprite = PokemonIconSprite.new(row[:pokemon], @viewport) rescue nil
+      elsif row[:species]
+        sprite = PokemonIconSprite.new(row[:species], @viewport) rescue nil
+      end
+      scale *= 1.64 unless row[:egg]
+    elsif kind == :currency
+      sprite = ItemIconSprite.new(x, y, :RELICGOLD, @viewport) rescue nil
+    elsif row[:item_id]
+      sprite = ItemIconSprite.new(x, y, row[:item_id], @viewport) rescue nil
+    end
+    return nil unless sprite
+    sprite.x = x
+    sprite.y = y
+    sprite.z = 982
+    sprite.setOffset(PictureOrigin::Center) if sprite.respond_to?(:setOffset)
+    sprite.zoom_x = scale
+    sprite.zoom_y = scale
+    sprite
+  rescue
+    nil
+  end
+
+  def create_reward_egg_icon(row, x, y)
+    sprite = IconSprite.new(x, y, @viewport) rescue nil
+    return nil unless sprite
+    custom = reward_custom_eggs_enabled? && row[:species]
+    path = custom ? reward_custom_egg_path(row) : nil
+    path = "Graphics/Icons/iconEgg" if path.to_s.empty?
+    sprite.setBitmap(path)
+    if custom
+      width = sprite.bitmap ? sprite.bitmap.width : 160
+      height = sprite.bitmap ? sprite.bitmap.height : 160
+      sprite.src_rect.set(0, 0, width, height) rescue nil
+      sprite.ox = width / 2
+      sprite.oy = height / 2
+    else
+      size = sprite.bitmap ? sprite.bitmap.height : 64
+      sprite.src_rect.set(0, 0, size, size) rescue nil
+      sprite.ox = size / 2
+      sprite.oy = size * 5 / 8
+    end
+    sprite
+  rescue
+    sprite.dispose rescue nil
+    nil
+  end
+
+  def reward_custom_eggs_enabled?
+    defined?($PokemonSystem) && $PokemonSystem && !$PokemonSystem.hide_custom_eggs
+  rescue
+    false
+  end
+
+  def reward_custom_egg_path(row)
+    return nil unless defined?(GameData::Species) && GameData::Species.respond_to?(:egg_sprite_filename)
+    pokemon = row[:pokemon]
+    form = if pokemon && pokemon.respond_to?(:form)
+             pokemon.form.to_i
+           else
+             reward = row[:reward].is_a?(Hash) ? row[:reward] : {}
+             (reward[:form] || 0).to_i
+           end
+    GameData::Species.egg_sprite_filename(row[:species], form)
+  rescue
+    nil
+  end
+
+  def bundle_reveal_animation_rows(rows)
+    entries = Array(rows)[0, 5].to_a
+    pokemon_index = entries.index { |row| row && row[:reward_type].to_sym == :pokemon rescue false }
+    return entries unless pokemon_index
+    pokemon = entries.delete_at(pokemon_index)
+    [pokemon] + entries
+  rescue
+    Array(rows)[0, 5].to_a
   end
 
   def bundle_reveal_sprite_targets
@@ -1407,7 +1545,7 @@ class ReloadedMartBuyScene
 
   def bundle_reveal_visual_rows(rows)
     entries = Array(rows)[0, 5].to_a
-    order = [3, 0, 4, 1, 2]
+    order = [3, 1, 0, 2, 4]
     order.map { |index| entries[index] }.compact
   rescue
     Array(rows)[0, 5].to_a
@@ -1533,8 +1671,13 @@ class ReloadedMartBuyScene
     overlay.bitmap = Bitmap.new(SW, SH)
     page = [[start_index.to_i / 10, 0].max, [(rows.length - 1) / 10, 0].max].min
     icons = []
+    refresh = true
     loop do
-      refresh_mystery_box_results(overlay.bitmap, rows, page, icons, title, show_rarity)
+      if refresh
+        icons.each { |sprite| sprite.dispose rescue nil }
+        icons = refresh_mystery_box_results(overlay.bitmap, rows, page, title, show_rarity)
+        refresh = false
+      end
       Graphics.update
       Input.update
       icons.each { |sprite| sprite.update rescue nil }
@@ -1544,9 +1687,11 @@ class ReloadedMartBuyScene
         break
       elsif Input.trigger?(Input::LEFT) || Input.trigger?(Input::JUMPUP)
         page = page <= 0 ? (rows.length - 1) / 10 : page - 1
+        refresh = true
       elsif Input.trigger?(Input::RIGHT) || Input.trigger?(Input::JUMPDOWN)
         max_page = (rows.length - 1) / 10
         page = page >= max_page ? 0 : page + 1
+        refresh = true
       end
     end
   ensure
@@ -1556,7 +1701,7 @@ class ReloadedMartBuyScene
     draw_content rescue nil
   end
 
-  def refresh_mystery_box_results(bitmap, rows, page, icons, title, show_rarity)
+  def refresh_mystery_box_results(bitmap, rows, page, title, show_rarity)
     bitmap.clear
     bitmap.fill_rect(0, 0, SW, SH, Color.new(0, 0, 0, 172))
     box_w = 456
@@ -1568,24 +1713,19 @@ class ReloadedMartBuyScene
     max_page = (rows.length - 1) / 10
     header = max_page > 0 ? "#{title} (#{page + 1}/#{max_page + 1})" : title
     shadow_text(bitmap, box_x + 12, box_y + 8, box_w - 24, 20, header, box_animation_title_color(nil, title), 1)
-    page_rows = rows[page * 10, 10] || []
+    page_rows = mystery_box_result_visual_rows(rows[page * 10, 10] || [])
     positions = mystery_box_result_positions(box_x, box_y)
-    while icons.length < 10
-      sprite = ItemIconSprite.new(0, 0, nil, @viewport) rescue nil
-      break unless sprite
-      sprite.z = 986
-      sprite.setOffset(PictureOrigin::Center) rescue nil
-      icons << sprite
-    end
-    icons.each_with_index do |sprite, i|
-      row = page_rows[i]
+    icons = []
+    page_rows.each_with_index do |row, i|
       if row
         x, y = positions[i]
         y -= 1 if title.to_s == "Bundle Contents" && (i % 5) == 0
-        sprite.x = x
-        sprite.y = y
-        sprite.item = row[:item_id]
-        sprite.visible = !row[:item_id].nil?
+        sprite = create_reward_reveal_icon(row, x, y, 1.0)
+        if sprite
+          sprite.z = 986
+          sprite.visible = true
+          icons << sprite
+        end
         qty = row[:quantity].to_i
         name = row[:name].to_s
         text_y = y + 25
@@ -1594,14 +1734,42 @@ class ReloadedMartBuyScene
         if show_rarity && !row[:rarity].to_s.empty?
           draw_badge_plain(bitmap, x - 58, y + 47, 116, mystery_box_rarity_label(row[:rarity]).upcase, mystery_box_rarity_color(row[:rarity]))
         end
-      else
-        sprite.visible = false
       end
     end
     hint = max_page > 0 ? "Close (C)  Page (< >)" : "Close (C)"
     bitmap.font.size = 13 rescue nil
     shadow_text(bitmap, box_x + 12, box_y + box_h - 22, box_w - 24, 16, hint, DIM, 1)
     pbSetSmallFont(bitmap) rescue nil
+    icons
+  rescue
+    icons || []
+  end
+
+  def mystery_box_result_visual_rows(rows)
+    entries = Array(rows)[0, 10].to_a
+    output = Array.new(10)
+    entries.each_slice(5).with_index do |group, group_index|
+      pokemon_index = group.index { |row| row && row[:reward_type].to_sym == :pokemon rescue false }
+      slot_order = case group.length
+                   when 1 then [2]
+                   when 2 then [1, 3]
+                   when 3 then [1, 2, 3]
+                   when 4 then [0, 1, 3, 4]
+                   else [0, 1, 2, 3, 4]
+                   end
+      if pokemon_index
+        pokemon = group.delete_at(pokemon_index)
+        output[group_index * 5 + 2] = pokemon
+        slot_order = slot_order.reject { |slot| slot == 2 }
+      end
+      group.each_with_index do |row, index|
+        slot = slot_order[index]
+        output[group_index * 5 + slot] = row if slot
+      end
+    end
+    output
+  rescue
+    Array(rows)[0, 10].to_a
   end
 
   def draw_result_quantity(bitmap, x, y, quantity)
@@ -3157,7 +3325,13 @@ class ReloadedMartBuyScreen
     max = @adapter.max_quantity(entry)
     if max <= 0
       currency = @adapter.currency(entry)
-      message = @adapter.buy_price(entry) > @adapter.balance(entry) ? _INTL("You don't have enough {1}.", ReloadedMart::Inventory.currency_name(currency)) : "There isn't enough room in the Bag."
+      failure = @adapter.max_quantity_failure(entry) if @adapter.respond_to?(:max_quantity_failure)
+      message = failure && !failure.message.to_s.empty? ? failure.message.to_s : nil
+      message ||= if @adapter.buy_price(entry) > @adapter.balance(entry)
+                    _INTL("You don't have enough {1}.", ReloadedMart::Inventory.currency_name(currency))
+                  else
+                    "There isn't enough room in the Bag."
+                  end
       @scene.pbDisplayPaused(_INTL(message))
       return
     end

@@ -33,11 +33,8 @@ module ReloadedIVBoundaries
 
   # Config: difficulty-driven trainer rules. Players cannot edit trainer IV boundaries.
   TRAINER_DIFFICULTY_RULES = {
-    :easy => { :min => 0, :max => 31 },
     :normal => { :min => 0, :max => 31 },
-    :hard => { :min => 10, :max => 31 },
-    :hardest => { :min => 20, :max => 31 },
-    :curated => { :min => 20, :max => 31 }
+    :hard => { :min => 10, :max => 31 }
   }.freeze
 
   # Config: trainer class groups can be referenced by TRAINER_CLASS_EXEMPTIONS.
@@ -47,7 +44,7 @@ module ReloadedIVBoundaries
   }.freeze
 
   # Config: add trainer classes here if a difficulty should leave them untouched.
-  # Example: { :all => [:group_bosses], :easy => [:LEADER] }
+  # Example: { :all => [:group_bosses], :hard => [:LEADER] }
   TRAINER_CLASS_EXEMPTIONS = {}.freeze
 
   # Config: default temporary IV Boundary reward length, in real minutes.
@@ -61,7 +58,40 @@ module ReloadedIVBoundaries
       ($PokemonSystem.hr_iv_boundaries_enabled rescue 0).to_i == 1
     end
 
+    def hard_difficulty?
+      return ReloadedDifficulty.hard? if defined?(ReloadedDifficulty)
+      if defined?($game_switches) && $game_switches && Object.const_defined?(:SWITCH_GAME_DIFFICULTY_HARD)
+        return true if $game_switches[Object.const_get(:SWITCH_GAME_DIFFICULTY_HARD)]
+      end
+      ($Trainer.selected_difficulty rescue nil).to_i == 2
+    rescue
+      false
+    end
+
+    def preset_selectable?(index)
+      return true unless hard_difficulty?
+      preset = PLAYER_PRESETS[index.to_i]
+      return false unless preset
+      return false if preset[:id] == :custom
+      preset[:min].to_i <= IV_MIN
+    rescue
+      false
+    end
+
+    def show_hard_boundary_warning
+      message = _INTL("Hard difficulty does not allow beneficial player IV minimums.")
+      if defined?(Reloaded) && Reloaded.respond_to?(:toast_warning)
+        Reloaded.toast_warning(message)
+      elsif defined?(pbMessage)
+        pbMessage(message)
+      end
+      false
+    rescue
+      false
+    end
+
     def player_min
+      return IV_MIN if hard_difficulty?
       value = $PokemonSystem.hr_iv_boundaries_min rescue IV_MIN
       clamp_iv(value)
     end
@@ -90,6 +120,10 @@ module ReloadedIVBoundaries
     def apply_preset(index)
       preset = PLAYER_PRESETS[index.to_i] || PLAYER_PRESETS[0]
       return true if preset[:id] == :custom
+      if hard_difficulty? && preset[:min].to_i > IV_MIN
+        show_hard_boundary_warning
+        return false
+      end
       old_enabled = player_enabled? ? 1 : 0
       old_min = player_min
       old_max = player_max
@@ -120,7 +154,12 @@ module ReloadedIVBoundaries
     def set_player_min(value)
       old_min = player_min
       old_max = player_max
-      min_value = clamp_iv(value)
+      requested = clamp_iv(value)
+      if hard_difficulty? && requested > IV_MIN
+        show_hard_boundary_warning
+        requested = IV_MIN
+      end
+      min_value = requested
       max_value = [player_max, min_value].max
       if $PokemonSystem
         $PokemonSystem.hr_iv_boundaries_min = min_value
@@ -885,10 +924,7 @@ module ReloadedIVBoundaries
     end
 
     def current_difficulty_key
-      return :curated if switch_enabled?(:SWITCH_GAME_DIFFICULTY_CURATED)
-      return :hardest if switch_enabled?(:SWITCH_GAME_DIFFICULTY_HARDEST)
       return :hard if switch_enabled?(:SWITCH_GAME_DIFFICULTY_HARD)
-      return :easy if switch_enabled?(:SWITCH_GAME_DIFFICULTY_EASY)
       :normal
     rescue
       :normal
@@ -1233,6 +1269,47 @@ module ReloadedIVBoundaries
     end
   end
 
+  class HardPresetOption < LiveEnumOption
+    def next(_current)
+      return super(current_value) unless ReloadedIVBoundaries.hard_difficulty?
+      move_to_allowed(1)
+    end
+
+    def prev(_current)
+      return super(current_value) unless ReloadedIVBoundaries.hard_difficulty?
+      move_to_allowed(-1)
+    end
+
+    def move_to_allowed(direction)
+      value = current_value
+      PLAYER_PRESETS.length.times do
+        value = (value + direction) % PLAYER_PRESETS.length
+        next unless ReloadedIVBoundaries.preset_selectable?(value)
+        set(value)
+        return value
+      end
+      current_value
+    end
+  end
+
+  class HardLockedMinSliderOption < LiveSliderOption
+    def disabled?
+      ReloadedIVBoundaries.hard_difficulty?
+    end
+
+    def disabled_label
+      _INTL("0")
+    end
+
+    def next(current)
+      disabled? ? current : super
+    end
+
+    def prev(current)
+      disabled? ? current : super
+    end
+  end
+
   class OptionsScene < PokemonOption_Scene
     def initUIElements
       super
@@ -1241,7 +1318,7 @@ module ReloadedIVBoundaries
 
     def pbGetOptions(_inloadscreen = false)
       [
-        LiveEnumOption.new(
+        HardPresetOption.new(
           _INTL("Preset"),
           ReloadedIVBoundaries.preset_labels,
           proc { ReloadedIVBoundaries.current_preset_index },
@@ -1255,12 +1332,12 @@ module ReloadedIVBoundaries
           proc { |value| ReloadedIVBoundaries.set_player_enabled(value) },
           _INTL("Controls IV boundaries for new wild, gift, static, and Egg Pokemon.")
         ),
-        LiveSliderOption.new(
+        HardLockedMinSliderOption.new(
           _INTL("Min IV"),
           IV_MIN, IV_MAX, 1,
           proc { ReloadedIVBoundaries.player_min },
           proc { |value| ReloadedIVBoundaries.set_player_min(value) },
-          _INTL("Lowest IV allowed for new player-obtained Pokemon.")
+          _INTL("Lowest IV allowed for new player-obtained Pokemon. Always 0 while playing on Hard.")
         ),
         LiveSliderOption.new(
           _INTL("Max IV"),
@@ -1351,7 +1428,7 @@ module Reloaded
 
       def register_option
         return unless defined?(Reloaded::Options) && Reloaded::Options.respond_to?(:register_category_option)
-        Reloaded::Options.register_category_option("RELOADED", :iv_boundaries_options, priority: 5) do |_scene|
+        Reloaded::Options.register_category_option("CHALLENGE", :iv_boundaries_options, priority: 0) do |_scene|
           [ActionButton.new(
             _INTL("IV Boundaries"),
             proc { ReloadedIVBoundaries.open_options if defined?(ReloadedIVBoundaries) },
